@@ -1,0 +1,201 @@
+name: "PST02 duplicate and delete"
+priority: High
+description: |
+  Validates that the duplicate_collection and delete_collection tools work correctly
+  for creating and removing collection copies.
+  
+  Objective: Verify collection duplication and cleanup
+  
+  Expected Behavior:
+  - Source collection is duplicated successfully
+  - Duplicate has new name and unique ID
+  - Duplicate can be retrieved by ID
+  - Duplicate can be deleted successfully
+  - Original collection remains unchanged
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  source_collection_id:
+    type: str
+    value: ${POSTMAN_COLLECTION_ID}
+  duplicate_name:
+    type: str
+  duplicate_result:
+    type: str
+  duplicate_id:
+    type: str
+  get_duplicate_result:
+    type: str
+  delete_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique name for duplicate
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        duplicate_name = f"PST02_TestCopy_{timestamp}_{random_suffix}"
+        
+        {"duplicate_name": duplicate_name}
+    output:
+      - duplicate_name
+    structured_output: true
+    transition: duplicate_collection
+
+  - id: duplicate_collection
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: duplicate_collection
+    input:
+      - duplicate_name
+    input_mapping:
+      new_name:
+        type: variable
+        value: duplicate_name
+    output:
+      - duplicate_result
+    structured_output: true
+    transition: extract_duplicate_id
+
+  - id: extract_duplicate_id
+    type: code
+    code:
+      type: fstring
+      value: |
+        import json
+        import re
+        
+        result_str = alita_state.get('duplicate_result', '')
+        
+        # Try to extract collection ID from result
+        duplicate_id = None
+        
+        # Pattern 1: Look for collection.id or collection.uid
+        try:
+            result_data = json.loads(result_str)
+            if isinstance(result_data, dict):
+                if 'collection' in result_data:
+                    coll = result_data['collection']
+                    duplicate_id = coll.get('id') or coll.get('uid')
+                    if not duplicate_id and 'info' in coll:
+                        duplicate_id = coll['info'].get('_postman_id') or coll['info'].get('uid')
+        except:
+            pass
+        
+        # Pattern 2: Regex search for ID-like patterns
+        if not duplicate_id:
+            id_match = re.search(r'"(?:id|uid|_postman_id)"\s*:\s*"([^"]+)"', result_str)
+            if id_match:
+                duplicate_id = id_match.group(1)
+        
+        duplicate_id or "ID_NOT_FOUND"
+    input:
+      - duplicate_result
+    output:
+      - duplicate_id
+    structured_output: true
+    transition: get_duplicate_collection
+
+  - id: get_duplicate_collection
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_collection
+    input:
+      - duplicate_id
+    input_mapping:
+      collection_id:
+        type: variable
+        value: duplicate_id
+    output:
+      - get_duplicate_result
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - duplicate_result
+      - duplicate_id
+      - get_duplicate_result
+      - duplicate_name
+      - source_collection_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from Postman collection duplication operations.
+          
+          Duplication Result: {duplicate_result}
+          Extracted Duplicate ID: {duplicate_id}
+          Get Duplicate Result: {get_duplicate_result}
+          Expected Name: {duplicate_name}
+          Source Collection ID: {source_collection_id}
+          
+          This is a POSITIVE test - we expect successful collection duplication.
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. duplication_succeeded: Collection was duplicated (no errors in duplicate_result)
+          2. id_extracted: Duplicate ID was successfully extracted
+          3. id_different: Duplicate ID is different from source collection ID
+          4. duplicate_retrieved: get_collection successfully retrieved the duplicate
+          5. correct_name: Duplicate has the expected name
+          6. no_errors: No error indicators in any output
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "duplication_succeeded": boolean,
+            "id_extracted": boolean,
+            "id_different": boolean,
+            "duplicate_retrieved": boolean,
+            "correct_name": boolean,
+            "no_errors": boolean,
+            "duplicate_id": "extracted ID or null",
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_delete_collection
+
+  - id: cleanup_delete_collection
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_collection
+    input:
+      - duplicate_id
+    input_mapping:
+      collection_id:
+        type: variable
+        value: duplicate_id
+    output:
+      - delete_result
+    structured_output: true
+    transition: END

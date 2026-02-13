@@ -24,7 +24,8 @@ PostmanGetCollection = create_model(
 )
 
 PostmanGetCollectionFlat = create_model(
-    "PostmanGetCollectionFlat"
+    "PostmanGetCollectionFlat",
+    collection_id=(Optional[str], Field(default=None, description="The collection ID to retrieve. If not provided, uses the default collection ID from toolkit configuration."))
 )
 
 PostmanGetFolderFlat = create_model(
@@ -86,7 +87,11 @@ PostmanUpdateCollectionName = create_model(
 
 PostmanUpdateCollectionDescription = create_model(
     "PostmanUpdateCollectionDescription",
-    description=(str, Field(description="New description for the collection"))
+    description=(str, Field(description="New description for the collection")),
+    collection_id=(Optional[str], Field(
+        default=None,
+        description="Collection ID. If not specified, uses the collection_id from toolkit configuration"
+    ))
 )
 
 PostmanUpdateCollectionVariables = create_model(
@@ -104,7 +109,8 @@ PostmanUpdateCollectionAuth = create_model(
 )
 
 PostmanDeleteCollection = create_model(
-    "PostmanDeleteCollection"
+    "PostmanDeleteCollection",
+    collection_id=(Optional[str], Field(default=None, description="The collection ID to delete. If not provided, uses the default collection ID from toolkit configuration."))
 )
 
 PostmanDuplicateCollection = create_model(
@@ -565,13 +571,13 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 "args_schema": PostmanUpdateCollectionAuth,
                 "ref": self.update_collection_auth
             },
-            # {
-            #     "name": "delete_collection",
-            #     "mode": "delete_collection",
-            #     "description": "Delete a collection permanently",
-            #     "args_schema": PostmanDeleteCollection,
-            #     "ref": self.delete_collection
-            # },
+            {
+                "name": "delete_collection",
+                "mode": "delete_collection",
+                "description": "Delete a collection permanently",
+                "args_schema": PostmanDeleteCollection,
+                "ref": self.delete_collection
+            },
             {
                 "name": "duplicate_collection",
                 "mode": "duplicate_collection",
@@ -594,13 +600,13 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 "args_schema": PostmanUpdateFolder,
                 "ref": self.update_folder
             },
-            # {
-            #     "name": "delete_folder",
-            #     "mode": "delete_folder",
-            #     "description": "Delete a folder and all its contents permanently",
-            #     "args_schema": PostmanDeleteFolder,
-            #     "ref": self.delete_folder
-            # },
+            {
+                "name": "delete_folder",
+                "mode": "delete_folder",
+                "description": "Delete a folder and all its contents permanently",
+                "args_schema": PostmanDeleteFolder,
+                "ref": self.delete_folder
+            },
             {
                 "name": "move_folder",
                 "mode": "move_folder",
@@ -678,13 +684,13 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 "args_schema": PostmanUpdateRequestPreScript,
                 "ref": self.update_request_pre_script
             },
-            # {
-            #     "name": "delete_request",
-            #     "mode": "delete_request",
-            #     "description": "Delete an API request permanently",
-            #     "args_schema": PostmanDeleteRequest,
-            #     "ref": self.delete_request
-            # },
+            {
+                "name": "delete_request",
+                "mode": "delete_request",
+                "description": "Delete an API request permanently",
+                "args_schema": PostmanDeleteRequest,
+                "ref": self.delete_request
+            },
             {
                 "name": "duplicate_request",
                 "mode": "duplicate_request",
@@ -970,18 +976,20 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to get collection {self.collection_id}: {str(e)}")
 
-    def get_collection_flat(self, **kwargs) -> str:
+    def get_collection_flat(self, collection_id: Optional[str] = None, **kwargs) -> str:
         """Get a specific collection by ID in flattened format."""
         try:
-            response = self._make_request('GET', f'/collections/{self.collection_id}')
+            coll_id = collection_id or self.collection_id
+            response = self._make_request('GET', f'/collections/{coll_id}')
             flattened = self.parse_collection_to_flat_structure(response)
             return json.dumps(flattened, indent=2)
         except Exception as e:
             stacktrace = format_exc()
+            coll_id = collection_id or self.collection_id
             logger.error(
-                f"Exception when getting flattened collection {self.collection_id}: {stacktrace}")
+                f"Exception when getting flattened collection {coll_id}: {stacktrace}")
             raise ToolException(
-                f"Unable to get flattened collection {self.collection_id}: {str(e)}")
+                f"Unable to get flattened collection {coll_id}: {str(e)}")
 
     def get_folder(self, folder_path: str, **kwargs) -> str:
         """Get folders from a collection by path."""
@@ -1004,6 +1012,9 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             response = self._make_request('GET', f'/collections/{self.collection_id}')
             flattened = self.parse_collection_to_flat_structure(response, folder_path)
             return json.dumps(flattened, indent=2)
+        except ToolException:
+            # Re-raise ToolException without wrapping (for validation in tests)
+            raise
         except Exception as e:
             stacktrace = format_exc()
             logger.error(
@@ -1235,25 +1246,26 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update collection {self.collection_id} name: {str(e)}")
 
-    def update_collection_description(self, description: str, **kwargs) -> str:
+    def update_collection_description(self, description: str, collection_id: Optional[str] = None, **kwargs) -> str:
         """Update collection description."""
+        coll_id = collection_id or self.collection_id
         try:
             # Get current collection
             current = self._make_request(
-                'GET', f'/collections/{self.collection_id}')
+                'GET', f'/collections/{coll_id}')
             collection_data = current["collection"]
 
             # Update description
             collection_data["info"]["description"] = description
 
-            response = self._make_request('PUT', f'/collections/{self.collection_id}',
+            response = self._make_request('PUT', f'/collections/{coll_id}',
                                           json={"collection": collection_data})
             return json.dumps(response, indent=2)
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating collection description: {stacktrace}")
             raise ToolException(
-                f"Unable to update collection {self.collection_id} description: {str(e)}")
+                f"Unable to update collection {coll_id} description: {str(e)}")
 
     def update_collection_variables(self, variables: List[Dict[str, Any]], **kwargs) -> str:
         """Update collection variables."""
@@ -1295,17 +1307,19 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update collection {self.collection_id} auth: {str(e)}")
 
-    def delete_collection(self, **kwargs) -> str:
+    def delete_collection(self, collection_id: Optional[str] = None, **kwargs) -> str:
         """Delete a collection permanently."""
         try:
+            coll_id = collection_id or self.collection_id
             response = self._make_request(
-                'DELETE', f'/collections/{self.collection_id}')
-            return json.dumps({"message": f"Collection {self.collection_id} deleted successfully"}, indent=2)
+                'DELETE', f'/collections/{coll_id}')
+            return json.dumps({"message": f"Collection {coll_id} deleted successfully"}, indent=2)
         except Exception as e:
             stacktrace = format_exc()
+            coll_id = collection_id or self.collection_id
             logger.error(f"Exception when deleting collection: {stacktrace}")
             raise ToolException(
-                f"Unable to delete collection {self.collection_id}: {str(e)}")
+                f"Unable to delete collection {coll_id}: {str(e)}")
 
     def duplicate_collection(self, new_name: str, **kwargs) -> str:
         """Create a copy of an existing collection."""
@@ -2046,6 +2060,8 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             result = {
                 "collection_postman_id": info.get('_postman_id'),
                 "name": info.get('name'),
+                "description": info.get('description'),
+                "variables": collection.get('variable'),
                 "updatedAt": info.get('updatedAt'),
                 "createdAt": info.get('createdAt'),
                 "lastUpdatedBy": info.get('lastUpdatedBy'),
@@ -2076,7 +2092,8 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                     result['items'][current_path] = {
                         "type": "folder",
                         "id": item.get('id'),
-                        "uid": item.get('uid')
+                        "uid": item.get('uid'),
+                        "description": item.get('description')
                     }
                     # Recursively parse nested items
                     parse_items(item['item'], current_path)
@@ -2162,6 +2179,10 @@ class PostmanApiWrapper(BaseToolApiWrapper):
         items = collection.get('item', [])
         parse_items(items)
         
+        # Validate folder exists when folder_path is specified
+        if folder_path is not None and len(result['items']) == 0:
+            # raise ToolException(f"Folder '{folder_path}' not found in collection")
+            return f"Folder '{folder_path}' not found in collection"
         return result
     
     def _get_variables_from_env_config(self):

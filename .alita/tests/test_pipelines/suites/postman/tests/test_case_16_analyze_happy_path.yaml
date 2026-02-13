@@ -1,0 +1,86 @@
+name: "PST16 analyze happy path"
+priority: Critical
+description: |
+  Validates that the analyze tool successfully analyzes a collection for API
+  quality, best practices, and potential issues.
+  
+  Objective: Verify collection-level analysis functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Returns analysis report for the collection
+  - Includes quality metrics and best practice checks
+  - Identifies potential issues or improvements
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  scope:
+    type: str
+    value: "collection"
+entry_point: invoke_analyze
+
+nodes:
+  - id: invoke_analyze
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: analyze
+    input:
+      - scope
+    input_mapping:
+      scope:
+        type: variable
+        value: scope
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'analyze' tool for collection analysis.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that analyze returns collection quality analysis.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result contains analysis information.
+          3. Check for quality metrics or best practice assessments.
+          4. Validate the analysis covers collection-level aspects.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if collection analysis was generated),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
