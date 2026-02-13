@@ -6,8 +6,8 @@ max_tokens: 70000
 toolkit_configs: 
   - file: .alita/tool_configs/git-config.json
 step_limit: 50
-persona: "cynical"
-lazy_tools_mode: true
+persona: "qa"
+lazy_tools_mode: false
 # lazy_tools_mode: false          # Enable lazy tool discovery (uses meta-tools to select from large toolsets)
 # agent_type: react                # Agent type: react, pipeline, predict
 # internal_tools: []               # Internal tools for multi-agent: ['swarm']
@@ -49,7 +49,7 @@ Create/update a milestone file to track your analysis and fix attempts:
     {
       "attempt": 1,
       "test_ids": ["XR08", "XR09", "XR10"],
-      "command": "bash -c '.alita/tests/test_pipelines/run_test.sh --local --setup suites/xray --pattern xr08 --pattern xr09 --pattern xr10'",
+      "command": "bash -c '.alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/xray --pattern xr08 --pattern xr09 --pattern xr10'",
       "result": "all_failed",
       "timestamp": "2026-02-13T15:32:00Z"
     }
@@ -70,7 +70,7 @@ Create/update a milestone file to track your analysis and fix attempts:
           "after_snippet": "has_error_message: boolean (true if result is non-empty with length > 10), error_message_meaningful: boolean (true if contains expected error indicators)"
         }
       ],
-      "verification_command": "bash -c '.alita/tests/test_pipelines/run_test.sh --local --setup suites/xray --pattern xr08 --pattern xr09 --pattern xr10'",
+      "verification_command": "bash -c '.alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/xray --pattern xr08 --pattern xr09 --pattern xr10'",
       "verification_result": "success",
       "verification_details": "All 3 tests now properly fail when error message is empty, pass when error message is present",
       "alternatives_considered": [
@@ -200,16 +200,17 @@ Before rerunning tests, group failures by error pattern:
 For each error pattern group:
 - If 2+ tests in same suite: Use `--pattern` flags to rerun together
 - If single test: Rerun individually
+- **ALWAYS use --timeout 180** to prevent hanging on long-running tests
 
 ```bash
 # Batch rerun (PREFERRED - multiple tests in same group)
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> --pattern <id1> --pattern <id2> --pattern <id3>"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/<suite> --pattern <id1> --pattern <id2> --pattern <id3>"
 
 # Single test rerun (fallback)
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> <test_id>"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/<suite> <test_id>"
 ```
 
-Example batch: `bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/xray --pattern xr08 --pattern xr09 --pattern xr10"`
+Example batch: `bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/xray --pattern xr08 --pattern xr09 --pattern xr10"`
 
 - If test(s) pass on rerun: Mark as flaky (intermittent issue)
 - If test(s) fail again: Proceed to root cause analysis and fix
@@ -272,7 +273,7 @@ See framework details if needed: .alita\tests\test_pipelines\README.md
 ### 9. Verify Fixes
 After applying fixes, rerun affected tests in batch to verify:
 ```bash
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> --pattern <id1> --pattern <id2>"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/<suite> --pattern <id1> --pattern <id2>"
 ```
 If tests still fail, try alternative fix or document as unfixable (client code issue)
 
@@ -323,32 +324,33 @@ Provide concise report grouping tests by error pattern.
 ## Command Format
 
 **ALWAYS use batch reruns when possible**
+**ALWAYS include --timeout 180** to prevent hanging on long-running tests
 
 **Batch (PREFERRED)** - Multiple tests from same suite:
 ```bash
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> --pattern <id1> --pattern <id2> --pattern <id3>"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/<suite> --pattern <id1> --pattern <id2> --pattern <id3>"
 ```
 
 **Single** - One test only:
 ```bash
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/<suite> <test_id>"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/<suite> <test_id>"
 ```
 
 **Wildcard** - Pattern matching:
 ```bash
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup -w suites/<suite> --pattern '<pattern>'"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 -w suites/<suite> --pattern '<pattern>'"
 ```
 
 **Examples:**
 ```bash
 # Batch: 3 xray tests together
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/xray --pattern xr08 --pattern xr09 --pattern xr10"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/xray --pattern xr08 --pattern xr09 --pattern xr10"
 
 # Wildcard: all XR0x tests  
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup -w suites/xray --pattern 'xr0*'"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 -w suites/xray --pattern 'xr0*'"
 
 # Single: one ADO test
-bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/ado ADO15"
+bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 suites/ado ADO15"
 ```
 
 **Test ID Extraction:**
