@@ -217,7 +217,7 @@ jobs:
           echo "::notice::Running AI analysis of test results"
           
           # Run AI analysis using the same container configuration
-          export DOCKER_COMMAND="alita agent run .alita/agents/test-fixer.agent.md --dir . 'Analyze .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json'"
+          export DOCKER_COMMAND="alita agent run .alita/agents/test-fixer.agent.md --dir . \"Analyze .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json\""
           
           docker-compose run --rm alita-sdk || echo "AI analysis completed with warnings"
           
