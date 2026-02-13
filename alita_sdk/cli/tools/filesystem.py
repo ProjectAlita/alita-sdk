@@ -26,6 +26,19 @@ logger = logging.getLogger(__name__)
 # Maximum recommended content size for single write operations (in characters)
 MAX_RECOMMENDED_CONTENT_SIZE = 5000  # ~5KB, roughly 1,200-1,500 tokens
 
+# Maximum file size limits to prevent hangs
+MAX_FILES_PER_BATCH = 20  # Maximum files for read_multiple_files
+MAX_TOTAL_BATCH_SIZE = 10 * 1024 * 1024  # 10 MB total across all files in batch
+MAX_WRITE_SIZE = 50 * 1024 * 1024  # 50 MB maximum for single write/append
+MAX_APPEND_SIZE = 50 * 1024 * 1024  # 50 MB maximum for single append
+
+# FilesystemApiWrapper scan limits to prevent hangs
+MAX_FILES_SCAN = 10000  # Maximum files to scan in _get_files
+MAX_DEPTH_SCAN = 10  # Maximum directory depth for recursive scans
+MAX_FILES_LOAD = 5000  # Maximum files to load in loader()
+MAX_FILE_SIZE_FOR_FULL_READ = 100 * 1024 * 1024  # 100 MB - use chunked reading above this
+MAX_EDIT_FILE_SIZE = 10 * 1024 * 1024  # 10 MB - maximum file size for edit operations
+
 # Helpful error message for truncated content
 CONTENT_TRUNCATED_ERROR = """
 ⚠️  CONTENT FIELD MISSING - OUTPUT TRUNCATED
@@ -380,13 +393,13 @@ class ReadFileChunkTool(FileSystemTool):
         "Read a specific range of lines from a file. This is efficient for large files where you only need a portion. "
         "✅ USE THIS for files >100KB that filesystem_read_file rejects. "
         "\n\n"
-        "Specify start_line (1-indexed) and optionally end_line. If end_line is omitted, reads to end of file. "
+        "Specify start_line (1-indexed) and optionally end_line. If end_line is omitted, reads up to 1000 lines from start (safety limit). "
         "This avoids loading entire large files into memory and prevents context overflow. "
         "\n"
         "EXAMPLES:\n"
         "• Read lines 1-500: filesystem_read_file_chunk(path='file.json', start_line=1, end_line=500)\n"
         "• Read lines 501-1000: filesystem_read_file_chunk(path='file.json', start_line=501, end_line=1000)\n"
-        "• Read from line 100 to end: filesystem_read_file_chunk(path='file.log', start_line=100)\n"
+        "• Read from line 100 (max 1000 lines): filesystem_read_file_chunk(path='file.log', start_line=100)\n"
         "\n"
         "Only works within allowed directories."
     )
@@ -398,6 +411,9 @@ class ReadFileChunkTool(FileSystemTool):
     
     def _run(self, path: str, start_line: int = 1, end_line: Optional[int] = None) -> str:
         """Read a chunk of a file by line range."""
+        # Default max chunk size to prevent reading entire massive files
+        MAX_LINES_PER_CHUNK = 1000
+        
         try:
             target = self._resolve_path(path)
             
@@ -413,12 +429,15 @@ class ReadFileChunkTool(FileSystemTool):
             if end_line is not None and end_line < start_line:
                 return "Error: end_line must be >= start_line"
             
+            # Apply safety limit if end_line not specified
+            effective_end_line = end_line if end_line is not None else (start_line + MAX_LINES_PER_CHUNK - 1)
+            
             lines = []
             with open(target, 'r', encoding='utf-8') as f:
                 for i, line in enumerate(f, 1):
                     if i < start_line:
                         continue
-                    if end_line is not None and i > end_line:
+                    if i > effective_end_line:
                         break
                     lines.append(line)
             
@@ -442,6 +461,7 @@ class ReadMultipleFilesTool(FileSystemTool):
         "Read the contents of multiple files simultaneously. This is more efficient than reading files one by one. "
         "Each file's content is returned with its path as a reference. "
         "Failed reads for individual files won't stop the entire operation. "
+        f"Maximum {MAX_FILES_PER_BATCH} files per batch with {MAX_TOTAL_BATCH_SIZE // (1024*1024)}MB total size limit. "
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ReadMultipleFilesInput
@@ -451,15 +471,56 @@ class ReadMultipleFilesTool(FileSystemTool):
     ]
     
     def _run(self, paths: List[str]) -> str:
-        """Read multiple files."""
+        """Read multiple files with size and count limits."""
+        # Enforce file count limit
+        if len(paths) > MAX_FILES_PER_BATCH:
+            return (
+                f"Error: Cannot read {len(paths)} files at once. "
+                f"Maximum is {MAX_FILES_PER_BATCH} files per batch. "
+                f"Please split into smaller batches."
+            )
+        
         results = []
+        total_size = 0
         
         for file_path in paths:
             try:
                 target = self._resolve_path(file_path)
+                
+                # Check file size before reading
+                if not target.exists():
+                    results.append(f"{file_path}: Error - File does not exist")
+                    continue
+                
+                if not target.is_file():
+                    results.append(f"{file_path}: Error - Not a file")
+                    continue
+                
+                file_size = target.stat().st_size
+                
+                # Check individual file size
+                if file_size > MAX_RECOMMENDED_CONTENT_SIZE * 20:  # 100KB per file
+                    results.append(
+                        f"{file_path}: Error - File too large ({self._format_size(file_size)}). "
+                        f"Use filesystem_read_file with head/tail or filesystem_read_file_chunk instead."
+                    )
+                    continue
+                
+                # Check total batch size
+                if total_size + file_size > MAX_TOTAL_BATCH_SIZE:
+                    results.append(
+                        f"\n⚠️  BATCH SIZE LIMIT REACHED: Total size would exceed "
+                        f"{self._format_size(MAX_TOTAL_BATCH_SIZE)}. "
+                        f"Stopped after {len(results)} files. Read remaining files in another batch."
+                    )
+                    break
+                
                 with open(target, 'r', encoding='utf-8') as f:
                     content = f.read()
+                
+                total_size += file_size
                 results.append(f"{file_path}:\n{content}")
+                
             except Exception as e:
                 results.append(f"{file_path}: Error - {str(e)}")
         
@@ -473,13 +534,26 @@ class WriteFileTool(FileSystemTool):
         "Create a new file or completely overwrite an existing file with new content. "
         "Use with caution as it will overwrite existing files without warning. "
         "Handles text content with proper encoding. Creates parent directories if needed. "
+        f"Maximum write size: {MAX_WRITE_SIZE // (1024*1024)}MB. For larger files, use filesystem_append_file in chunks. "
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = WriteFileInput
     
     def _run(self, path: str, content: str) -> str:
-        """Write to a file."""
+        """Write to a file with size limit."""
         try:
+            # Check content size before writing
+            content_size = len(content.encode('utf-8'))
+            
+            if content_size > MAX_WRITE_SIZE:
+                return (
+                    f"Error: Content too large ({self._format_size(content_size)}). "
+                    f"Maximum write size is {self._format_size(MAX_WRITE_SIZE)}. "
+                    f"Consider writing in chunks with filesystem_append_file instead:"
+                    f"\n1. Write initial section with filesystem_write_file"
+                    f"\n2. Append remaining sections with filesystem_append_file"
+                )
+            
             target = self._resolve_path(path)
             
             # Create parent directories if they don't exist
@@ -488,8 +562,7 @@ class WriteFileTool(FileSystemTool):
             with open(target, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            size = len(content.encode('utf-8'))
-            return f"Successfully wrote to '{path}' ({self._format_size(size)})"
+            return f"Successfully wrote to '{path}' ({self._format_size(content_size)})"
         except Exception as e:
             return f"Error writing to file '{path}': {str(e)}"
 
@@ -501,13 +574,24 @@ class AppendFileTool(FileSystemTool):
         "Append content to the end of an existing file. Creates the file if it doesn't exist. "
         "Use this for incremental file creation - write initial structure with write_file, "
         "then add sections progressively with append_file. This is safer than rewriting "
-        "entire files and prevents context overflow. Only works within allowed directories."
+        f"entire files and prevents context overflow. Maximum append size: {MAX_APPEND_SIZE // (1024*1024)}MB per call. "
+        "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = AppendFileInput
     
     def _run(self, path: str, content: str) -> str:
-        """Append to a file."""
+        """Append to a file with size limit."""
         try:
+            # Check content size before appending
+            content_size = len(content.encode('utf-8'))
+            
+            if content_size > MAX_APPEND_SIZE:
+                return (
+                    f"Error: Content too large ({self._format_size(content_size)}). "
+                    f"Maximum append size is {self._format_size(MAX_APPEND_SIZE)}. "
+                    f"Split your content into smaller chunks and append them sequentially."
+                )
+            
             target = self._resolve_path(path)
             
             # Create parent directories if they don't exist
@@ -520,13 +604,12 @@ class AppendFileTool(FileSystemTool):
             with open(target, 'a', encoding='utf-8') as f:
                 f.write(content)
             
-            appended_size = len(content.encode('utf-8'))
-            new_size = original_size + appended_size
+            new_size = original_size + content_size
             
             if existed:
-                return f"Successfully appended {self._format_size(appended_size)} to '{path}' (total: {self._format_size(new_size)})"
+                return f"Successfully appended {self._format_size(content_size)} to '{path}' (total: {self._format_size(new_size)})"
             else:
-                return f"Created '{path}' and wrote {self._format_size(appended_size)}"
+                return f"Created '{path}' and wrote {self._format_size(content_size)}"
         except Exception as e:
             return f"Error appending to file '{path}': {str(e)}"
 
@@ -543,7 +626,7 @@ class EditFileTool(FileSystemTool):
     args_schema: type[BaseModel] = EditFileInput
     
     def _run(self, path: str, old_text: str, new_text: str) -> str:
-        """Edit a file by replacing exact text."""
+        """Edit a file by replacing exact text with size limit."""
         try:
             target = self._resolve_path(path)
             
@@ -552,6 +635,15 @@ class EditFileTool(FileSystemTool):
             
             if not target.is_file():
                 return f"Error: '{path}' is not a file"
+            
+            # Check file size before editing
+            file_size = target.stat().st_size
+            if file_size > MAX_EDIT_FILE_SIZE:
+                return (
+                    f"Error: File too large ({self._format_size(file_size)}) for editing. "
+                    f"Maximum is {self._format_size(MAX_EDIT_FILE_SIZE)}. "
+                    f"Use filesystem_apply_patch or write/read file in chunks instead."
+                )
             
             # Read current content
             with open(target, 'r', encoding='utf-8') as f:
@@ -589,13 +681,13 @@ class ApplyPatchTool(FileSystemTool):
         "Apply multiple precise edits to a file in a single operation, similar to applying a patch. "
         "Each edit specifies 'old_text' (exact text to find) and 'new_text' (replacement text). "
         "Edits are applied sequentially. Use dry_run=true to preview changes without applying them. "
-        "This is efficient for making multiple changes to large files. "
+        f"Maximum file size: {MAX_EDIT_FILE_SIZE // (1024*1024)}MB. "
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ApplyPatchInput
     
     def _run(self, path: str, edits: List[Dict[str, str]], dry_run: bool = False) -> str:
-        """Apply multiple edits to a file."""
+        """Apply multiple edits to a file with size limit."""
         try:
             target = self._resolve_path(path)
             
@@ -604,6 +696,15 @@ class ApplyPatchTool(FileSystemTool):
             
             if not target.is_file():
                 return f"Error: '{path}' is not a file"
+            
+            # Check file size before editing
+            file_size = target.stat().st_size
+            if file_size > MAX_EDIT_FILE_SIZE:
+                return (
+                    f"Error: File too large ({self._format_size(file_size)}) for patching. "
+                    f"Maximum is {self._format_size(MAX_EDIT_FILE_SIZE)}. "
+                    f"Consider editing smaller sections or using write/read operations."
+                )
             
             # Read current content
             with open(target, 'r', encoding='utf-8') as f:
@@ -1236,7 +1337,7 @@ class FilesystemApiWrapper:
     
     def _get_files(self, path: str = "", branch: str = None) -> List[str]:
         """
-        Get list of files in the directory.
+        Get list of files in the directory with depth and count limits.
         
         Implements BaseCodeToolApiWrapper._get_files() for filesystem.
         
@@ -1245,7 +1346,7 @@ class FilesystemApiWrapper:
             branch: Ignored for filesystem (compatibility with git-based toolkits)
             
         Returns:
-            List of file paths relative to base_directory
+            List of file paths relative to base_directory (limited to MAX_FILES_SCAN)
         """
         base = Path(self.base_directory)
         search_path = base / path if path else base
@@ -1256,13 +1357,29 @@ class FilesystemApiWrapper:
         files = []
         
         if self.recursive:
+            start_depth = len(search_path.parts)
+            
             for root, dirs, filenames in os.walk(search_path, followlinks=self.follow_symlinks):
+                # Check depth limit
+                current_depth = len(Path(root).parts) - start_depth
+                if current_depth >= MAX_DEPTH_SCAN:
+                    dirs[:] = []  # Stop descending further
+                    continue
+                
                 # Skip hidden directories
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
                 
                 for filename in filenames:
                     if filename.startswith('.'):
                         continue
+                    
+                    # Check file count limit
+                    if len(files) >= MAX_FILES_SCAN:
+                        logger.warning(
+                            f"Reached maximum file scan limit ({MAX_FILES_SCAN}). "
+                            f"Use more specific whitelists or target smaller subdirectories."
+                        )
+                        return sorted(files)
                     
                     full_path = Path(root) / filename
                     try:
@@ -1406,11 +1523,14 @@ class FilesystemApiWrapper:
         - Binary documents (PDF, DOCX, PPTX, Excel): Convert to markdown
         - Images: Return LLM description or base64 data URI
         
+        For large text files with offset/limit, uses chunked reading to avoid
+        loading entire file into memory.
+        
         Args:
             file_path: Path relative to base_directory
             branch: Ignored for filesystem (compatibility with git-based toolkits)
             offset: Start line number (1-indexed). If None, start from beginning.
-            limit: Maximum number of lines to read. If None, read to end.
+            limit: Maximum number of lines to read. If None, read to end (up to 10K lines).
             head: Read only first N lines (alternative to offset/limit)
             tail: Read only last N lines (alternative to offset/limit)
             
@@ -1442,10 +1562,21 @@ class FilesystemApiWrapper:
         
         for encoding in encodings:
             try:
+                # Check file size first
+                file_size = full_path.stat().st_size
+                
+                # For large files with line filtering, use chunked reading
+                has_line_filter = offset is not None or limit is not None or head is not None or tail is not None
+                
+                if file_size > MAX_FILE_SIZE_FOR_FULL_READ and has_line_filter:
+                    # Use chunked reading for large files
+                    return self._read_file_chunked(full_path, encoding, offset, limit, head, tail)
+                
+                # Small files or no filtering: read normally
                 content = full_path.read_text(encoding=encoding)
                 
                 # Apply line filtering if specified
-                if offset is not None or limit is not None or head is not None or tail is not None:
+                if has_line_filter:
                     lines = content.splitlines(keepends=True)
                     
                     if head is not None:
@@ -1461,7 +1592,9 @@ class FilesystemApiWrapper:
                             end_idx = start_idx + limit
                             lines = lines[start_idx:end_idx]
                         else:
-                            lines = lines[start_idx:]
+                            # No limit specified - cap at 10K lines for safety
+                            end_idx = start_idx + 10000
+                            lines = lines[start_idx:end_idx]
                     
                     content = ''.join(lines)
                 
@@ -1475,6 +1608,65 @@ class FilesystemApiWrapper:
         
         logger.warning(f"Could not decode {file_path} with any known encoding")
         return None
+    
+    def _read_file_chunked(
+        self,
+        full_path: Path,
+        encoding: str,
+        offset: Optional[int],
+        limit: Optional[int],
+        head: Optional[int],
+        tail: Optional[int]
+    ) -> Optional[str]:
+        """
+        Read large files line-by-line to avoid loading entire file into memory.
+        
+        Args:
+            full_path: Absolute path to file
+            encoding: Character encoding to use
+            offset: Start line number (1-indexed)
+            limit: Maximum number of lines
+            head: Read first N lines
+            tail: Read last N lines
+            
+        Returns:
+            File content as string
+        """
+        try:
+            lines = []
+            
+            if head is not None:
+                # Read first N lines
+                with open(full_path, 'r', encoding=encoding) as f:
+                    for i, line in enumerate(f):
+                        if i >= head:
+                            break
+                        lines.append(line)
+            
+            elif tail is not None:
+                # Use deque for efficient tail reading
+                from collections import deque
+                with open(full_path, 'r', encoding=encoding) as f:
+                    lines = list(deque(f, maxlen=tail))
+            
+            else:
+                # offset/limit mode
+                start_idx = (offset - 1) if offset and offset > 0 else 0
+                max_lines = limit if limit else 10000  # Default safety limit
+                
+                with open(full_path, 'r', encoding=encoding) as f:
+                    for i, line in enumerate(f):
+                        if i < start_idx:
+                            continue
+                        if i >= start_idx + max_lines:
+                            break
+                        lines.append(line)
+            
+            return ''.join(lines)
+            
+        except Exception as e:
+            logger.warning(f"Failed to read file with chunked method: {e}")
+            return None
     
     def read_file(
         self,
@@ -1581,10 +1773,27 @@ class FilesystemApiWrapper:
         def raw_document_generator() -> Generator[Document, None, None]:
             self._log_tool_event("Reading files...", "loader")
             processed = 0
+            skipped_large = 0
             
             for file_path in file_iterator:
+                # Check file limit
+                if processed >= MAX_FILES_LOAD:
+                    self._log_tool_event(
+                        f"⚠️  Reached maximum file load limit ({MAX_FILES_LOAD}). "
+                        f"Use more specific whitelists to load fewer files.",
+                        "loader"
+                    )
+                    break
+                
                 content = self._read_file(file_path)
                 if not content:
+                    continue
+                
+                # Check content size to prevent memory exhaustion
+                content_size = len(content.encode('utf-8'))
+                if content_size > MAX_FILE_SIZE_FOR_FULL_READ:
+                    logger.warning(f"Skipping {file_path}: too large ({content_size} bytes)")
+                    skipped_large += 1
                     continue
                 
                 content_hash = hashlib.sha256(content.encode('utf-8')).hexdigest()
@@ -1604,7 +1813,10 @@ class FilesystemApiWrapper:
                 if processed % 100 == 0:
                     logger.debug(f"[loader] Read {processed} files...")
             
-            self._log_tool_event(f"Loaded {processed} files", "loader")
+            summary = f"Loaded {processed} files"
+            if skipped_large > 0:
+                summary += f" (skipped {skipped_large} files >100MB)"
+            self._log_tool_event(summary, "loader")
         
         if not chunked:
             return raw_document_generator()
