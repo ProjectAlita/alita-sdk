@@ -1,0 +1,97 @@
+name: "PST11 - get_request_by_id: Handle invalid request ID"
+priority: High
+description: |
+  Validates that the get_request_by_id tool properly handles requests with
+  non-existent or invalid request IDs.
+  
+  Objective: Verify error handling for invalid request IDs
+  
+  Expected Behavior:
+  - Tool executes without crashing
+  - Returns appropriate error message
+  - Error indicates request not found or invalid ID
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  invalid_request_id:
+    type: str
+    value: "invalid-request-id-pst10-12345678-9abc-def0-1234-567890abcdef"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_request_by_id
+
+nodes:
+  - id: invoke_get_request_by_id
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_request_by_id
+    input:
+      - invalid_request_id
+    input_mapping:
+      request_id:
+        type: variable
+        value: invalid_request_id
+    output:
+      - tool_result
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - tool_result
+      - invalid_request_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_request_by_id' tool with an invalid request ID.
+          
+          Tool Result: {tool_result}
+          Invalid ID Used: {invalid_request_id}
+          
+          This is a NEGATIVE test - we expect an appropriate error for invalid request ID.
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool executed (didn't crash)
+          2. has_error: Result contains an error message
+          3. appropriate_error: Error indicates request not found/invalid ID
+          4. no_system_errors: No system/internal errors (only expected ID error)
+          
+          Valid error patterns:
+          - "request not found" or "does not exist"
+          - "invalid request id" or "invalid id"
+          - "cannot be located"
+          - "no request with id"
+          - "not found"
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if appropriate error returned),
+            "tool_executed": boolean,
+            "has_error": boolean,
+            "appropriate_error": boolean,
+            "no_system_errors": boolean,
+            "error_message": "extracted error message or null",
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
