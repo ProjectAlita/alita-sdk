@@ -821,6 +821,14 @@ def run_suite_local(
         logger=logger,  # Pass logger for proper output routing
     )
 
+    # Load env_mapping values before setup
+    if config:
+        for key, value in config.get("env_mapping", {}).items():
+            resolved_value = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
+            ctx.env_vars[key] = resolved_value
+            if logger:
+                logger.debug(f"Loaded env_mapping: {key}={resolved_value}")
+
     # Execute setup steps using local strategy
     # Logger will route output based on verbose flag (verbose=True shows progress)
     if logger:

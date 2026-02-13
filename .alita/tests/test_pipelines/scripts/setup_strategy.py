@@ -156,6 +156,10 @@ class LocalSetupStrategy(SetupStrategy):
         Returns:
             List of BaseTool instances created during setup
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[GET_TOOLS] Returning {len(self.created_tools)} tools")
+        logger.info(f"[GET_TOOLS] Tool names: {[t.name if hasattr(t, 'name') else str(type(t)) for t in self.created_tools]}")
         return self.created_tools
     
     def _create_toolkit_tools(self, toolkit_info: Dict[str, Any], ctx: "SetupContext") -> List[Any]:
@@ -172,6 +176,10 @@ class LocalSetupStrategy(SetupStrategy):
         Returns:
             List of BaseTool instances
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("[TOOLKIT CREATE] Entered _create_toolkit_tools()")
+        
         from utils_common import load_from_env
         
         toolkit_type = toolkit_info.get("type", "unknown")
@@ -179,27 +187,48 @@ class LocalSetupStrategy(SetupStrategy):
         toolkit_id = toolkit_info.get("id", 1)
         config = toolkit_info.get("config", {})
         
+        logger.info(f"[TOOLKIT CREATE] toolkit_type={toolkit_type}, toolkit_name={toolkit_name}, toolkit_id={toolkit_id}")
+        
         # Initialize alita client if needed
         if self._alita_client is None:
+            logger.info("[TOOLKIT CREATE] Creating AlitaClient")
             self._alita_client = self._create_alita_client()
+            logger.info("[TOOLKIT CREATE] AlitaClient created")
         
         # Initialize LLM if needed (for toolkits that process images, etc.)
         if self._llm is None:
+            logger.info("[TOOLKIT CREATE] Creating LLM")
             self._llm = self._create_llm()
+            logger.info("[TOOLKIT CREATE] LLM created")
         
         # Build tool configuration in the format expected by get_tools
         # This matches the structure used by the backend
+        logger.info("[TOOLKIT CREATE] Calling _build_toolkit_settings")
+        settings = self._build_toolkit_settings(toolkit_type, config, load_from_env)
+        logger.info(f"[TOOLKIT CREATE] _build_toolkit_settings completed, settings keys: {list(settings.keys())}")
+        
+        # DEBUG: Log the settings structure
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[LOCAL DEBUG] Built settings for {toolkit_type}: {list(settings.keys())}")
+        config_key = f"{toolkit_type}_configuration"
+        if config_key in settings:
+            logger.info(f"[LOCAL DEBUG] {config_key} content: {settings[config_key]}")
+        
         tool_config = {
             "id": toolkit_id,
             "type": toolkit_type,
             "toolkit_name": toolkit_name,
             "name": toolkit_name,
-            "settings": self._build_toolkit_settings(toolkit_type, config, load_from_env),
+            "settings": settings,
         }
+        
+        logger.info(f"[LOCAL DEBUG] Final tool_config being passed to get_tools: {tool_config}")
         
         try:
             from alita_sdk.runtime.toolkits.tools import get_tools
             
+            logger.info("[TOOLKIT CREATE] Calling get_tools from alita_sdk.runtime.toolkits.tools")
             tools = get_tools(
                 tools_list=[tool_config],
                 alita_client=self._alita_client,
@@ -207,11 +236,13 @@ class LocalSetupStrategy(SetupStrategy):
                 memory_store=None,
                 debug_mode=False,
             )
+            logger.info(f"[TOOLKIT CREATE] get_tools returned {len(tools)} tools")
             
             ctx.log(f"[LOCAL] Created {toolkit_type} toolkit '{toolkit_name}' with {len(tools)} tools", "success")
             return tools
             
         except Exception as e:
+            logger.error(f"[TOOLKIT CREATE] Exception in get_tools: {e}", exc_info=True)
             ctx.log(f"[LOCAL] Failed to create {toolkit_type} toolkit: {e}", "error")
             return []
     
@@ -240,21 +271,51 @@ class LocalSetupStrategy(SetupStrategy):
         settings = config.copy()
         
         # Build the configuration key name (e.g., 'github_configuration', 'jira_configuration')
+        # Special handling for toolkit types that don't match their configuration key
         toolkit_type = "ado" if toolkit_type.startswith("ado") else toolkit_type
-        config_key = f"{toolkit_type}_configuration"
+        # xray_cloud uses xray_configuration, not xray_cloud_configuration
+        if toolkit_type == "xray_cloud":
+            config_key = "xray_configuration"
+        else:
+            config_key = f"{toolkit_type}_configuration"
         
         # Start with existing configuration from config dict if present
         existing_config = config.get(config_key, {})
         toolkit_config = existing_config.copy() if isinstance(existing_config, dict) else {}
         
+        # DEBUG: Log config state before merge
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[MERGE DEBUG] toolkit_type: {toolkit_type}, config_key: {config_key}")
+        logger.info(f"[MERGE DEBUG] toolkit_config: {toolkit_config}")
+        logger.info(f"[MERGE DEBUG] _configuration_data keys: {list(self._configuration_data.keys())}")
+        logger.info(f"[MERGE DEBUG] 'alita_title' in toolkit_config: {'alita_title' in toolkit_config}")
+        if 'alita_title' in toolkit_config:
+            logger.info(f"[MERGE DEBUG] toolkit_config['alita_title']: {toolkit_config['alita_title']}")
+            logger.info(f"[MERGE DEBUG] alita_title in _configuration_data: {toolkit_config['alita_title'] in self._configuration_data}")
+        
         # If toolkit_config has an alita_title, try to load stored configuration data
         if 'alita_title' in toolkit_config and toolkit_config['alita_title'] in self._configuration_data:
             stored_data = self._configuration_data[toolkit_config['alita_title']]
+            # DEBUG: Log what we're merging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[LOCAL DEBUG] Found alita_title: {toolkit_config['alita_title']}")
+            logger.info(f"[LOCAL DEBUG] Stored data keys: {list(stored_data.keys())}")
+            logger.info(f"[LOCAL DEBUG] Stored data: {stored_data}")
+            logger.info(f"[LOCAL DEBUG] toolkit_config BEFORE merge: {toolkit_config}")
             # Merge stored configuration data (credentials) into toolkit_config
-            # Stored data takes precedence for credential fields
+            # When alita_title is present, stored data takes PRECEDENCE over config file values
+            # This allows credentials to come from the configuration step while keeping
+            # config file placeholders for remote mode compatibility
             for key, value in stored_data.items():
-                if key not in toolkit_config or not toolkit_config[key]:
-                    toolkit_config[key] = value
+                # Skip alita_title and private fields - they're metadata, not credentials
+                if key in ('alita_title', 'private'):
+                    continue
+                # Always overwrite with stored credentials when alita_title is used  
+                toolkit_config[key] = value
+                logger.info(f"[LOCAL DEBUG] Merged {key} into toolkit_config (overwrite)")
+            logger.info(f"[LOCAL DEBUG] toolkit_config AFTER merge: {toolkit_config}")
         
         # Fill in defaults from Pydantic model if available
         try:
@@ -376,8 +437,18 @@ class LocalSetupStrategy(SetupStrategy):
         ctx.log(f"[LOCAL] Registered toolkit '{toolkit_name}' (type: {toolkit_type}) with ID {toolkit_id}", "success")
         
         # Create actual tool instances
-        tools = self._create_toolkit_tools(toolkit_info, ctx)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[TOOLKIT CREATE] Calling _create_toolkit_tools for {toolkit_name}")
+        try:
+            tools = self._create_toolkit_tools(toolkit_info, ctx)
+            logger.info(f"[TOOLKIT CREATE] _create_toolkit_tools returned {len(tools)} tools")
+        except Exception as e:
+            logger.error(f"[TOOLKIT CREATE] Exception in _create_toolkit_tools: {e}", exc_info=True)
+            tools = []
+        logger.info(f"[TOOLKIT CREATE] created_tools BEFORE extend: {len(self.created_tools)}")
         self.created_tools.extend(tools)
+        logger.info(f"[TOOLKIT CREATE] created_tools AFTER extend: {len(self.created_tools)}")
         
         return {
             "success": True,
@@ -472,6 +543,14 @@ class LocalSetupStrategy(SetupStrategy):
         alita_title = config.get("alita_title")
         data = config.get("data", {})
         
+        # DEBUG: Log configuration data
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[CONFIG DEBUG] config_type: {config_type}")
+        logger.info(f"[CONFIG DEBUG] alita_title: {alita_title}")
+        logger.info(f"[CONFIG DEBUG] data keys: {list(data.keys())}")
+        logger.info(f"[CONFIG DEBUG] data content: {data}")
+        
         if not config_type:
             ctx.log("[LOCAL] No config_type provided", "warning")
             return {"success": True, "skipped": True, "reason": "no config_type", "local": True}
@@ -489,6 +568,11 @@ class LocalSetupStrategy(SetupStrategy):
         
         # Also store the data for lookup by alita_title
         self._configuration_data[alita_title] = data
+        
+        # DEBUG: Verify storage
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[CONFIG DEBUG] Stored in _configuration_data['{alita_title}']: {self._configuration_data[alita_title]}")
         
         ctx.log(f"[LOCAL] Registered configuration '{alita_title}' of type '{config_type}'", "success")
         

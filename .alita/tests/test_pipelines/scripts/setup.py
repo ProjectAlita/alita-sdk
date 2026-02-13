@@ -882,6 +882,14 @@ def run(
         logger=logger,
     )
     
+    # Load env_mapping values before setup
+    if config:
+        for key, value in config.get("env_mapping", {}).items():
+            resolved_value = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
+            ctx.env_vars[key] = resolved_value
+            if verbose or dry_run:
+                logger.debug(f"Loaded env_mapping: {key}={resolved_value}")
+    
     logger.section(f"Setup: {config.get('name', folder)}")
     logger.info(f"Target: {base_url} (Project: {project_id})")
     if dry_run:
