@@ -32,7 +32,7 @@ terminal_run_command(
   timeout=180
 )
 ```
-Example: `bash -c ".alita/tests/test_pipelines/run_test.sh --local suites/ado ADO15"`
+Example: `bash -c ".alita/tests/test_pipelines/run_test.sh --local --setup suites/ado ADO15"`
 - If test passes on rerun: Skip it (was flaky)
 - If test fails again: Proceed to analysis
 
