@@ -31,13 +31,13 @@ TIMEOUT=""
 TIMEOUT_SET=false
 
 print_usage() {
-    echo "Usage: $0 [OPTIONS] <suite> [pattern]"
+    echo "Usage: $0 [OPTIONS] <suite> [pattern1] [pattern2] ..."
     echo ""
     echo "Run individual test(s) within a suite by pattern matching."
     echo ""
     echo "Arguments:"
     echo "  suite              Suite folder name (e.g., github_toolkit)"
-    echo "  pattern            Test name pattern to match (optional if using --pattern flags)"
+    echo "  pattern1 ...       Test name pattern(s) to match (optional if using --pattern flags)"
     echo ""
     echo "Options:"
     echo "  --setup            Run setup before testing (creates toolkit, etc.)"
@@ -55,6 +55,10 @@ print_usage() {
     echo "Examples:"
     echo "  # First time: setup + seed + run"
     echo "  $0 --setup --seed github_toolkit update_file"
+    echo ""
+    echo "  # Run multiple tests by ID"
+    echo "  $0 --all suites/xray XR08 XR09 XR10"
+    echo "  $0 -v github_toolkit GH14 GH15 GH16"
     echo ""
     echo "  # Iterative development: just run (after setup/seed done)"
     echo "  $0 github_toolkit update_file"
@@ -146,7 +150,7 @@ done
 # Restore positional parameters
 set -- "${POSITIONAL[@]}"
 
-# Parse suite and optional pattern from positional args
+# Parse suite and optional pattern(s) from positional args
 if [ $# -lt 1 ]; then
     echo -e "${RED}Error: Suite argument required${NC}"
     print_usage
@@ -154,13 +158,16 @@ if [ $# -lt 1 ]; then
 fi
 
 SUITE="$1"
-if [ $# -gt 1 ]; then
-    PATTERN="$2"
-    # If positional pattern provided but no --pattern flags, use positional
-    if [ ${#PATTERNS[@]} -eq 0 ]; then
-        PATTERNS=("$PATTERN")
-    fi
-elif [ ${#PATTERNS[@]} -eq 0 ]; then
+shift  # Remove suite from positional args
+
+# If positional patterns provided and no --pattern flags, use all positional args as patterns
+if [ $# -gt 0 ] && [ ${#PATTERNS[@]} -eq 0 ]; then
+    # Add all remaining positional args as patterns
+    while [ $# -gt 0 ]; do
+        PATTERNS+=("$1")
+        shift
+    done
+elif [ $# -eq 0 ] && [ ${#PATTERNS[@]} -eq 0 ]; then
     echo -e "${RED}Error: Pattern required (either as argument or via --pattern flag)${NC}\n"
     print_usage
     exit 1
