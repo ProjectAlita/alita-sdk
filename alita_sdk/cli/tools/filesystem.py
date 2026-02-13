@@ -299,8 +299,16 @@ class ReadFileTool(FileSystemTool):
     name: str = "filesystem_read_file"
     description: str = (
         "Read the complete contents of a file from the file system. "
+        "⚠️  WARNING: Files larger than 100KB will be rejected to prevent context overflow. "
+        "For large files, use 'head' or 'tail' parameters, or use filesystem_read_file_chunk instead. "
+        "\n\n"
+        "BEST PRACTICES:\n"
+        "• For unknown file size: Use filesystem_get_file_info first to check size\n"
+        "• For large JSON/log files: Use head=500 to read first portion with key information\n"
+        "• For result logs: Use tail=200 to read recent entries\n"
+        "• For specific sections: Use filesystem_read_file_chunk with line ranges\n"
+        "\n"
         "Handles various text encodings and provides detailed error messages if the file cannot be read. "
-        "Use 'head' parameter to read only the first N lines, or 'tail' parameter to read only the last N lines. "
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ReadFileInput
@@ -323,6 +331,23 @@ class ReadFileTool(FileSystemTool):
             
             if head and tail:
                 return "Error: Cannot specify both head and tail parameters simultaneously"
+            
+            # Check file size before reading (to prevent hanging on large files)
+            file_size = target.stat().st_size
+            # Use 100KB as hard limit (too large causes context overflow and hangs)
+            MAX_FILE_SIZE = 100 * 1024  # 100KB in bytes
+            
+            if file_size > MAX_FILE_SIZE and not head and not tail:
+                size_formatted = self._format_size(file_size)
+                return (
+                    f"Error: File '{path}' is too large to read completely ({size_formatted}).\n\n"
+                    f"⚠️  Reading large files can cause context overflow and hangs.\n\n"
+                    f"Please use one of these alternatives:\n"
+                    f"  • filesystem_read_file(path='{path}', head=100) - Read first 100 lines\n"
+                    f"  • filesystem_read_file(path='{path}', tail=100) - Read last 100 lines\n"
+                    f"  • filesystem_read_file_chunk(path='{path}', start_line=1, end_line=100) - Read specific range\n"
+                    f"  • filesystem_search_files - Search for specific content within the file"
+                )
             
             with open(target, 'r', encoding='utf-8') as f:
                 if tail:
@@ -353,8 +378,16 @@ class ReadFileChunkTool(FileSystemTool):
     name: str = "filesystem_read_file_chunk"
     description: str = (
         "Read a specific range of lines from a file. This is efficient for large files where you only need a portion. "
+        "✅ USE THIS for files >100KB that filesystem_read_file rejects. "
+        "\n\n"
         "Specify start_line (1-indexed) and optionally end_line. If end_line is omitted, reads to end of file. "
-        "Use this to avoid loading entire large files into memory. "
+        "This avoids loading entire large files into memory and prevents context overflow. "
+        "\n"
+        "EXAMPLES:\n"
+        "• Read lines 1-500: filesystem_read_file_chunk(path='file.json', start_line=1, end_line=500)\n"
+        "• Read lines 501-1000: filesystem_read_file_chunk(path='file.json', start_line=501, end_line=1000)\n"
+        "• Read from line 100 to end: filesystem_read_file_chunk(path='file.log', start_line=100)\n"
+        "\n"
         "Only works within allowed directories."
     )
     args_schema: type[BaseModel] = ReadFileChunkInput
@@ -1025,6 +1058,10 @@ class GetFileInfoTool(FileSystemTool):
     description: str = (
         "Retrieve detailed metadata about a file or directory. "
         "Returns comprehensive information including size, creation time, last modified time, permissions, and type. "
+        "\n\n"
+        "⚠️  RECOMMENDED: Always use this tool BEFORE reading files of unknown size. "
+        "If file is >100KB, filesystem_read_file will fail - use head/tail/chunk methods instead. "
+        "\n"
         "This tool is perfect for understanding file characteristics without reading the actual content. "
         "Only works within allowed directories."
     )

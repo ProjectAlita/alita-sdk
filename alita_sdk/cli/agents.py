@@ -394,7 +394,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
         def plan_callback(state: PlanState):
             plan_state['title'] = state.title
             plan_state['steps'] = state.to_dict()['steps']
-            plan_state['session_id'] = state.session_id
+            plan_state['session_id'] = state.conversation_id  # Fixed: PlanState uses conversation_id, not session_id
         
         # Get session_id from plan_state dict if provided
         session_id = plan_state.get('session_id')
