@@ -210,6 +210,16 @@ jobs:
         if: always()
         run: |
           docker-compose logs alita-sdk > docker-logs.txt 2>&1 || echo "Failed to retrieve logs" > docker-logs.txt
+      
+      - name: Do AI analysis of logs
+        if: always()
+        run: |
+          echo "::notice::Running AI analysis of test results"
+          
+          # Run AI analysis using the same container configuration
+          export DOCKER_COMMAND="alita agent run .alita/agents/test-fixer.agent.md --dir . 'Analyze .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json'"
+          
+          docker-compose run --rm alita-sdk || echo "AI analysis completed with warnings"
           
       - name: Stop docker-compose
         if: always()

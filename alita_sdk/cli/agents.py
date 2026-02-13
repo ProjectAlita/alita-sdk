@@ -403,7 +403,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             plan_callback=plan_callback,
             session_id=session_id
         )
-        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {plan_state_obj.session_id}][/dim]")
+        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {session_id or plan_state_obj.conversation_id or 'new'}][/dim]")
     
     # Check if we have tools
     has_tools = bool(agent_def.get('tools') or toolkit_configs or filesystem_tools or terminal_tools or planning_tools)

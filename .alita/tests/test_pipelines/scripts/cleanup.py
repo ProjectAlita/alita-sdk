@@ -35,6 +35,15 @@ from typing import Any, Optional
 import requests
 import yaml
 
+# Force UTF-8 encoding for Windows compatibility
+import os
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 from seed_pipelines import (
     DEFAULT_BASE_URL,
     DEFAULT_PROJECT_ID,

@@ -26,6 +26,15 @@ import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 import sys
+import os
+
+# Force UTF-8 encoding for Windows compatibility
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
 
 import yaml
 
