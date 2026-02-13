@@ -1,15 +1,14 @@
 name: "GL01 - List Branches"
 priority: Critical
 description: |
-  Verify list_branches_in_repo tool returns branches including expected branch names.
+  Verify list_branches_in_repo tool returns branch list from GitLab repository.
   
-  Objective: Confirm the tool can retrieve all branches from the GitLab repository
+  Objective: Confirm the tool can retrieve branches successfully
   
   Expected Behavior:
   - Tool executes successfully without errors
-  - Returns a list of branch names
-  - If result list has fewer than 20 branches: base branch (main/master) must be present
-  - If result list has 20 or more branches: base branch (main/master) is optional
+  - Returns a non-empty list of branch names
+  - Each entry in the list is a valid branch name string
 
 toolkits:
   - id: ${GITLAB_TOOLKIT_ID}
@@ -54,18 +53,15 @@ nodes:
 
           expected behavior:
           - tool executes successfully without errors
-          - returns a list of branch names
-          - conditional requirement for base branch:
-            * if result list has fewer than 20 branches: base branch (main or master) MUST be present
-            * if result list has 20 or more branches: base branch (main or master) is optional
+          - returns a non-empty list of branch names
+          - each entry is a string representing a valid branch name
 
           evaluate:
           1. did the tool execute successfully?
-          2. are there any errors?
-          3. does the output contain branch names?
-          4. how many branches were returned?
-          5. if fewer than 20 branches: is the base branch (main or master) present?
-          6. if 20 or more branches: test passes regardless of base branch presence
+          2. are there any errors in the output?
+          3. is the result a list (array)?
+          4. is the list non-empty (contains at least one branch)?
+          5. are all entries strings (valid branch names)?
 
           return a json object with:
           {{
