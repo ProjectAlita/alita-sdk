@@ -74,6 +74,7 @@ from logger import TestLogger
 from utils_local import (
     IsolatedPipelineTestRunner,
     find_tests_in_suite,
+    configure_file_logging,
 )
 
 # Import setup utilities for local execution
@@ -154,13 +155,13 @@ def merge_hook_output(result: dict, output: dict, output_mapping: dict) -> dict:
 
 
 def invoke_hook_pipeline(
-    base_url: str,
-    project_id: int,
-    pipeline_id: int,
-    hook_input: dict,
-    headers: dict,
-    timeout: int = 120,
-    logger: Optional[TestLogger] = None
+        base_url: str,
+        project_id: int,
+        pipeline_id: int,
+        hook_input: dict,
+        headers: dict,
+        timeout: int = 120,
+        logger: Optional[TestLogger] = None
 ) -> dict:
     """Invoke a composable pipeline for a hook.
 
@@ -248,14 +249,14 @@ def invoke_hook_pipeline(
 
 
 def run_post_test_hooks(
-    base_url: str,
-    project_id: int,
-    result: dict,
-    hooks_config: list,
-    env_vars: dict,
-    headers: dict,
-    timeout: int = 120,
-    logger: Optional[TestLogger] = None
+        base_url: str,
+        project_id: int,
+        result: dict,
+        hooks_config: list,
+        env_vars: dict,
+        headers: dict,
+        timeout: int = 120,
+        logger: Optional[TestLogger] = None
 ) -> dict:
     """Run post-test hooks for a test result.
 
@@ -272,7 +273,7 @@ def run_post_test_hooks(
     Returns:
         Updated test result with hook outputs merged
     """
-    
+
     for hook in hooks_config:
         hook_name = hook.get("name", "unnamed")
         condition = hook.get("condition", "")
@@ -361,7 +362,7 @@ class SuiteResult:
 
     def to_summary(self, results_file: str = None) -> str:
         """Generate human-readable summary.
-        
+
         Args:
             results_file: Optional path to results.json file for reference in error messages
         """
@@ -369,7 +370,7 @@ class SuiteResult:
             f"\n{'=' * 60}",
             f"Suite: {self.suite_name}",
             f"{'=' * 60}",
-            f"Total: {self.total} | Passed: {self.passed} | Failed: {self.failed} | Errors: {self.errors}",
+            f"Total: {self.total} | Passed: {self.passed} | Failed: {self.failed} | Errors: {self.errors} | Skipped: {self.skipped}",
             f"Success Rate: {self.success_rate:.1f}%",
             f"Execution Time: {self.execution_time:.2f}s",
             f"{'=' * 60}",
@@ -408,11 +409,11 @@ class SuiteResult:
 
 
 def get_pipelines_from_folder(
-    base_url: str,
-    project_id: int,
-    folder_name: str,
-    headers: dict,
-    pipeline_file: str | None = None
+        base_url: str,
+        project_id: int,
+        folder_name: str,
+        headers: dict,
+        pipeline_file: str | None = None
 ) -> List[dict]:
     """Get pipelines that match the folder's test case names.
 
@@ -500,11 +501,11 @@ def get_pipelines_from_folder(
 
 
 def get_pipelines_by_pattern(
-    base_url: str,
-    project_id: int,
-    patterns: List[str],
-    headers: dict,
-    use_wildcards: bool = False
+        base_url: str,
+        project_id: int,
+        patterns: List[str],
+        headers: dict,
+        use_wildcards: bool = False
 ) -> List[dict]:
     """Get pipelines matching name patterns (substring match, case-insensitive, underscore/space agnostic)."""
     url = f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}?limit=500"
@@ -527,10 +528,10 @@ def get_pipelines_by_pattern(
 
 
 def get_pipelines_by_ids(
-    base_url: str,
-    project_id: int,
-    ids: List[int],
-    headers: dict
+        base_url: str,
+        project_id: int,
+        ids: List[int],
+        headers: dict
 ) -> List[dict]:
     """Get pipelines by their IDs."""
     pipelines = []
@@ -542,17 +543,17 @@ def get_pipelines_by_ids(
 
 
 def run_suite(
-    base_url: str,
-    project_id: int,
-    pipelines: List[dict],
-    suite_name: str,
-    input_message: str = "",
-    timeout: int = 120,
-    parallel: int = 1,
-    logger: Optional[TestLogger] = None,
-    config: dict = None,
-    env_vars: dict = None,
-    headers: dict = None,
+        base_url: str,
+        project_id: int,
+        pipelines: List[dict],
+        suite_name: str,
+        input_message: str = "",
+        timeout: int = 120,
+        parallel: int = 1,
+        logger: Optional[TestLogger] = None,
+        config: dict = None,
+        env_vars: dict = None,
+        headers: dict = None,
 ) -> SuiteResult:
     """Execute multiple pipelines and aggregate results.
 
@@ -605,7 +606,7 @@ def run_suite(
                     r_dict = result.to_dict()
                     r_dict['timestamp'] = datetime.now(timezone.utc).isoformat()
                     results.append(r_dict)
-                    
+
                     if logger and logger.verbose:
                         status = "PASS" if result.test_passed else "FAIL"
                         logger.info(f"[{status}] {result.pipeline_name}")
@@ -624,13 +625,13 @@ def run_suite(
         # Sequential execution
         for pipeline in pipelines:
             pipeline_name = pipeline.get('name', f"ID: {pipeline.get('id')}")
-            
+
             if logger:
                 logger.debug(f"Running: {pipeline_name}...")
             elif logger and not logger.quiet:
                 sys.stdout.write(f"▶ {pipeline_name}...\r")
                 sys.stdout.flush()
-            
+
             # 1. Execute Pipeline
             result = execute_one(pipeline)
 
@@ -638,7 +639,7 @@ def run_suite(
             result_dict = result.to_dict()
             result_dict['timestamp'] = datetime.now(timezone.utc).isoformat()
             rca_info = ""
-            
+
             if post_test_hooks:
                 result_dict = run_post_test_hooks(
                     base_url=base_url,
@@ -659,7 +660,7 @@ def run_suite(
                     # Or check for 'hook_results' if we added that (we didn't yet).
                     pass
 
-            results.append(result_dict) # Store dictionary with hook results
+            results.append(result_dict)  # Store dictionary with hook results
 
             # 3. Print Result
             if logger and logger.verbose:
@@ -669,27 +670,27 @@ def run_suite(
                 # Clear running line
                 sys.stdout.write("\033[2K\r")
                 sys.stdout.flush()
-                
+
                 if result.test_passed:
-                    status = "\033[92m✓\033[0m" # Green check
+                    status = "\033[92m✓\033[0m"  # Green check
                     print(f"{status} {pipeline.get('name')} ({result.execution_time:.1f}s)", flush=True)
                 else:
-                    status = "\033[91m✗\033[0m" # Red x
+                    status = "\033[91m✗\033[0m"  # Red x
                     print(f"{status} {pipeline.get('name')} ({result.execution_time:.1f}s)", flush=True)
-                    
+
                     # Print RCA info if available in result_dict
                     rca_summary = result_dict.get('rca_summary')
                     if rca_summary:
-                         print(f"    \033[33mRCA Analysis:\033[0m {rca_summary}", flush=True)
-                    
+                        print(f"    \033[33mRCA Analysis:\033[0m {rca_summary}", flush=True)
+
                     rca_details = result_dict.get('rca')
                     if rca_details and rca_details != rca_summary:
-                         # Print specific details if they exist and are different
-                         # Often 'rca' is the main text block
-                         lines = str(rca_details).split('\n')
-                         print(f"    \033[33mRCA Detail:\033[0m", flush=True)
-                         for line in lines:
-                             print(f"      {line}", flush=True)
+                        # Print specific details if they exist and are different
+                        # Often 'rca' is the main text block
+                        lines = str(rca_details).split('\n')
+                        print(f"    \033[33mRCA Detail:\033[0m", flush=True)
+                        for line in lines:
+                            print(f"      {line}", flush=True)
 
     # Aggregate results (results list now contains dicts for sequential, objects for parallel)
     for res in results:
@@ -697,10 +698,10 @@ def run_suite(
         if hasattr(res, 'to_dict'):
             r = res.to_dict()
         else:
-            r = res # Already a dict from sequential loop
+            r = res  # Already a dict from sequential loop
 
         # (Hooks already run for sequential, need to run for parallel if we supported it)
-        
+
         suite.results.append(r)
 
         if r.get('error'):
@@ -719,13 +720,13 @@ def run_suite(
 def validate_and_get_log_level(local_arg: Any) -> tuple:
     """
     Validate --local argument and extract log level.
-    
+
     Args:
         local_arg: Value from args.local (None, True, or string level)
-        
+
     Returns:
         (is_local: bool, log_level: str or None)
-        
+
     Examples:
         None -> (False, None)              # Not local mode
         True -> (True, 'error')            # Local mode, default log level
@@ -734,39 +735,39 @@ def validate_and_get_log_level(local_arg: Any) -> tuple:
     """
     if local_arg is None:
         return False, None
-    
+
     if local_arg is True:
         return True, 'error'  # Default to error level
-    
+
     # Must be a string log level
     valid_levels = {'debug', 'info', 'warning', 'error'}
     level = str(local_arg).lower()
-    
+
     if level not in valid_levels:
         raise ValueError(
             f"Invalid log level '{local_arg}'. "
             f"Must be one of: {', '.join(sorted(valid_levels))}"
         )
-    
+
     return True, level
 
 
 def run_suite_local(
-    suite_folder: Path,
-    config: dict,
-    test_files: List[Path],
-    suite_name: str = "Local",
-    input_message: str = "",
-    timeout: int = 120,
-    logger: Optional[TestLogger] = None,
-    sdk_log_level: str = 'error',
+        suite_folder: Path,
+        config: dict,
+        test_files: List[Path],
+        suite_name: str = "Local",
+        input_message: str = "",
+        timeout: int = 120,
+        logger: Optional[TestLogger] = None,
+        sdk_log_level: str = 'error',
 ) -> SuiteResult:
     """
     Run a suite of pipelines locally without backend.
-    
+
     Uses LocalSetupStrategy to execute setup steps locally, then runs
     test pipelines using IsolatedPipelineTestRunner.
-    
+
     Args:
         suite_folder: Path to suite folder
         config: Suite configuration dict
@@ -776,7 +777,7 @@ def run_suite_local(
         timeout: Execution timeout per pipeline
         logger: Optional TestLogger instance for logging
         sdk_log_level: Log level for alita_sdk loggers (debug, info, warning, error)
-        
+
     Returns:
         SuiteResult with aggregated results
     """
@@ -785,44 +786,55 @@ def run_suite_local(
         suite_name=suite_name,
         total=len(test_files),
     )
-    
+
+    # Configure file logging for DEBUG-level trace
+    # Log file goes to test_results/suites/<suite_name>/run.log
+    # Strip 'suites/' prefix from suite_name if present to avoid double path
+    log_suite_name = suite_name.replace('suites/', '', 1) if suite_name.startswith('suites/') else suite_name
+    log_file = f"test_results/suites/{log_suite_name}/run.log"
+    verbose_mode = logger.verbose if logger else False
+    configure_file_logging(log_file, sdk_log_level, verbose=verbose_mode)
+
+    if logger:
+        logger.debug(f"Configured DEBUG-level file logging to: {log_file}")
+
     # Create local setup strategy
     local_strategy = LocalSetupStrategy()
-    
+
     # Create a minimal SetupContext for local execution
     # No backend auth needed, but we need env_vars for substitution
-    # Pass logger so setup output routes to stderr in JSON mode
+    # Pass logger so setup output appears when verbose=True
     ctx = SetupContext(
         base_url="local://",  # Placeholder, not used in local mode
-        project_id=0,         # Placeholder, not used in local mode
-        bearer_token="",      # Not needed for local
+        project_id=0,  # Placeholder, not used in local mode
+        bearer_token="",  # Not needed for local
         verbose=logger.verbose if logger else False,
         dry_run=False,
         logger=logger,  # Pass logger for proper output routing
     )
-    
+
     # Execute setup steps using local strategy
-    # Logger automatically routes output to stderr in JSON mode (quiet=True)
+    # Logger will route output based on verbose flag (verbose=True shows progress)
     if logger:
         logger.section("Executing local setup...")
-    
+
     setup_result = execute_setup(
         config=config,
         ctx=ctx,
         base_path=suite_folder,
         strategy=local_strategy,
     )
-    
+
     if not setup_result.get("success"):
         if logger:
             logger.error(f"Local setup failed: {setup_result}")
         suite.errors = 1
         suite.execution_time = time.time() - start_time
         return suite
-    
+
     # Get env_vars from setup (includes toolkit IDs, names, etc.)
     env_vars = setup_result.get("env_vars", {})
-    
+
     # Merge and resolve execution.substitutions from pipeline config into env_vars
     # Substitutions can reference setup variables, .env variables, or have defaults
     execution_config = config.get("execution", {})
@@ -836,44 +848,44 @@ def run_suite_local(
                 env_vars[key] = resolved
             else:
                 env_vars[key] = value
-    
+
     # Get tools created by local strategy
     tools = local_strategy.get_tools()
-    
+
     if logger:
         logger.info(f"Setup completed. Env vars: {list(env_vars.keys())}")
         logger.info(f"Created {len(tools)} toolkit tools")
-    
+
     if not tools:
         if logger:
             logger.warning("No toolkit tools were created during setup")
-    
+
     # Create runner with pre-created tools from strategy
-    # In JSON mode (quiet), disable verbose to prevent LangGraph debug output from polluting stdout
+    # Pass verbose flag directly from logger (controlled by -v flag)
     runner = IsolatedPipelineTestRunner(
         tools=tools,  # Pass pre-created tools from strategy
         env_vars=env_vars,  # Pass setup env_vars for substitution
-        verbose=logger.verbose if logger and not logger.quiet else False,
+        verbose=logger.verbose if logger else False,
         sdk_log_level=sdk_log_level,  # Control alita_sdk logging verbosity
     )
-    
+
     # Run all tests
     for test_file in test_files:
         if logger:
             logger.separator()
             logger.info(f"Running: {test_file.name}")
             logger.separator()
-        
+
         result = runner.run_test(
             test_yaml_path=str(test_file),
             input_message=input_message or 'execute',
             timeout=timeout,
             dry_run=False,
         )
-        
+
         # Use PipelineResult.to_dict() directly
         suite.results.append(result.to_dict())
-        
+
         # Update counters
         if result.error or not result.success:
             suite.errors += 1
@@ -888,16 +900,17 @@ def run_suite_local(
             if logger:
                 logger.success("TEST PASSED")
         else:
-            # success=True but test_passed=None means execution succeeded, treat as passed
-            suite.passed += 1
+            # success=True but test_passed=None means result cannot be evaluated, mark as skipped
+            suite.skipped += 1
             if logger:
-                logger.success("TEST PASSED")
-        
+                logger.info("TEST SKIPPED (result indeterminate)")
+
         if logger and result.execution_time > 0:
             logger.info(f"Execution time: {result.execution_time:.2f}s")
-    
+
     suite.execution_time = time.time() - start_time
     return suite
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -911,10 +924,10 @@ def main():
     parser.add_argument("--base-url", default=None, help="Base URL (default: from env)")
     parser.add_argument("--project-id", type=int, default=None, help="Project ID (default: from env)")
     parser.add_argument("--input", "-i", type=str, default="", help="Input message for pipelines")
-    parser.add_argument("--timeout", "-t", type=int, default=None, help="Execution timeout per pipeline (default: from config or 120)")
+    parser.add_argument("--timeout", "-t", type=int, default=None,
+                        help="Execution timeout per pipeline (default: from config or 120)")
     parser.add_argument("--parallel", type=int, default=1, help="Number of parallel executions")
-    parser.add_argument("--json", "-j", action="store_true", help="Output JSON format")
-    parser.add_argument("--output-json", help="Save JSON results to file (can be used with or without --json)")
+    parser.add_argument("--output-json", help="Save JSON results to file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
     parser.add_argument("--exit-code", "-e", action="store_true",
@@ -953,7 +966,7 @@ def main():
     pipelines = []  # For remote mode
     test_files = []  # For local mode
     pattern = args.pattern[0] if args.pattern else "*"
-    
+
     # Remote mode variables (initialized here to avoid warnings)
     base_url = None
     project_id = None
@@ -963,23 +976,17 @@ def main():
         folder_name, pipeline_file = parse_suite_spec(args.folder)
         suite_name = args.folder
         folder_path = Path(__file__).parent.parent / folder_name
-        
+
         if not folder_path.exists():
             error_msg = f"Suite folder not found: {folder_path}"
-            if args.json:
-                print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
-            else:
-                print(f"Error: {error_msg}")
+            print(f"Error: {error_msg}", file=sys.stderr)
             sys.exit(1)
-        
+
         # Load config
         config = load_config(folder_path, pipeline_file)
         if not config:
             error_msg = f"Config not found in {folder_path}"
-            if args.json:
-                print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
-            else:
-                print(f"Error: {error_msg}")
+            print(f"Error: {error_msg}", file=sys.stderr)
             sys.exit(1)
 
     # ========================================
@@ -987,24 +994,22 @@ def main():
     # ========================================
     # Validate and extract log level from --local argument
     is_local, sdk_log_level = validate_and_get_log_level(args.local)
-    
+
     if is_local:
         # LOCAL: Get test files from folder (stored as pipelines for unified handling)
         if not args.folder:
             parser.error("--local mode requires a folder argument")
-        
+
         pipelines = find_tests_in_suite(folder_path, pattern, config)
     else:
         # REMOTE: Get pipelines from folder and match with backend
-        base_url = args.base_url or load_from_env("BASE_URL") or load_from_env("DEPLOYMENT_URL") or "http://192.168.68.115"
+        base_url = args.base_url or load_from_env("BASE_URL") or load_from_env(
+            "DEPLOYMENT_URL") or "http://192.168.68.115"
         project_id = args.project_id or int(load_from_env("PROJECT_ID") or "2")
         headers = get_auth_headers()
 
         if not headers:
-            if args.json:
-                print(json.dumps({"success": False, "error": "No authentication token found"}))
-            else:
-                print("Error: No authentication token found in environment")
+            print("Error: No authentication token found in environment", file=sys.stderr)
             sys.exit(1)
 
         if args.folder:
@@ -1095,10 +1100,7 @@ def main():
     # ========================================
     if not pipelines:
         error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
-        if args.json:
-            print(json.dumps({"success": False, "error": error_msg, "total": 0, "passed": 0, "failed": 0}))
-        else:
-            print(f"Error: {error_msg}")
+        print(f"Error: {error_msg}", file=sys.stderr)
         sys.exit(1)
 
     # Determine effective timeout: CLI arg > config value > default 120
@@ -1109,11 +1111,12 @@ def main():
         # Validate: must be a positive integer (not None, not blank, not zero/negative)
         if raw_timeout is not None and isinstance(raw_timeout, int) and raw_timeout > 0:
             config_timeout = raw_timeout
-    
+
     effective_timeout = args.timeout if args.timeout is not None else config_timeout
-    
+
     # Create logger instance
-    logger = TestLogger(verbose=args.verbose, quiet=args.json) if args.verbose or not args.json else None
+    # Always create logger when verbose is True, otherwise None (no console output)
+    logger = TestLogger(verbose=args.verbose) if args.verbose else None
 
     if logger:
         logger.info(f"Found {len(pipelines)} pipeline(s) to execute")
@@ -1150,18 +1153,17 @@ def main():
         )
 
     # Output results
+    # Save JSON results to file if --output-json specified
     if args.output_json:
         output_path = Path(args.output_json)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, "w") as f:
             f.write(result.to_json())
 
-    if args.json:
-        print(result.to_json())
-    else:
-        # Pass absolute path to results file for clearer error messages
-        results_file_abs = str(Path(args.output_json).resolve()) if args.output_json else None
-        print(result.to_summary(results_file=results_file_abs))
+    # Always print summary to console (unless verbose mode already showed details)
+    # Pass absolute path to results file for clearer error messages
+    results_file_abs = str(Path(args.output_json).resolve()) if args.output_json else None
+    print(result.to_summary(results_file=results_file_abs))
 
     # Exit code
     if args.exit_code:
