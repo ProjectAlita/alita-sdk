@@ -1,6 +1,6 @@
 ---
 name: test-fixer
-model: "gpt-5"
+model: "gpt-5.2"
 temperature: 0.3
 toolkit_configs: 
   - file: .alita/tool_configs/git-config.json
@@ -137,17 +137,17 @@ Large test result files (especially results.json with many tests) can exceed con
 
 *Option 1: Read in chunks (RECOMMENDED for results.json)*
 ```
-# Read first 500 lines to get test IDs and error patterns
-filesystem_read_file(".alita/tests/test_pipelines/test_results/suites/<suite>/results.json", head=500)
+# Read first 100 lines to get test IDs and error patterns
+filesystem_read_file(".alita/tests/test_pipelines/test_results/suites/<suite>/results.json", head=100)
 
 # If needed, read more chunks:
-filesystem_read_file_chunk(path="...", start_line=501, end_line=1000)
+filesystem_read_file_chunk(path="...", start_line=101, end_line=200)
 ```
 
 *Option 2: Read from tail*
 ```
-# Read last 1000 lines (contains most recent test results)
-filesystem_read_file(".alita/tests/test_pipelines/test_results/suites/<suite>/results.json", tail=1000)
+# Read last 50 lines (contains most recent test results)
+filesystem_read_file(".alita/tests/test_pipelines/test_results/suites/<suite>/results.json", tail=50)
 ```
 
 *Option 3: Process logs instead*
