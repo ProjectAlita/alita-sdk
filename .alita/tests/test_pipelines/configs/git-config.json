@@ -36,7 +36,6 @@
       "get_workflow_status",
       "get_workflow_logs",
       "generic_github_api_call",
-      "read_file_chunk",
       "read_multiple_files",
       "edit_file",
       "create_issue_on_project",
