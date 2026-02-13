@@ -71,6 +71,7 @@ nodes:
       - add_attachment_result
       - invalid_step_id
       - unexpected_success_indicators
+      - expected_error_indicators
     input_mapping:
       chat_history:
         type: fixed
@@ -83,35 +84,41 @@ nodes:
         value: |
           Analyze the result from executing 'add_attachment_to_test_step' with an invalid step_id.
           
-          CONTEXT - How continue_on_error works:
-          - The Xray tool raises a ToolException for invalid step_id format
-          - With continue_on_error=true, the exception is caught and execution continues
-          - The output variable receives NO VALUE (empty/None) when exception occurs
-          - For this NEGATIVE test, empty output = CORRECT error handling
+          CRITICAL REQUIREMENT:
+          This is a NEGATIVE test - we expect a proper error message, NOT empty/null output.
+          Empty or null error messages indicate BROKEN error handling and should FAIL the test.
           
           Add Attachment Result: {add_attachment_result}
           Invalid Step ID Used: {invalid_step_id}
+          Expected Error Indicators: {expected_error_indicators}
           Unexpected Success Indicators: {unexpected_success_indicators}
 
           VALIDATION LOGIC:
-          This negative test PASSES if the tool correctly rejected the invalid step_id.
-          Evidence of correct rejection: Output is empty/None/minimal (no attachment was added).
+          This negative test PASSES only if the tool returns a proper error message.
 
           Validation Criteria (ALL must pass for test_passed=true):
           1. tool_executed: Always true (we reached this validation node)
-          2. error_handled: Result is empty, None, or very short (< 20 characters)
-          3. no_attachment_added: Result does NOT contain "Successfully added attachment", "File size"
-          4. no_success_indicators: Result does NOT contain any success field indicators from the list
+          2. has_error_message: Result is NOT empty/null/None (length > 10 characters)
+          3. error_message_meaningful: Result contains at least one expected error indicator
+          4. no_attachment_added: Result does NOT contain "Successfully added attachment", "File size"
+          5. no_success_indicators: Result does NOT contain any success field indicators from the list
+
+          FAILURE CONDITIONS:
+          - If result is empty, null, or < 10 characters: has_error_message = false, TEST FAILS
+          - If result does not contain any expected error indicators: error_message_meaningful = false, TEST FAILS
+          - If result contains success indicators: TEST FAILS
 
           Return JSON test_results:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
             "tool_executed": true,
-            "error_handled": boolean (true if result is empty/None/short),
+            "has_error_message": boolean (true if result is non-empty with length > 10),
+            "error_message_meaningful": boolean (true if contains expected error indicators),
             "no_attachment_added": boolean (true if no success messages found),
             "no_success_indicators": boolean (true if no success indicators found),
             "result_length": number (character count of result),
-            "result_preview": "first 100 chars of result or 'empty'"
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "result_preview": "first 150 chars of result or 'EMPTY/NULL - ERROR HANDLING BROKEN'"
           }}
 
           Return ONLY the JSON object.

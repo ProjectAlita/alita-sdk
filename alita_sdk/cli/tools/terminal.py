@@ -212,8 +212,10 @@ Use the 'directory' parameter to run commands in a specific allowed directory wh
                 cwd=target_dir,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',  # Replace undecodable bytes instead of crashing
                 timeout=timeout,
-                env={**os.environ, "PWD": target_dir}
+                env={**os.environ, "PWD": target_dir, "PYTHONIOENCODING": "utf-8"}
             )
             
             output_parts = []

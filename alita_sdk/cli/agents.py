@@ -394,7 +394,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
         def plan_callback(state: PlanState):
             plan_state['title'] = state.title
             plan_state['steps'] = state.to_dict()['steps']
-            plan_state['session_id'] = state.session_id
+            plan_state['session_id'] = state.conversation_id  # Fixed: PlanState uses conversation_id, not session_id
         
         # Get session_id from plan_state dict if provided
         session_id = plan_state.get('session_id')
@@ -403,7 +403,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             plan_callback=plan_callback,
             session_id=session_id
         )
-        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {plan_state_obj.session_id}][/dim]")
+        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {session_id or plan_state_obj.conversation_id or 'new'}][/dim]")
     
     # Check if we have tools
     has_tools = bool(agent_def.get('tools') or toolkit_configs or filesystem_tools or terminal_tools or planning_tools)
@@ -1191,6 +1191,12 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         # Get model and temperature for welcome banner
         llm_model_display = current_model or agent_def.get('model', default_model)
         llm_temperature_display = current_temperature if current_temperature is not None else agent_def.get('temperature', default_temperature)
+        
+        # Honor agent definition's step_limit if recursion_limit not explicitly set via CLI
+        # CLI default is 50, but agent can override (e.g., test-fixer uses 50, others may use 25)
+        if recursion_limit == 50 and 'step_limit' in agent_def:
+            # User didn't explicitly set --recursion-limit, use agent's preference
+            recursion_limit = agent_def.get('step_limit', 50)
         
         # Print nice welcome banner
         print_welcome(agent_name, llm_model_display, llm_temperature_display, approval_mode)
@@ -2597,7 +2603,7 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
 
 @agent.command('run')
 @click.argument('agent_source')
-@click.argument('message')
+@click.option('--message', type=str, help='Input message to send to the agent', default="Go")
 @click.option('--version', help='Agent version (for platform agents)')
 @click.option('--toolkit-config', multiple=True, type=click.Path(exists=True),
               help='Toolkit configuration files')

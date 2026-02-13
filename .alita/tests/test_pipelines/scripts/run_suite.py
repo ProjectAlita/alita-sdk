@@ -50,6 +50,14 @@ from pattern_matcher import matches_any_pattern
 import requests
 import yaml
 
+# Force UTF-8 encoding for Windows compatibility
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 # Import from run_pipeline module
 from run_pipeline import (
     get_auth_headers,
@@ -812,6 +820,14 @@ def run_suite_local(
         dry_run=False,
         logger=logger,  # Pass logger for proper output routing
     )
+
+    # Load env_mapping values before setup
+    if config:
+        for key, value in config.get("env_mapping", {}).items():
+            resolved_value = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
+            ctx.env_vars[key] = resolved_value
+            if logger:
+                logger.debug(f"Loaded env_mapping: {key}={resolved_value}")
 
     # Execute setup steps using local strategy
     # Logger will route output based on verbose flag (verbose=True shows progress)

@@ -38,6 +38,14 @@ from typing import Any, Optional
 import requests
 import yaml
 
+# Force UTF-8 encoding for Windows compatibility
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 from seed_pipelines import (
     DEFAULT_BASE_URL,
     DEFAULT_PROJECT_ID,
@@ -873,6 +881,14 @@ def run(
         dry_run=dry_run,
         logger=logger,
     )
+    
+    # Load env_mapping values before setup
+    if config:
+        for key, value in config.get("env_mapping", {}).items():
+            resolved_value = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
+            ctx.env_vars[key] = resolved_value
+            if verbose or dry_run:
+                logger.debug(f"Loaded env_mapping: {key}={resolved_value}")
     
     logger.section(f"Setup: {config.get('name', folder)}")
     logger.info(f"Target: {base_url} (Project: {project_id})")

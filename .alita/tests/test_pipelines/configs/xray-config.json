@@ -6,10 +6,7 @@
     "alita_title": "xray_cloud",
     "private": true
   },
-  "base_url": "${XRAY_BASE_URL}",
-  "client_id": "${XRAY_CLIENT_ID}",
-  "client_secret": "${XRAY_CLIENT_SECRET}",
-  "elected_tools": [
+  "selected_tools": [
     "get_tests",
     "create_test",
     "create_tests",

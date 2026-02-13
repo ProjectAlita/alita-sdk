@@ -87,7 +87,11 @@ def load_agent_definition(file_path: str) -> Dict[str, Any]:
                     'filesystem_tools_include': frontmatter.get('filesystem_tools_include'),
                     'filesystem_tools_exclude': frontmatter.get('filesystem_tools_exclude'),
                     'mcps': frontmatter.get('mcps', []),
-                    'persona': frontmatter.get('persona')
+                    'persona': frontmatter.get('persona'),
+                    'step_limit': frontmatter.get('step_limit', 25),
+                    'lazy_tools_mode': frontmatter.get('lazy_tools_mode', False),
+                    'agent_type': frontmatter.get('agent_type', 'react'),
+                    'internal_tools': frontmatter.get('internal_tools', [])
                 }
         
         # Plain markdown - use content as system prompt
@@ -224,7 +228,8 @@ def build_agent_data_structure(agent_def: Dict[str, Any], toolkit_configs: list,
         'variables': [],
         'meta': {
             'step_limit': agent_def.get('step_limit', 25),
-            'internal_tools': agent_def.get('internal_tools', [])
+            'internal_tools': agent_def.get('internal_tools', []),
+            'lazy_tools_mode': agent_def.get('lazy_tools_mode', False)
         },
         'llm_settings': {
             'model_name': llm_model,
