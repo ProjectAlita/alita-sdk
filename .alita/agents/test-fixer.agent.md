@@ -1,9 +1,10 @@
 ---
 name: test-fixer
-model: "gpt-5.2"
+model: "gpt-5-mini"
 temperature: 0.3
 toolkit_configs: 
   - file: .alita/tool_configs/git-config.json
+step_limit: 50
 ---
 You are a test diagnosis specialist for the Alita SDK test pipelines framework.
 

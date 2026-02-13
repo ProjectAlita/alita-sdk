@@ -1192,6 +1192,12 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         llm_model_display = current_model or agent_def.get('model', default_model)
         llm_temperature_display = current_temperature if current_temperature is not None else agent_def.get('temperature', default_temperature)
         
+        # Honor agent definition's step_limit if recursion_limit not explicitly set via CLI
+        # CLI default is 50, but agent can override (e.g., test-fixer uses 50, others may use 25)
+        if recursion_limit == 50 and 'step_limit' in agent_def:
+            # User didn't explicitly set --recursion-limit, use agent's preference
+            recursion_limit = agent_def.get('step_limit', 50)
+        
         # Print nice welcome banner
         print_welcome(agent_name, llm_model_display, llm_temperature_display, approval_mode)
         

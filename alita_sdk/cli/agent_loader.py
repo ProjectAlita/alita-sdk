@@ -87,7 +87,8 @@ def load_agent_definition(file_path: str) -> Dict[str, Any]:
                     'filesystem_tools_include': frontmatter.get('filesystem_tools_include'),
                     'filesystem_tools_exclude': frontmatter.get('filesystem_tools_exclude'),
                     'mcps': frontmatter.get('mcps', []),
-                    'persona': frontmatter.get('persona')
+                    'persona': frontmatter.get('persona'),
+                    'step_limit': frontmatter.get('step_limit', 25)
                 }
         
         # Plain markdown - use content as system prompt
