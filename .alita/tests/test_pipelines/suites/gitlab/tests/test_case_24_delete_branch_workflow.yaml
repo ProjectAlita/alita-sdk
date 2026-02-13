@@ -1,0 +1,240 @@
+name: "GL24 - Delete Branch Workflow"
+priority: Critical
+description: |
+  Verify delete_branch tool behavior with and without force flag.
+  
+  Objective: Test branch deletion workflow with force flag requirement
+  
+  Expected Behavior:
+  - Create test branch successfully
+  - Delete without force flag returns proper error
+  - Branch still exists after failed delete
+  - Delete with force flag succeeds
+  - Branch no longer exists after forced delete
+
+toolkits:
+  - id: ${GITLAB_TOOLKIT_ID}
+    name: ${GITLAB_TOOLKIT_NAME}
+
+state:
+  test_branch_name:
+    type: str
+  branch_wildcard:
+    type: str
+  create_result:
+    type: dict
+  delete_without_force_result:
+    type: dict
+  list_after_failed_delete_result:
+    type: dict
+  delete_with_force_result:
+    type: dict
+  list_after_success_delete_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    description: "Generate unique branch name with timestamp and random suffix"
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        
+        # Generate unique branch name
+        test_branch_name = f"gl24-delete-test-{timestamp}-{random_suffix}"
+        
+        # Wildcard pattern to find this specific test branch
+        branch_wildcard = f"gl24-delete-test-{timestamp}*"
+        
+        {"test_branch_name": test_branch_name, "branch_wildcard": branch_wildcard}
+    output:
+      - test_branch_name
+      - branch_wildcard
+    structured_output: true
+    transition: create_test_branch
+
+  - id: create_test_branch
+    type: toolkit
+    description: "Create test branch for deletion"
+    tool: create_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - create_result
+    structured_output: true
+    transition: delete_without_force
+
+  - id: delete_without_force
+    type: toolkit
+    description: "Attempt to delete branch without force flag (should fail)"
+    continue_on_error: true
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+      force:
+        type: fixed
+        value: false
+    output:
+      - delete_without_force_result
+    structured_output: true
+    transition: list_branches_after_failed_delete
+
+  - id: list_branches_after_failed_delete
+    type: toolkit
+    description: "Verify branch still exists after failed delete"
+    tool: list_branches_in_repo
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch_wildcard
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_wildcard
+    output:
+      - list_after_failed_delete_result
+    structured_output: true
+    transition: delete_with_force
+
+  - id: delete_with_force
+    type: toolkit
+    description: "Delete branch with force flag (should succeed)"
+    tool: delete_branch
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+      force:
+        type: fixed
+        value: true
+    output:
+      - delete_with_force_result
+    structured_output: true
+    transition: wait_for_propagation
+
+  - id: wait_for_propagation
+    type: code
+    description: "Wait for branch deletion to propagate through GitLab API"
+    code:
+      type: fixed
+      value: |
+        import time
+        # Wait for eventual consistency - GitLab API may need time to propagate delete
+        time.sleep(2)
+    output: []
+    structured_output: false
+    transition: list_branches_after_success_delete
+
+  - id: list_branches_after_success_delete
+    type: toolkit
+    description: "Verify branch no longer exists after forced delete"
+    tool: list_branches_in_repo
+    toolkit_name: ${GITLAB_TOOLKIT_NAME}
+    input:
+      - branch_wildcard
+    input_mapping:
+      branch_wildcard:
+        type: variable
+        value: branch_wildcard
+    output:
+      - list_after_success_delete_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    description: "Validate delete_branch workflow"
+    model: gpt-4o-2024-11-20
+    input:
+      - test_branch_name
+      - create_result
+      - delete_without_force_result
+      - list_after_failed_delete_result
+      - delete_with_force_result
+      - list_after_success_delete_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the delete_branch workflow test results.
+
+          Test Branch Name: {test_branch_name}
+          
+          Step 1 - Create Branch:
+          {create_result}
+          
+          Step 2 - Delete Without Force (should fail with error):
+          {delete_without_force_result}
+          
+          Step 3 - List Branches After Failed Delete:
+          {list_after_failed_delete_result}
+          
+          Step 4 - Delete With Force (should succeed):
+          {delete_with_force_result}
+          
+          Step 5 - List Branches After Successful Delete:
+          {list_after_success_delete_result}
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branch_created: Test branch was created successfully in step 1
+          2. delete_without_force_failed: Step 2 returned an error (proper error handling for missing force flag)
+          3. error_message_appropriate: Error message indicates force flag is required or branch cannot be deleted
+          4. branch_exists_after_failed_delete: Branch name appears in step 3 list results
+          5. delete_with_force_succeeded: Step 4 completed successfully without errors
+          6. branch_not_exists_after_success_delete: Branch name does NOT appear in step 5 list results
+
+          Expected error patterns for step 2 (delete without force):
+          - "force" or "protected" mentioned in error
+          - "cannot delete" or "deletion failed"
+          - http error codes 400, 403, or 405
+
+          Evaluate each criterion carefully and provide detailed reasoning.
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branch_created": boolean,
+            "delete_without_force_failed": boolean,
+            "error_message_appropriate": boolean,
+            "branch_exists_after_failed_delete": boolean,
+            "delete_with_force_succeeded": boolean,
+            "branch_not_exists_after_success_delete": boolean,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
