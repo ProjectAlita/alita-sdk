@@ -49,6 +49,10 @@ def deduplicate_tool_names(tools: list, context: str = "") -> int:
     The suffixes are stripped at execution time by BaseAction._run() using
     re.sub(r'_\\d+$', '', name) to route to the correct api_wrapper method.
 
+    A 'is_duplicate' flag is added to tool.metadata for frontend display purposes,
+    allowing the UI to distinguish between duplicate tool suffixes (e.g. 'index_data_1')
+    and legitimate user-chosen names (e.g. 'Agent_123').
+
     Args:
         tools: List of tool objects with 'name' attribute. Modified in place.
         context: Optional label for log messages (e.g. "lazy-auto-disable", "swarm").
@@ -67,6 +71,12 @@ def deduplicate_tool_names(tools: list, context: str = "") -> int:
                 tool_name_counts[base_name] += 1
                 new_name = f"{base_name}_{tool_name_counts[base_name]}"
                 tool.name = new_name
+
+                # Mark as duplicate for frontend display
+                if not hasattr(tool, 'metadata'):
+                    tool.metadata = {}
+                tool.metadata['is_duplicate'] = True
+
                 renamed_count += 1
                 logger.info(f"{prefix}Tool name collision: '{base_name}' -> '{new_name}'")
             else:
