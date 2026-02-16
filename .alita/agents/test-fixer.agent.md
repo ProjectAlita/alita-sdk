@@ -396,14 +396,12 @@ Test Failure
    - Ensure ONLY test YAML files and/or framework scripts are modified
    - If unexpected files modified (e.g., SDK source code) → ABORT commit
 
-#### B. Commit Fixes
+#### B. Commit & Push Fixes via GitHub API
 **Only if all safety checks pass:**
 
-1. **Stage modified files:**
-   ```bash
-   bash -c "git add .alita/tests/test_pipelines/suites/<suite>/tests/*.yaml"
-   bash -c "git add .alita/tests/test_pipelines/scripts/*.py"  # Only if framework fixed
-   ```
+1. **Extract repository info:**
+   - Repository is already configured in toolkit: `ProjectAlita/alita-sdk`
+   - Branch to commit to: `<branch_name>`
 
 2. **Create descriptive commit message:**
    - Format: `fix(tests): [<suite>] Fix <count> failing tests - <test_ids>`
@@ -412,22 +410,82 @@ Test Failure
      - `fix(tests): [ado] Fix assertion timeout in ADO17`
    - Include brief summary of changes from milestone
 
-3. **Commit:**
-   ```bash
-   bash -c "git commit -m '<commit_message>'"
+3. **Set active branch to target branch:**
    ```
+   set_active_branch(branch_name="<branch_name>")
+   ```
+   - Do NOT provide `repo_name` parameter (uses default repository)
 
-4. **Record commit to milestone:**
+4. **Get list of modified files:**
+   - Use git tool: `bash -c "git diff --name-only HEAD"`
+   - This shows all files with uncommitted changes
+   - Filter for only test YAML files and framework scripts
+
+5. **Push each modified file using GitHub tools:**
+   
+   **For EXISTING files (modifications):**
+   - Read modified file content from filesystem:
+     ```
+     filesystem_read_file(path=".alita/tests/test_pipelines/suites/<suite>/tests/<file>.yaml")
+     ```
+   - Read original file content from GitHub (before your changes):
+     ```
+     read_file(file_path=".alita/tests/test_pipelines/suites/<suite>/tests/<file>.yaml")
+     ```
+     - This reads from the active branch set in step 3
+     - Do NOT provide `branch` or `repo_name` parameters
+   - Compare local vs GitHub content to create OLD/NEW blocks
+   - Use `update_file` tool with OLD/NEW markers:
+     ```
+     update_file(
+       file_query=""".alita/tests/test_pipelines/suites/<suite>/tests/<file>.yaml
+     OLD <<<<
+     <original_file_content_from_github>
+     >>>> OLD
+     NEW <<<<
+     <modified_file_content_from_filesystem>
+     >>>> NEW""",
+       commit_message="<commit_message>"
+     )
+     ```
+   - Important: file_query MUST start with file path on first line, followed by OLD/NEW blocks
+   - Important: Use COMPLETE file content in OLD/NEW blocks, not just changed sections
+   - Do NOT provide `repo_name` parameter
+   
+   **For NEW files (not in GitHub yet):**
+   - Read file content from filesystem using `filesystem_read_file`
+   - Use `create_file` tool:
+     ```
+     create_file(
+       file_path=".alita/tests/test_pipelines/suites/<suite>/tests/<file>.yaml",
+       file_contents="<file_content>"
+     )
+     ```
+   - Do NOT provide `repo_name` or `filepath` parameters
+   
+   - Repeat for all modified test YAMLs and framework scripts
+
+6. **Find PR for target branch (if fixes committed):**
+   - Use `list_open_pull_requests` tool (no parameters for default repo):
+     ```
+     list_open_pull_requests()
+     ```
+   - Returns list of PRs with structure: `[{number, title, head, base, ...}]`
+   - Filter results to find PR where `head` == `TARGET_BRANCH`
+   - Record PR number to `commit_info` (or null if not found)
+
+7. **Record commit to milestone:**
    - Add `commit_info` section with:
-     - `commit_hash`: Git SHA from commit
+     - `method`: "github_api"
      - `commit_message`: Full commit message
-     - `branch`: `CI_TARGET_BRANCH` value
-     - `files_committed`: List of files committed
+     - `branch`: `TARGET_BRANCH` value
+     - `files_committed`: List of file paths committed
+     - `repository`: "ProjectAlita/alita-sdk"
+     - `pushed`: true (always true with GitHub API)
+     - `pr_number`: PR number from step 6 (or null if not found)
      - `timestamp`: Commit timestamp
 
-5. **Do NOT push:**
-   - CI will handle pushing after review
-   - Agent only commits locally
+**Note:** PR labeling is handled by GitHub Actions workflow, not by the agent.
 
 #### C. Error Handling
 - If commit fails → Log error to milestone, proceed to Step 8
@@ -573,6 +631,7 @@ Test Failure
       ".alita/tests/test_pipelines/suites/xray/tests/test_case_10_invalid_step_id.yaml",
       ".alita/tests/test_pipelines/suites/xray/tests/test_case_11.yaml"
     ],
+    "pr_number": 123,
     "timestamp": "2026-02-13T16:05:00Z"
   },
   "summary": {
@@ -612,6 +671,7 @@ Test Failure
     "branch": "feature/test-improvements",
     "commit_hash": "a1b2c3d4e5f6",
     "files_count": 3,
+    "pr_number": null,
     "skip_reason": "CI_TARGET_BRANCH not set"
   }
 }

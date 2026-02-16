@@ -273,6 +273,37 @@ jobs:
           # Remove the fixer container after copying files
           docker rm alita-sdk-fixer || true
 
+      - name: Label PR with tests_ai_healed
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
+        run: |
+          if [ ! -f ./fix_output.json ]; then
+            echo "No fix_output.json found, skipping PR labeling"
+            exit 0
+          fi
+          
+          # Check if fixes were committed
+          COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+          if [ "$COMMITTED" != "true" ]; then
+            echo "No fixes committed, skipping PR labeling"
+            exit 0
+          fi
+          
+          # Get PR number from fix_output.json
+          PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+          if [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR found for branch, skipping labeling"
+            exit 0
+          fi
+          
+          echo "Adding 'tests_ai_healed' label to PR #$PR_NUMBER"
+          
+          # Add label to PR
+          gh pr edit "$PR_NUMBER" \
+            --add-label tests_ai_healed \
+            --repo ${{ github.repository }} || echo "Failed to add label, continuing..."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Post AI Analysis Summary to GitHub
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
@@ -313,14 +344,14 @@ jobs:
               if [ "$FIXED_COUNT" -gt 0 ]; then
                 echo "### ✅ Fixed Tests"
                 echo ""
-                jq -r '.fixed[]? | "- **\(.test_name)**\n  - Root Cause: \(.root_cause // "N/A")\n  - Fix Applied: \(.fix_description // "N/A")\n"' ./fix_output.json
+                jq -r '.fixed[]? | "- **\(.test_ids | join(", "))**\n  - Root Cause: \(.issue // "N/A")\n  - Fix Applied: \(.fix // "N/A")\n"' ./fix_output.json
               fi
               
               # Show blocked tests details
               if [ "$BLOCKED_COUNT" -gt 0 ]; then
                 echo "### ❌ Blocked Tests"
                 echo ""
-                jq -r '.blocked[]? | "- **\(.test_name)**\n  - Issue: \(.issue // "N/A")\n  - Recommendation: \(.recommendation // "N/A")\n  - Bug Report Needed: \(.bug_report_needed // false)\n"' ./fix_output.json
+                jq -r '.blocked[]? | "- **\(.test_ids | join(", "))**\n  - Issue: \(.issue // "N/A")\n  - Recommendation: \(.recommendation // "N/A")\n  - Bug Report Needed: \(.bug_report_needed // false)\n"' ./fix_output.json
               fi
               
               # Add milestone summary if available
@@ -337,6 +368,35 @@ jobs:
                 if [ "$NEXT_STEPS" != "[]" ]; then
                   echo "**Next Steps:**"
                   jq -r '.next_steps[]? | "- \(.)"' ./fix_milestone.json
+                fi
+              fi
+              
+              # Add commit information if fixes were committed
+              COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+              if [ "$COMMITTED" = "true" ]; then
+                echo ""
+                echo "### 🔧 Commits & Push"
+                echo ""
+                COMMIT_MSG=$(jq -r '.commit_details.commit_message // "N/A"' ./fix_output.json)
+                BRANCH=$(jq -r '.commit_details.branch // "N/A"' ./fix_output.json)
+                FILES_COUNT=$(jq -r '.commit_details.files_count // 0' ./fix_output.json)
+                PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+                
+                echo "✅ **Fixes committed and pushed to GitHub**"
+                echo ""
+                echo "- **Branch:** \`$BRANCH\`"
+                echo "- **Files updated:** $FILES_COUNT"
+                echo "- **Commit message:** $COMMIT_MSG"
+                echo "- **Method:** GitHub API (direct push)"
+                
+                # Add PR info if found
+                if [ "$PR_NUMBER" != "null" ]; then
+                  echo ""
+                  echo "🔗 **Associated PR:** [#$PR_NUMBER](https://github.com/ProjectAlita/alita-sdk/pull/$PR_NUMBER)"
+                  echo "- Label 'tests_ai_healed' will be added automatically"
+                else
+                  echo ""
+                  echo "ℹ️ **No PR found** for branch \`$BRANCH\`"
                 fi
               fi
             } >> "$GITHUB_STEP_SUMMARY"
