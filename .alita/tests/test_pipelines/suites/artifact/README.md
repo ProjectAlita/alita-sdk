@@ -11,7 +11,6 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 | AT03 | `createFile` | test_case_03_create_file_error_handling.yaml | High | Error handling for missing parameters |
 | AT04 | `listFiles` | test_case_04_list_files_happy_path.yaml | Critical | File listing with metadata and links |
 | AT05 | `readFile` | test_case_05_read_file_happy_path.yaml | Critical | Full file content retrieval and integrity |
-| AT06 | `read_file_chunk` | test_case_06_read_file_chunk_happy_path.yaml | High | Partial file reads by line range |
 | AT07 | `search_file` | test_case_07_search_file_happy_path.yaml | High | Pattern matching with context lines |
 | AT08 | `edit_file` | test_case_08_edit_file_happy_path.yaml | High | Text replacement using OLD/NEW markers |
 | AT09 | `appendData` | test_case_09_append_data_happy_path.yaml | High | Appending content to files |
@@ -20,6 +19,7 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 | AT12 | `read_multiple_files` | test_case_12_read_multiple_files_happy_path.yaml | High | Batch file retrieval |
 | AT13 | `get_file_type` | test_case_13_get_file_type_happy_path.yaml | High | File type detection from content |
 | AT16 | `edit_file` | test_case_16_edit_empty_file_edge_case.yaml | High | Empty file edit behavior validation |
+| AT17 | `deleteFile` | test_case_17_delete_nonexistent_file_error.yaml | High | Error handling for non-existent file deletion |
 
 **Total Test Cases: 14**
 - Critical: 4 tests (core functionality)
@@ -42,7 +42,6 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 
 #### Read Operations
 - `readFile`: Full file retrieval with optional page/sheet filtering
-- `read_file_chunk`: Partial reads by line range (start_line, end_line)
 - `read_multiple_files`: Batch read multiple files in single operation
 
 #### Search & Edit
