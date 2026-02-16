@@ -55,6 +55,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true  # Important for negative test - we want to validate error handling, not fail the test
     tool: update_file
     toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
     transition: validate_results
@@ -98,7 +99,7 @@ nodes:
             "file_not_found_detected": boolean,
             "no_unhandled_exception": boolean,
             "error_indicator_found": "which indicator was found or 'none'",
-            "error": string | null
+            "error": string | null (include error message if available, else null)
           }}
 
           Return ONLY the JSON object (no markdown or explanation).

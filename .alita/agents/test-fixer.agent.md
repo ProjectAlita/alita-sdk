@@ -104,20 +104,82 @@ Analyze test results, fix broken tests automatically, commit verified fixes to C
 - Rerun only failed tests (not full suite) to save time
 
 ### 4. Determine Root Cause
-- **Test code issues** → fix automatically (assertions, timeouts, logic)
-  - Most likely: Test YAML issues (80% of cases)
-  - Read test YAML files first in `.alita/tests/test_pipelines/suites/<suite>/tests/*.yaml`
-  - Framework README: `.alita/tests/test_pipelines/README.md` (read only if needed)
-  - Framework code: Only search if error message points to specific file/line
+
+**Step 4A: Read Framework Documentation**
+- **ALWAYS read first:** `.alita/tests/test_pipelines/README.md` to understand:
+  - Test YAML structure (state, nodes, transitions)
+  - Node types (toolkit, llm, code) and their properties
+  - `continue_on_error: true` flag for negative tests
+  - `structured_output` and output mapping
+  - Error handling patterns
+- **Focus on relevant sections:** Search README for keywords from error message
+
+**Step 4B: Analyze Similar Tests**
+- **Find passing tests with similar patterns:**
+  1. List all tests in suite: `ls .alita/tests/test_pipelines/suites/<suite>/tests/`
+  2. Read 2-3 passing tests that use same tools/node types
+  3. Compare structure, assertions, and error handling
+  
+- **Search patterns:**
+  - Same tool name: `grep -l "tool: update_file" suites/<suite>/tests/*.yaml`
+  - Same node type: `grep -l "type: toolkit" suites/<suite>/tests/*.yaml`
+  - Error handling: `grep -l "continue_on_error: true" suites/<suite>/tests/*.yaml`
+  - Validation patterns: `grep -l "validate_error" suites/<suite>/tests/*.yaml`
+
+- **Compare failing vs passing:**
+  - What do passing tests do differently?
+  - Are assertions more robust (contains vs equals)?
+  - Do passing tests use continue_on_error for negative tests?
+  - Are timeouts different?
+  - Are state variables initialized properly?
+
+**Step 4C: Categorize Root Cause**
+- **Test code issues** → fix automatically (80% of cases)
+  - Assertion/validation logic incorrect
+  - Missing `continue_on_error: true` in negative tests
+  - Wrong expected values or comparison operators
+  - State variables not initialized
+  - Timeouts too short
 - **SDK/platform bugs** → document as blocker (DO NOT fix)
-  - Search for exact places in the code which are causing the issue (e.g. method, line number)
+  - Search for exact places in the code causing the issue
   - Look in `alita_sdk/tools/<toolkit_name>/` for toolkit implementation
+  - Add detailed blocker report with code locations
 
 ### 5. Fix Tests (Auto-fix test code only)
 
 #### A. Test YAML Fixes (Primary - Fix These First)
 
 **Test YAML Location:** `.alita/tests/test_pipelines/suites/<suite>/tests/*.yaml`
+
+**Fix Strategy Workflow:**
+
+1. **Read framework README section on test YAML format** (if not already done in Step 4)
+   - Location: `.alita/tests/test_pipelines/README.md` 
+   - Section: "Test Case YAML Format"
+   - Focus: Node types, continue_on_error, error handling patterns
+
+2. **Find and read 2-3 similar passing tests:**
+   ```bash
+   # Find tests using same tool
+   grep -l "tool: <tool_name>" .alita/tests/test_pipelines/suites/<suite>/tests/*.yaml
+   
+   # Find tests with error handling
+   grep -l "continue_on_error: true" .alita/tests/test_pipelines/suites/<suite>/tests/*.yaml
+   
+   # Find tests with similar validation
+   grep -l "validate_error\|validate_result" .alita/tests/test_pipelines/suites/<suite>/tests/*.yaml
+   ```
+
+3. **Compare failing test with passing tests:**
+   - Read failing test YAML completely
+   - Read 2-3 similar passing tests
+   - Identify structural differences
+   - Note patterns in passing tests (robust assertions, error handling, etc.)
+
+4. **Apply fix based on comparison:**
+   - Use patterns from passing tests
+   - Don't invent new patterns - follow established conventions
+   - Preserve test intent while fixing implementation
 
 **Common YAML Fix Scenarios:**
 
@@ -162,7 +224,10 @@ Analyze test results, fix broken tests automatically, commit verified fixes to C
    - **Pattern:** Errors like "unexpected keyword argument 'X'" or "missing required parameter 'Y'"
 
 **YAML Fix Guidelines:**
-- **Read test README first:** `.alita/tests/test_pipelines/README.md` explains node types (task, assert, conditional, loop)
+- **Read framework README first:** `.alita/tests/test_pipelines/README.md` explains all node types and properties
+- **Compare with passing tests:** Find 2-3 similar tests that pass and use their patterns
+- **Follow established conventions:** Don't invent new patterns - use what works in other tests
+- **For negative tests:** Look for `continue_on_error: true` examples in passing tests
 - **Preserve test intent:** Don't weaken validations just to pass - fix the actual issue
 - **Use robust patterns:** Prefer `contains` over `equals`, check for error indicators not exact strings
 - **Test data isolation:** Use timestamps/UUIDs for resource names to avoid conflicts
@@ -236,24 +301,44 @@ Analyze test results, fix broken tests automatically, commit verified fixes to C
 ```
 Test Failure
     │
-    ├─ Incorrect assertion/expected value? → Fix YAML (update assert node)
-    ├─ Missing/wrong state variable? → Fix YAML (fix variable refs)
-    ├─ Bad test data? → Fix YAML (update prepare_data node)
-    ├─ Timeout/timing issue? → Fix YAML (increase timeout, add wait)
-    ├─ Wrong tool parameters? → Fix YAML (fix tool_call node)
-    ├─ Node executor bug? → Fix Framework (scripts/run_pipeline.py)
-    └─ SDK/toolkit bug? → Document as BLOCKER (do NOT fix)
+    ├─ Step 1: Read README section on node type that failed
+    │   └─ Understand expected behavior, properties, error handling
+    │
+    ├─ Step 2: Find and read 2-3 similar passing tests
+    │   ├─ Same tool? → grep "tool: <name>" in suite tests
+    │   ├─ Same node type? → grep "type: toolkit|llm" in suite tests
+    │   └─ Error handling? → grep "continue_on_error" in suite tests
+    │
+    ├─ Step 3: Compare failing vs passing patterns
+    │   ├─ Incorrect assertion/expected value? → Fix YAML (use passing test patterns)
+    │   ├─ Missing continue_on_error in negative test? → Fix YAML (add flag like passing tests)
+    │   ├─ Missing/wrong state variable? → Fix YAML (fix variable refs like passing tests)
+    │   ├─ Bad test data? → Fix YAML (update prepare_data node)
+    │   ├─ Timeout/timing issue? → Fix YAML (increase timeout, check passing test values)
+    │   ├─ Wrong tool parameters? → Fix YAML (fix tool_call node)
+    │   ├─ Node executor bug? → Fix Framework (scripts/run_pipeline.py)
+    │   └─ SDK/toolkit bug? → Document as BLOCKER (do NOT fix)
+    │
+    └─ Step 4: Apply fix using established patterns
+        └─ Don't invent - copy working patterns from passing tests
 ```
 
 #### D. Post-Fix Validation Checklist
 - [ ] Fix addresses root cause, not just symptom
+- [ ] Fix follows patterns from similar passing tests (documented in milestone)
+- [ ] Fix aligns with framework README documentation
 - [ ] Fix doesn't weaken test validation (e.g., removing error checks)
 - [ ] Fix uses robust patterns (not brittle exact-match strings)
 - [ ] Fix considers test data isolation (unique names, cleanup)
 - [ ] Fix doesn't break other tests in the suite (run full suite to verify)
 - [ ] Fix is documented in milestone with clear rationale
 
-**Record to milestone:** `fix_attempts` array with files_modified details, fix_rationale, alternatives_considered
+**Record to milestone:** `fix_attempts` array with:
+- `files_modified` - What was changed
+- `fix_rationale` - Why this fix works
+- `similar_passing_tests` - Which tests were used as reference
+- `readme_section_consulted` - Which README sections were referenced
+- `alternatives_considered` - Other approaches considered
 
 ### 6. Verify Fixes
 - Rerun fixed tests in batch using `bash -c "..."` wrapper
@@ -519,13 +604,15 @@ Test Failure
 3. **Use bash -c for all commands** - Always wrap shell commands in `bash -c "..."` for Windows compatibility
 4. **Read run.log ONLY** - NEVER read results.json (causes hangs)
 5. **Batch reruns** - Run 2+ tests together when possible
-6. **Fix test YAMLs first** - 80% of issues are in test YAML, not framework. Don't search framework randomly
-7. **Fix test code** - Auto-fix assertions, timeouts, logic
-8. **Document SDK bugs** - Add to blockers (DO NOT fix SDK code)
-9. **CRITICAL: Branch safety** - ONLY commit to branch specified in user prompt. NEVER commit to main/master/develop
-10. **Verify before commit** - Always check current branch matches target branch from prompt exactly
-11. **Update milestone** - After each major step
-12. **Save JSON output** - Write final JSON to fix_output.json file (NO markdown fences, NO extra text)
+6. **ALWAYS read README first** - Read `.alita/tests/test_pipelines/README.md` before analyzing failures
+7. **Compare with passing tests** - Find 2-3 similar passing tests and use their patterns
+8. **Fix test YAMLs first** - 80% of issues are in test YAML, not framework. Don't search framework randomly
+9. **Fix test code** - Auto-fix assertions, timeouts, logic using established patterns
+10. **Document SDK bugs** - Add to blockers (DO NOT fix SDK code)
+11. **CRITICAL: Branch safety** - ONLY commit to branch specified in user prompt. NEVER commit to main/master/develop
+12. **Verify before commit** - Always check current branch matches target branch from prompt exactly
+13. **Update milestone** - After each major step, include similar_passing_tests references
+14. **Save JSON output** - Write final JSON to fix_output.json file (NO markdown fences, NO extra text)
 
 ## Command Examples
 
@@ -549,6 +636,8 @@ bash -c ".alita/tests/test_pipelines/run_test.sh --all -v --timeout 180 suites/x
 1. Detect environment from user message (local/dev/stage/prod)
 2. Extract target branch from user prompt (e.g., "on branch feature/test-improvements")
 3. Read run.log in 100-line chunks and extract failed test IDs
-4. Execute workflow steps 1-8
-5. Write final JSON result to fix_output.json file (pure JSON, no markdown fences)
+4. **Read framework README** `.alita/tests/test_pipelines/README.md` first (focus on Test YAML Format section)
+5. **Find and read 2-3 similar passing tests** before attempting fixes
+6. Execute workflow steps 1-8 (using README and passing test patterns)
+7. Write final JSON result to fix_output.json file (pure JSON, no markdown fences)
 

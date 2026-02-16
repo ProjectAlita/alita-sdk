@@ -196,6 +196,176 @@ cat suites/<suite_name>/README.md
 cat suites/<suite_name>/pipeline.yaml
 ```
 
+## Test Case YAML Format
+
+### Basic Structure
+
+Each test case is a YAML file with this structure:
+
+```yaml
+name: "Test Name"
+description: |
+  Test description explaining the objective and expected behavior
+
+toolkits:
+  - id: ${TOOLKIT_ID}        # From .env
+    name: ${TOOLKIT_NAME}    # From .env
+
+state:                       # Define pipeline state variables
+  variable_name:
+    type: str|int|dict|list
+    value: "initial value"
+  result:
+    type: str                # Output variable (no initial value)
+
+entry_point: first_node     # Starting node ID
+
+nodes:
+  - id: node_id
+    type: toolkit|llm|code
+    # ... node configuration ...
+    transition: next_node|END
+```
+
+### Node Types
+
+#### Toolkit Node
+
+Executes a toolkit tool and captures the result:
+
+```yaml
+- id: invoke_tool
+  type: toolkit
+  input: [file_path, content]        # List of input variables
+  input_mapping:                     # Map variables to tool parameters
+    file_path:
+      type: variable
+      value: file_path
+    content:
+      type: fixed
+      value: "Fixed value"
+  output: [tool_result]              # Variables to store output
+  structured_output: true            # Parse output as structured data
+  continue_on_error: true            # Continue pipeline if tool fails (for negative tests)
+  tool: tool_name                    # Tool name from toolkit
+  toolkit_name: ${TOOLKIT_NAME}      # Toolkit to use
+  transition: next_node
+```
+
+**Key Properties:**
+- `continue_on_error: true` - **Critical for negative tests**. When set, allows the pipeline to continue to the next node even if the tool encounters an error. This enables validation nodes to check that errors are handled properly.
+- `structured_output: true` - Parses tool output and updates state variables that match output keys
+- `input_mapping` - Maps state variables or fixed values to tool parameters
+
+#### LLM Node
+
+Uses an LLM to validate results or perform analysis:
+
+```yaml
+- id: validate_results
+  type: llm
+  input: [tool_result, expected_values]
+  input_mapping:
+    chat_history:
+      type: fixed
+      value: []
+    system:
+      type: fixed
+      value: "You are a validator. Return only valid JSON."
+    task:
+      type: fstring
+      value: |
+        Analyze the tool output: {tool_result}
+        Expected: {expected_values}
+        
+        Return JSON:
+        {{
+          "test_passed": boolean,
+          "validation_details": "description"
+        }}
+  model: ${DEFAULT_LLM_MODEL}
+  output: [validation_result]
+  structured_output_dict:
+    validation_result: dict
+  transition: END
+```
+
+**Key Properties:**
+- `structured_output_dict` - Defines output variable types for parsing LLM response
+- `task` with `type: fstring` - Template string with variable substitution using `{var_name}` syntax
+
+### Error Handling with continue_on_error
+
+The `continue_on_error: true` flag is essential for **negative testing** - tests that verify error handling behavior.
+
+**How it works:**
+
+1. **Without continue_on_error (default behavior):**
+   ```yaml
+   - id: invoke_tool
+     type: toolkit
+     tool: update_file
+     # ... config ...
+     transition: validate_results  # Never reached if tool fails
+   ```
+   - If the tool encounters an error, the pipeline stops immediately
+   - The test is marked as failed
+   - Validation nodes never execute
+
+2. **With continue_on_error: true:**
+   ```yaml
+   - id: invoke_tool
+     type: toolkit
+     tool: update_file
+     continue_on_error: true  # ← Key difference
+     transition: validate_results  # ← Always reached, even on error
+   
+   - id: validate_results
+     type: llm
+     # Validates that the error was handled correctly
+   ```
+   - If the tool encounters an error, it's captured in the output
+   - The pipeline continues to the next node (validate_results)
+   - Validation can check that the error message is appropriate
+   - Test passes if error handling is correct
+
+**Example Use Case:**
+
+Test that `update_file` properly handles non-existent files:
+
+```yaml
+- id: invoke_update_file
+  type: toolkit
+  tool: update_file
+  input_mapping:
+    file_path:
+      type: variable
+      value: non_existent_file  # This will cause an error
+  continue_on_error: true  # ← Let's us validate the error
+  transition: validate_error_handling
+
+- id: validate_error_handling
+  type: llm
+  input_mapping:
+    task:
+      type: fstring
+      value: |
+        Tool result: {tool_result}
+        
+        Verify:
+        1. Error message contains "File not found" or similar
+        2. No unhandled exceptions (traceback, stack trace)
+        3. Error is properly formatted
+        
+        Return {{"test_passed": true}} if error handled correctly.
+```
+
+**Best Practices:**
+- Use `continue_on_error: true` only for nodes that are expected to fail
+- Always follow with a validation node that checks the error output
+- Document in test description that this is a negative test
+- Include expected error indicators in state variables for validation
+
 ## Logging & Output Flow (--local mode)
 
 ### Output Routing Summary
