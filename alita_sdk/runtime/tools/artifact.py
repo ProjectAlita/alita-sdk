@@ -24,8 +24,6 @@ from ...tools.utils.text_operations import (
 )
 from ...runtime.utils.utils import IndexerKeywords
 
-# Error message returned when file content exceeds single read size limit
-CONTENT_TOO_LARGE_ERROR = "[File content exceeds size limit. Use chunked read operations to access specific portions of this file.]"
 DEFAULT_MAX_SINGLE_READ_SIZE = 60000
 
 
@@ -54,26 +52,20 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             Dict mapping file paths to their content
         """
         results = {}
-        
+
+        # Convert offset/limit to start_line/end_line for read_file
+        start_line = offset
+        end_line = (offset + limit - 1) if (offset is not None and limit is not None) else None
+
         for path in file_paths:
             try:
-                # Detect if path is a full filepath (starts with /) or just a filename
-                # filepath: always starts with "/" (e.g., /attachments/1469/file.txt)
-                # filename: never starts with "/" (e.g., file.txt or 1469/file.txt)
                 if path.startswith('/'):
-                    # Full path - use filepath parameter which extracts bucket and filename
-                    content = self.read_file(filepath=path, bucket_name=bucket_name)
+                    content = self.read_file(filepath=path, bucket_name=bucket_name,
+                                            start_line=start_line, end_line=end_line)
                 else:
-                    # Relative filename - use directly
-                    content = self.read_file(filename=path, bucket_name=bucket_name)
-                
-                sliced_content = apply_line_slice(content, offset=offset, limit=limit)
-                
-                # Check content size limit per file
-                if isinstance(sliced_content, str) and len(sliced_content) > self.max_single_read_size:
-                    results[path] = CONTENT_TOO_LARGE_ERROR
-                else:
-                    results[path] = sliced_content
+                    content = self.read_file(filename=path, bucket_name=bucket_name,
+                                            start_line=start_line, end_line=end_line)
+                results[path] = content
             except Exception as e:
                 results[path] = f"Error reading file: {str(e)}"
         return results
@@ -490,10 +482,10 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
         # Check content size limit (after slicing if applicable)
         if isinstance(content, str) and len(content) > self.max_single_read_size:
-            # If doing partial read and still too large, return error with helpful message
+            line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
             if start_line is not None or end_line is not None:
-                return f"{CONTENT_TOO_LARGE_ERROR} Requested range still exceeds limit. Try a smaller line range."
-            return CONTENT_TOO_LARGE_ERROR
+                return f"[Content ({line_count} lines) still exceeds size limit. Use smaller range.]"
+            return f"[Content has {line_count} lines and exceeds size limit. Use partial read options.]"
 
         return content
     
