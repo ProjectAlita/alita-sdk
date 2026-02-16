@@ -36,7 +36,7 @@ services:
     volumes:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
-      - ./.git:/app/.git:ro
+      - ./.git:/app/.git
     command: >
       sh -c ".alita/tests/test_pipelines/run_test.sh --all -v --timeout 180 suites/ado ADO23 ADO17"
 
