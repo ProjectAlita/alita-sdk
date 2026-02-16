@@ -98,6 +98,7 @@ jobs:
           docker-compose up -d
 
       - name: Wait for tests to complete
+        id: wait_tests
         run: |
           echo "Waiting for test execution to complete..."
           
@@ -116,8 +117,10 @@ jobs:
               
               if [ "$EXIT_CODE" -eq 0 ]; then
                 echo "✅ Container completed successfully"
+                echo "tests_failed=false" >> $GITHUB_OUTPUT
               else
                 echo "❌ Container exited with error code $EXIT_CODE"
+                echo "tests_failed=true" >> $GITHUB_OUTPUT
               fi
               
               echo "Container logs:"
@@ -138,6 +141,7 @@ jobs:
           
           if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "⚠️ Timeout reached after $TIMEOUT seconds"
+            echo "tests_failed=true" >> $GITHUB_OUTPUT
             docker-compose logs alita-sdk
             exit 1
           fi
@@ -160,6 +164,7 @@ jobs:
 
       - name: Print execution summary
         if: always()
+        id: test_summary
         run: |
           if [ ! -f ./results.json ]; then
             echo "❌ No results.json found - tests may not have completed"
@@ -212,7 +217,7 @@ jobs:
           docker-compose logs alita-sdk > docker-logs.txt 2>&1 || echo "Failed to retrieve logs" > docker-logs.txt
       
       - name: Do AI analysis of logs
-        if: always()
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
           echo "::notice::Running AI analysis of test results"
           
@@ -250,7 +255,7 @@ jobs:
           sh -c "alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${{ github.ref }}'" || echo "AI analysis completed with warnings"
 
       - name: Copy AI analysis outputs
-        if: always()
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
           echo "Copying fix analysis files from container..."
           docker cp alita-sdk-fixer:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_output.json ./fix_output.json || echo "{}" > ./fix_output.json
@@ -263,7 +268,7 @@ jobs:
           docker rm alita-sdk-fixer || true
           
       - name: Parse fix_output.json and check for blocked tests
-        if: always()
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         id: check_blocked
         run: |
           echo "Parsing fix_output.json for blocked tests..."
@@ -300,7 +305,7 @@ jobs:
           fi
 
       - name: Create bug reports for blocked tests
-        if: ${{ always() && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
         run: |
           echo "::notice::Creating bug reports for blocked tests"
           
