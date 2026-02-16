@@ -274,11 +274,12 @@ for p in "${PATTERNS[@]}"; do
 done
 
 # Run with pattern filter
+RESULTS_FILE="test_results/$SUITE/results.json"
 if python scripts/run_suite.py "$SUITE" \
     "${PATTERN_ARGS[@]}" \
     $TIMEOUT_ARG \
     --env-file "$ENV_FILE" \
-    --output-json "test_results/$SUITE/results.json" \
+    --output-json "$RESULTS_FILE" \
     $VERBOSE \
     $LOCAL_FLAG \
     $WILDCARDS_FLAG; then
@@ -306,4 +307,42 @@ fi
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 
-exit $RUN_STATUS
+# Parse results and display summary
+if [ -f "$RESULTS_FILE" ]; then
+    PASSED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+    FAILED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+    ERRORS=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
+    SKIPPED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
+    TOTAL=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('total', 0))" 2>/dev/null || echo "0")
+
+    echo -e "${BLUE}Test Results Summary:${NC}"
+    echo "  Passed:  $PASSED"
+    echo "  Failed:  $FAILED"
+    echo "  Errors:  $ERRORS"
+    echo "  Skipped: $SKIPPED"
+    echo "  Total:   $TOTAL"
+    echo ""
+
+    # Determine overall success
+    if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
+        echo -e "${RED}✗ Some tests failed or had errors${NC}"
+        echo "Results saved to: $RESULTS_FILE"
+        exit 1
+    elif [ "$RUN_STATUS" -ne 0 ]; then
+        echo -e "${RED}✗ Test execution failed${NC}"
+        exit $RUN_STATUS
+    else
+        echo -e "${GREEN}✓ All tests passed!${NC}"
+        echo "Results saved to: $RESULTS_FILE"
+        exit 0
+    fi
+else
+    # No results file - use RUN_STATUS from execution
+    if [ "$RUN_STATUS" -eq 0 ]; then
+        echo -e "${GREEN}✓ Test execution completed${NC}"
+        exit 0
+    else
+        echo -e "${RED}✗ Test execution failed${NC}"
+        exit $RUN_STATUS
+    fi
+fi
