@@ -38,7 +38,7 @@ services:
       - ./alita_sdk:/app/alita_sdk
       - ./.git:/app/.git
     command: >
-      sh -c ".alita/tests/test_pipelines/run_test.sh --all -v --timeout 180 suites/ado ADO23 ADO17"
+      sh -c "$${DOCKER_COMMAND:-.alita/tests/test_pipelines/run_all_suites.sh --local suites/github}"
 
   pgvector-db:
     image: ankane/pgvector
