@@ -1,0 +1,93 @@
+name: "PST42 update request description"
+priority: Critical
+description: |
+  Validates that the update_request_description tool successfully updates
+  the description of an existing request.
+  
+  Objective: Verify request description update functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Request description is updated
+  - Changes are persisted
+  - Returns confirmation of the update
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  request_path:
+    type: str
+    value: ${TEST_REQUEST_PATH}
+  new_description:
+    type: str
+    value: "Updated request description for testing"
+entry_point: invoke_update_request_description
+
+nodes:
+  - id: invoke_update_request_description
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_request_description
+    input:
+      - request_path
+      - new_description
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      description:
+        type: variable
+        value: new_description
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_request_description' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_request_description updates the description.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates description was updated.
+          3. Check for success confirmation.
+          4. Validate no errors occurred during the update.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if description was updated successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

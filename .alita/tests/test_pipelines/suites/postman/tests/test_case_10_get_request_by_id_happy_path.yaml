@@ -1,0 +1,276 @@
+name: "PST10 - get_request_by_id: Retrieve request by ID"
+priority: Critical
+description: |
+  Validates that the get_request_by_id tool successfully retrieves a specific
+  API request using its unique identifier.
+  
+  Objective: Verify request retrieval by ID
+  
+  Expected Behavior:
+  - Test folder and request are created
+  - Request ID is extracted from creation result
+  - get_request_by_id retrieves the request by ID
+  - Returns complete request details
+  - Cleanup removes both request and folder
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+  request_name:
+    type: str
+  request_method:
+    type: str
+    value: "POST"
+  request_url:
+    type: str
+    value: "https://api.example.com/create"
+  folder_path:
+    type: str
+  request_path:
+    type: str
+  request_id:
+    type: str
+  create_folder_result:
+    type: str
+  create_request_result:
+    type: str
+  get_request_result:
+    type: str
+  delete_request_result:
+    type: str
+  delete_folder_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique names
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        folder_name = f"PST10_Folder_{timestamp}_{random_suffix}"
+        request_name = f"PST10_Request_{timestamp}_{random_suffix}"
+        
+        # Build paths
+        folder_path = folder_name
+        request_path = f"{folder_name}/{request_name}"
+        
+        {
+          "folder_name": folder_name,
+          "request_name": request_name,
+          "folder_path": folder_path,
+          "request_path": request_path
+        }
+    output:
+      - folder_name
+      - request_name
+      - folder_path
+      - request_path
+    structured_output: true
+    transition: create_test_folder
+
+  - id: create_test_folder
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+    output:
+      - create_folder_result
+    structured_output: true
+    transition: create_test_request
+
+  - id: create_test_request
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - folder_path
+      - request_name
+      - request_method
+      - request_url
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: variable
+        value: request_method
+      url:
+        type: variable
+        value: request_url
+    output:
+      - create_request_result
+    structured_output: true
+    transition: extract_request_id
+
+  - id: extract_request_id
+    type: code
+    code:
+      type: fstring
+      value: |
+        import json
+        import re
+        
+        result_str = alita_state.get('create_request_result', '')
+        
+        # Try to extract ID from result
+        request_id = None
+        
+        # Pattern 1: Look for "id": "..."
+        id_match = re.search(r'"id"\s*:\s*"([^"]+)"', result_str)
+        if id_match:
+            request_id = id_match.group(1)
+        
+        # Pattern 2: Look for "uid": "..."
+        if not request_id:
+            uid_match = re.search(r'"uid"\s*:\s*"([^"]+)"', result_str)
+            if uid_match:
+                request_id = uid_match.group(1)
+        
+        # Pattern 3: Try JSON parse
+        if not request_id:
+            try:
+                result_data = json.loads(result_str)
+                if isinstance(result_data, dict):
+                    request_id = result_data.get('id') or result_data.get('uid')
+            except:
+                pass
+        
+        request_id or "ID_NOT_FOUND"
+    input:
+      - create_request_result
+    output:
+      - request_id
+    structured_output: true
+    transition: get_request_by_id
+
+  - id: get_request_by_id
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_request_by_id
+    input:
+      - request_id
+    input_mapping:
+      request_id:
+        type: variable
+        value: request_id
+    output:
+      - get_request_result
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - create_folder_result
+      - create_request_result
+      - request_id
+      - get_request_result
+      - request_name
+      - request_method
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from Postman request operations using ID retrieval.
+          
+          Folder Creation Result: {create_folder_result}
+          Request Creation Result: {create_request_result}
+          Extracted Request ID: {request_id}
+          Get Request Result: {get_request_result}
+          Expected Request Name: {request_name}
+          Expected Method: {request_method}
+          
+          This is a POSITIVE test - we expect successful ID-based request retrieval.
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. folder_created: Folder was created successfully
+          2. request_created: Request was created successfully
+          3. id_extracted: Request ID was extracted (not "ID_NOT_FOUND")
+          4. request_retrieved: get_request_by_id returned request details
+          5. correct_name: Request name matches expected
+          6. correct_method: Request method matches expected
+          7. no_errors: No error indicators in any output
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "folder_created": boolean,
+            "request_created": boolean,
+            "id_extracted": boolean,
+            "request_retrieved": boolean,
+            "correct_name": boolean,
+            "correct_method": boolean,
+            "no_errors": boolean,
+            "extracted_id": "the request ID or null",
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_delete_request
+
+  - id: cleanup_delete_request
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_request
+    input:
+      - request_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+    output:
+      - delete_request_result
+    structured_output: true
+    transition: cleanup_delete_folder
+
+  - id: cleanup_delete_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - folder_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+    output:
+      - delete_folder_result
+    structured_output: true
+    transition: END

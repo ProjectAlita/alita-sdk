@@ -1,4 +1,5 @@
 name: Execute Toolkit Tests on Demand
+run-name: "Toolkit Tests on Demand: ${{ inputs.environment }} - ${{ inputs.test_cases_dir == 'custom' && inputs.custom_suites || inputs.test_cases_dir }}"
 
 on:
   workflow_dispatch:

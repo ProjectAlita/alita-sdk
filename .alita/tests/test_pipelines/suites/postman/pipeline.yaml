@@ -1,0 +1,72 @@
+name: postman_toolkit
+description: |
+  Postman toolkit integration tests
+
+  Test Structure:
+  - Collection Operations (PST01-PST04): Test collection retrieval and management
+  - Folder Operations (PST05-PST06): Test folder retrieval
+  - Request Operations (PST07-PST10): Test request retrieval by path and ID
+
+env_mapping:
+  toolkit_config: ${POSTMAN_CONFIG_PATH:../../configs/postman-config.json}
+  api_key: ${POSTMAN_API_KEY}
+  workspace_id: ${POSTMAN_WORKSPACE_ID:8d10763d-3e34-4a59-8316-db29aad206cc}
+  collection_id: ${POSTMAN_COLLECTION_ID:52159169-cd51d7b0-55f2-4355-8684-427e5e2fe2e0}
+  base_url: ${POSTMAN_BASE_URL:https://api.getpostman.com}
+
+setup:
+  - name: Setup Postman Configuration
+    type: configuration
+    config:
+      config_type: postman
+      alita_title: ${POSTMAN_SECRET_NAME:postman}
+      data:
+        api_key: ${POSTMAN_API_KEY}
+        base_url: ${POSTMAN_BASE_URL:https://api.getpostman.com}
+        workspace_id: ${POSTMAN_WORKSPACE_ID:8d10763d-3e34-4a59-8316-db29aad206cc}
+
+  - name: Create Postman Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ${POSTMAN_CONFIG_PATH:../../configs/postman-config.json}
+      toolkit_type: postman
+      toolkit_name: ${POSTMAN_TOOLKIT_NAME:postman-testing}
+    save_to_env:
+      - key: POSTMAN_TOOLKIT_ID
+        value: $.id
+      - key: POSTMAN_TOOLKIT_NAME
+        value: $.name
+
+composable_pipelines: []
+
+execution:
+  test_directory: tests
+  order:
+    - test_case_*.yaml
+
+  substitutions:
+    POSTMAN_TOOLKIT_ID: ${POSTMAN_TOOLKIT_ID}
+    POSTMAN_TOOLKIT_NAME: ${POSTMAN_TOOLKIT_NAME}
+    POSTMAN_COLLECTION_ID: ${POSTMAN_COLLECTION_ID:52159169-cd51d7b0-55f2-4355-8684-427e5e2fe2e0}
+    TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+
+  settings:
+    timeout: 180
+    parallel: 1
+    stop_on_failure: false
+
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "PST*"
+    continue_on_error: true
+
+  - name: Delete Postman Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${POSTMAN_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

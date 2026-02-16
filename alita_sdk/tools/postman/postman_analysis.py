@@ -1038,7 +1038,7 @@ class PostmanAnalyzer:
             target_name = current_path[depth]
             for item in current_items:
                 if (item.get('name', '').lower() == target_name.lower() or
-                        target_name.lower() in item.get('name', '').lower()) and item.get('item'):
+                        target_name.lower() in item.get('name', '').lower()) and 'item' in item:
                     if depth == len(current_path) - 1:
                         # This is the target folder
                         results.append(item)

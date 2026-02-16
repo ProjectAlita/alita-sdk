@@ -1,0 +1,91 @@
+name: "PST22 update collection"
+priority: Critical
+description: |
+  Validates that the update_collection_variables tool successfully updates
+  collection-level variables.
+  
+  Objective: Verify collection variables update functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Collection variables are updated
+  - Variable structure includes key, value, type, enabled
+  - Returns confirmation of the update
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  variables:
+    type: list
+    value:
+      - key: "test_var"
+        value: "test_value"
+        type: "string"
+        enabled: true
+
+entry_point: invoke_update_collection_variables
+
+nodes:
+  - id: invoke_update_collection_variables
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_collection_variables
+    input:
+      - variables
+    input_mapping:
+      variables:
+        type: variable
+        value: variables
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_collection_variables' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_collection_variables updates variables.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates variables were updated.
+          3. Check for success confirmation or updated collection data.
+          4. Validate the variable structure was properly processed.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if variables were updated successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

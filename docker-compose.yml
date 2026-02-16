@@ -25,6 +25,7 @@ services:
       - XRAY_CLIENT_ID=${XRAY_CLIENT_ID}
       - ZEPHYR_ESENTIALS_KEY=${ZEPHYR_ESENTIALS_KEY}
       - GITLAB_PRIVATE_TOKEN=${GITLAB_PRIVATE_TOKEN}
+      - POSTMAN_API_KEY=${POSTMAN_API_KEY}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
       - DEFAULT_LLM_MODEL=gpt-4o-2024-11-20
       - SANDBOX_BASE=/app/

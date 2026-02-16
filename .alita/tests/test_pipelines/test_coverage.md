@@ -90,7 +90,6 @@ Generated on: 2026-02-12
 | `createFile` | ✅ | test_case_02, test_case_03 |
 | `listFiles` | ✅ | test_case_04 |
 | `readFile` | ✅ | test_case_05 |
-| `read_file_chunk` | ✅ | test_case_06 |
 | `grep_file` (search_file) | ✅ | test_case_07 |
 | `edit_file` | ✅ | test_case_08, test_case_16 |
 | `appendData` | ✅ | test_case_09 |
@@ -237,7 +236,6 @@ Generated on: 2026-02-12
 | `create_pull_request` | ✅ | test_case_17 |
 | `create_pr_change_comment` | ✅ | test_case_18 |
 | `get_commits` | ✅ | test_case_19 |
-| `read_file_chunk` | ✅ | test_case_20 |
 | `list_folders` | ✅ | test_case_21 |
 | `search_file` | ✅ | test_case_22 |
 | `edit_file` | ✅ | test_case_23 |
