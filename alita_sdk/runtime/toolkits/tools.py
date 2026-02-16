@@ -289,7 +289,6 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
 
                     # Get server config (may be in settings or from global config)
                     server_config = settings.get('server_config')
-
                     toolkit_tools = McpConfigToolkit.get_toolkit(
                         server_name=server_name,
                         server_config=server_config,
@@ -298,6 +297,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         excluded_tools=excluded_tools if excluded_tools else None,
                         toolkit_name=toolkit_name,
                         client=alita_client,
+                        mcp_tokens=mcp_tokens,
                     ).get_tools()
 
                     tools.extend(toolkit_tools)
