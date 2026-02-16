@@ -294,6 +294,8 @@ class MetadataCollectingCallback(BaseCallbackHandler):
             'tool_inputs': inputs or input_str,
             'timestamp_start': datetime.now(tz=timezone.utc).isoformat(),
             'metadata': metadata or {},
+            'agent_type': None,  # Backend compatibility
+            'error': None,  # Backend compatibility (will be updated on error)
         }
 
     def on_tool_end(
@@ -322,6 +324,8 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                 'content': tool_output,  # Backend compatibility (alias for tool_output)
                 'finish_reason': 'stop',
                 'timestamp_finish': datetime.now(tz=timezone.utc).isoformat(),
+                'error': None,  # Backend compatibility (explicit null for success)
+                'agent_type': None,  # Backend compatibility
             })
         else:
             # Tool start was missed - create entry (defensive)
@@ -361,6 +365,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
                 'tool_output': None,  # Backend sets to None on error
                 'finish_reason': 'error',
                 'timestamp_finish': datetime.now(tz=timezone.utc).isoformat(),
+                'agent_type': None,  # Backend compatibility
             })
         else:
             # Tool start was missed - create entry with error (defensive)
@@ -802,74 +807,6 @@ class IsolatedPipelineTestRunner:
 
         return result_data
 
-    def _transform_to_remote_format(self, local_result: Dict[str, Any], user_input: str) -> Dict[str, Any]:
-        """
-        Transform local graph.invoke() result to match remote /predict API format.
-
-        This enables process_pipeline_result to work consistently across local and remote modes.
-
-        Args:
-            local_result: Raw result from graph.invoke()
-            user_input: The user input message
-
-        Returns:
-            Dict in remote API format with chat_history, result, tool_calls_dict
-        """
-        # Build chat_history in remote format
-        chat_history = [
-            {'role': 'user', 'content': user_input}
-        ]
-
-        # Extract response content using backend logic
-        response_content = self._extract_response_content(local_result, response_format='output')
-
-        # Add assistant message to chat history
-        output_message = self._build_output_message(response_content)
-        chat_history.append(output_message)
-
-        # Extract test results from state
-        # Check common locations where test results might be stored
-        result_field = None
-
-        # Priority 1: test_results field (most specific)
-        if 'test_results' in local_result:
-            test_results = local_result['test_results']
-            # Parse if it's a JSON string
-            if isinstance(test_results, str) and test_results.strip().startswith('{'):
-                try:
-                    result_field = json.loads(test_results)
-                except json.JSONDecodeError:
-                    result_field = {'raw_output': test_results}
-            else:
-                result_field = test_results
-
-        # Priority 2: output field (fallback)
-        if result_field is None and 'output' in local_result:
-            output = local_result['output']
-            # Parse if it's a JSON string
-            if isinstance(output, str) and output.strip().startswith('{'):
-                try:
-                    result_field = json.loads(output)
-                except json.JSONDecodeError:
-                    result_field = {'raw_output': output}
-            elif isinstance(output, dict):
-                result_field = output
-
-        # Build remote-like structure
-        remote_format = {
-            'chat_history': chat_history,
-            'error': None,
-            'tool_calls_dict': {},  # Local doesn't have detailed tool call tracking
-            'tool_calls': [],
-            'thinking_steps': [],
-        }
-
-        # Add result field if available (should be a dict now, not a string)
-        if result_field is not None:
-            remote_format['result'] = result_field
-
-        return remote_format
-
     def run_test(
             self,
             test_yaml_path: str,
@@ -973,6 +910,26 @@ class IsolatedPipelineTestRunner:
 
         memory = MemorySaver()
 
+        # Wrap tools with error handling (matches backend ToolExceptionHandlerMiddleware behavior)
+        # This ensures errors are caught DURING execution and returned as formatted messages,
+        # not raised as exceptions. The LLM sees error messages in real-time, allowing it
+        # to evaluate expected errors (e.g., 404 for invalid ID) correctly.
+        from alita_sdk.runtime.middleware import ToolExceptionHandlerMiddleware, TransformErrorStrategy
+
+        error_handler = ToolExceptionHandlerMiddleware(
+            strategies=[
+                TransformErrorStrategy(
+                    llm=None,  # No LLM-powered error transformation for local tests
+                    return_detailed_errors=True  # Include full stack traces (production mode)
+                )
+            ],
+            conversation_id=f'test-{path.stem}'
+        )
+
+        # Wrap all tools to return formatted error messages instead of raising exceptions
+        wrapped_tools = [error_handler.wrap_tool(tool) for tool in self._tools]
+        logger.info(f"Wrapped {len(wrapped_tools)} tools with error handling")
+
         # Create graph (same as backend does)
         try:
             start_time = time.time()
@@ -980,7 +937,7 @@ class IsolatedPipelineTestRunner:
             graph = create_graph(
                 client=llm,
                 yaml_schema=yaml_schema,
-                tools=self._tools,
+                tools=wrapped_tools,  # Use wrapped tools instead of raw tools
                 memory=memory,
                 store=None,
                 debug=self.verbose,
