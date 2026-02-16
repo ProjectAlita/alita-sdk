@@ -252,7 +252,7 @@ jobs:
           
           # Run without --rm to keep container for file extraction
           docker-compose run --name alita-sdk-fixer alita-sdk \
-          sh -c "alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${{ github.ref }}'" || echo "AI analysis completed with warnings"
+          sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${{ github.ref }}'" || echo "AI analysis completed with warnings"
 
       - name: Copy AI analysis outputs
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
