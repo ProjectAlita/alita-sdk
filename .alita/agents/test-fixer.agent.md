@@ -5,7 +5,7 @@ temperature: 0.1
 max_tokens: 16000
 toolkit_configs: 
   - file: .alita/tool_configs/git-config.json
-step_limit: 20
+step_limit: 40
 persona: "qa"
 lazy_tools_mode: false
 enable_planning: false
