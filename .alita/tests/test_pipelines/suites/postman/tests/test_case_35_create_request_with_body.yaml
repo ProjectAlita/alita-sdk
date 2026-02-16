@@ -1,0 +1,125 @@
+name: "PST35 create request with body"
+priority: High
+description: |
+  Validates that the create_request tool successfully creates a POST request
+  with request body and headers.
+  
+  Objective: Verify creating requests with body and headers
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - POST request is created with specified body
+  - Headers are properly set
+  - Request structure includes all components
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  folder_path:
+    type: str
+    value: ${TEST_FOLDER_PATH}
+  request_name:
+    type: str
+    value: "Create User POST"
+  method:
+    type: str
+    value: "POST"
+  url:
+    type: str
+    value: "https://api.example.com/users"
+  request_details:
+    type: dict
+    value:
+      headers:
+        - key: "Content-Type"
+          value: "application/json"
+      body:
+        mode: "raw"
+        raw: '{"name": "Test User", "email": "test@example.com"}'
+
+entry_point: invoke_create_request
+
+nodes:
+  - id: invoke_create_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - folder_path
+      - request_name
+      - method
+      - url
+      - headers
+      - body
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: variable
+        value: method
+      url:
+        type: variable
+        value: url
+      headers:
+        type: variable
+        value: headers
+      body:
+        type: variable
+        value: body
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_request' tool for POST request with body.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that create_request creates a POST request with body and headers.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the POST request was created with body.
+          3. Check that headers and body were properly set.
+          4. Validate the complete request structure.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if POST request was created with body),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,86 @@
+name: "PST25 update collection auth"
+priority: High
+description: |
+  Validates that the update_collection_auth tool properly handles clearing
+  collection authentication by passing null.
+  
+  Objective: Verify clearing collection authentication
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Collection authentication is cleared
+  - Returns confirmation of the update
+  - Collection has no authentication after operation
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  auth:
+    type: str
+    value: null
+entry_point: invoke_update_collection_auth
+
+nodes:
+  - id: invoke_update_collection_auth
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_collection_auth
+    input:
+      - auth
+    input_mapping:
+      auth:
+        type: variable
+        value: auth
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_collection_auth' tool when clearing auth.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_collection_auth clears authentication.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the authentication was cleared or set to null.
+          3. Check for success confirmation.
+          4. Validate no errors occurred during the operation.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if authentication was cleared successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

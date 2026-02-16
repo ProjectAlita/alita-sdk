@@ -1,0 +1,96 @@
+name: "PST07 - get_folder: Handle invalid folder path"
+priority: High
+description: |
+  Validates that the get_folder tool properly handles requests for non-existent
+  or invalid folder paths.
+  
+  Objective: Verify error handling for invalid folder paths
+  
+  Expected Behavior:
+  - Tool executes without crashing
+  - Returns appropriate error message
+  - Error indicates folder not found or invalid path
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  invalid_folder_path:
+    type: str
+    value: "NonExistent/Folder/Path_PST07"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_folder
+
+nodes:
+  - id: invoke_get_folder
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_folder
+    input:
+      - invalid_folder_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: invalid_folder_path
+    output:
+      - tool_result
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - tool_result
+      - invalid_folder_path
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_folder' tool with an invalid folder path.
+          
+          Tool Result: {tool_result}
+          Invalid Path Used: {invalid_folder_path}
+          
+          This is a NEGATIVE test - we expect an appropriate error for invalid folder path.
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool executed (didn't crash)
+          2. has_error: Result contains an error message
+          3. appropriate_error: Error indicates folder not found/invalid path
+          4. no_system_errors: No system/internal errors (only expected path error)
+          
+          Valid error patterns:
+          - "folder not found" or "does not exist"
+          - "invalid folder path"
+          - "cannot be located"
+          - "no folder at specified path"
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if appropriate error returned),
+            "tool_executed": boolean,
+            "has_error": boolean,
+            "appropriate_error": boolean,
+            "no_system_errors": boolean,
+            "error_message": "extracted error message or null",
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
