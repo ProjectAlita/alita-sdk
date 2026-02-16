@@ -182,3 +182,4 @@ node_modules/
 alita_sdk/docs/
 .alita/sessions
 .playwright-mcp/*
+.claude/*
