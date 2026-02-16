@@ -272,6 +272,75 @@ jobs:
           
           # Remove the fixer container after copying files
           docker rm alita-sdk-fixer || true
+
+      - name: Post AI Analysis Summary to GitHub
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
+        run: |
+          if [ ! -f ./fix_output.json ]; then
+            echo "::warning::No AI analysis output found"
+            exit 0
+          fi
+          
+          # Check if file is valid JSON
+          if ! jq empty ./fix_output.json 2>/dev/null; then
+            echo "::warning::Invalid JSON in fix_output.json"
+            exit 0
+          fi
+          
+          # Parse AI analysis results
+          FIXED_COUNT=$(jq -r '.summary.fixed // 0' ./fix_output.json)
+          BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
+          TOTAL_ANALYZED=$(jq -r '.summary.total_analyzed // 0' ./fix_output.json)
+          
+          # Write AI Analysis Summary to GitHub Step Summary
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            {
+              echo ""
+              echo "## 🤖 AI Analysis Summary"
+              echo ""
+              echo '```'
+              echo "═══════════════════════════════════════════════════════════════"
+              echo "  Test Fixer Agent Analysis"
+              echo "═══════════════════════════════════════════════════════════════"
+              echo ""
+              printf "%-20s %s\n" "Total Analyzed:" "$TOTAL_ANALYZED"
+              printf "%-20s %s\n" "Fixed:" "$FIXED_COUNT"
+              printf "%-20s %s\n" "Blocked:" "$BLOCKED_COUNT"
+              echo '```'
+              echo ""
+              
+              # Show fixed tests details
+              if [ "$FIXED_COUNT" -gt 0 ]; then
+                echo "### ✅ Fixed Tests"
+                echo ""
+                jq -r '.fixed[]? | "- **\(.test_name)**\n  - Root Cause: \(.root_cause // "N/A")\n  - Fix Applied: \(.fix_description // "N/A")\n"' ./fix_output.json
+              fi
+              
+              # Show blocked tests details
+              if [ "$BLOCKED_COUNT" -gt 0 ]; then
+                echo "### ❌ Blocked Tests"
+                echo ""
+                jq -r '.blocked[]? | "- **\(.test_name)**\n  - Issue: \(.issue // "N/A")\n  - Recommendation: \(.recommendation // "N/A")\n  - Bug Report Needed: \(.bug_report_needed // false)\n"' ./fix_output.json
+              fi
+              
+              # Add milestone summary if available
+              if [ -f ./fix_milestone.json ] && jq empty ./fix_milestone.json 2>/dev/null; then
+                echo ""
+                echo "### 📋 Fix Milestone"
+                echo ""
+                MILESTONE=$(jq -r '.milestone // "No milestone data"' ./fix_milestone.json)
+                NEXT_STEPS=$(jq -r '.next_steps // []' ./fix_milestone.json)
+                
+                echo "$MILESTONE"
+                echo ""
+                
+                if [ "$NEXT_STEPS" != "[]" ]; then
+                  echo "**Next Steps:**"
+                  jq -r '.next_steps[]? | "- \(.)"' ./fix_milestone.json
+                fi
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
           
       - name: Parse fix_output.json and check for blocked tests
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
