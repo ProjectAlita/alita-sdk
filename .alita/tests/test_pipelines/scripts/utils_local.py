@@ -1066,20 +1066,24 @@ class IsolatedPipelineTestRunner:
             )
 
 
-def find_tests_in_suite(suite_folder: Path, pattern: str, config: Optional[dict] = None) -> List[Path]:
+def find_tests_in_suite(suite_folder: Path, patterns: List[str], config: Optional[dict] = None, use_wildcards: bool = False) -> List[Path]:
     """
-    Find test files in a suite folder matching a pattern.
+    Find test files in a suite folder matching one or more patterns.
 
     Replicates the logic from run_test.sh and run_suite.py.
 
     Args:
         suite_folder: Path to the suite directory (e.g., github_toolkit)
-        pattern: Pattern to match test files (e.g., 'list_branches', 'GH01', '*')
+        patterns: List of patterns to match test files (e.g., ['list_branches', 'GH01'])
         config: Optional loaded pipeline.yaml config
+        use_wildcards: If True, use shell-style wildcards (*, ?)
 
     Returns:
         List of matching test file paths
     """
+    # Import pattern matching utilities
+    from pattern_matcher import matches_any_pattern
+    
     # Get all yaml files using seed_pipelines.py logic
     all_yaml_files = get_yaml_files(suite_folder, config)
 
@@ -1087,24 +1091,24 @@ def find_tests_in_suite(suite_folder: Path, pattern: str, config: Optional[dict]
         logger.warning(f"No test files found in {suite_folder}")
         return []
 
-    # Filter by pattern (same as run_suite.py --pattern)
-    if pattern == '*' or pattern == '':
+    # Filter by patterns (same as run_suite.py --pattern)
+    if patterns == ['*'] or not patterns:
         return all_yaml_files
 
-    pattern_lower = pattern.lower()
     matched = []
     for yaml_file in all_yaml_files:
-        # Check if pattern matches the filename (case-insensitive partial match)
-        if pattern_lower in yaml_file.name.lower():
+        # Check if any pattern matches the filename
+        if matches_any_pattern(yaml_file.name, patterns, use_wildcards):
             matched.append(yaml_file)
             continue
+        
         # Also check against the test name inside the file
         # (This is more expensive, so we do it only if filename didn't match)
         try:
             with open(yaml_file) as f:
                 data = yaml.safe_load(f)
                 test_name = data.get('name', '')
-                if pattern_lower in test_name.lower():
+                if matches_any_pattern(test_name, patterns, use_wildcards):
                     matched.append(yaml_file)
         except Exception:
             pass

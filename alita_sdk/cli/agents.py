@@ -385,7 +385,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             access_msg += f" [exclude: {', '.join(exclude_tools)}]"
         console.print(f"[dim]{access_msg}[/dim]")
     
-    # Add planning tools (always available)
+    # Add planning tools (if enabled via agent config)
     planning_tools = None
     plan_state_obj = None
     if plan_state is not None:
@@ -1207,7 +1207,11 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         # Initialize session for persistence (memory + plan)
         from .tools import generate_session_id, create_session_memory, save_session_metadata, to_portable_path
         current_session_id = generate_session_id()
-        plan_state = {'session_id': current_session_id}
+        
+        # Only enable planning if explicitly requested via agent config
+        # Check agent_def for 'enable_planning' flag (default: False to reduce overhead)
+        enable_planning = agent_def.get('enable_planning', False)
+        plan_state = {'session_id': current_session_id} if enable_planning else None
         
         # Create persistent memory for agent (stored in session directory)
         memory = create_session_memory(current_session_id)
@@ -2659,10 +2663,14 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             from langgraph.checkpoint.sqlite import SqliteSaver
             memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
             
+            # Check if planning is enabled for this agent (default: False)
+            enable_planning = agent_def.get('enable_planning', False)
+            plan_state = {} if enable_planning else None
+            
             # Setup local agent executor (reuses same logic as agent_chat)
             try:
                 agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                    client, agent_def, toolkit_config, ctx.obj['config'], model, temperature, max_tokens, memory, work_dir, {}
+                    client, agent_def, toolkit_config, ctx.obj['config'], model, temperature, max_tokens, memory, work_dir, plan_state
                 )
             except Exception as e:
                 error_panel = Panel(

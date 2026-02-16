@@ -981,7 +981,7 @@ def main():
     suite_name = "Custom"
     pipelines = []  # For remote mode
     test_files = []  # For local mode
-    pattern = args.pattern[0] if args.pattern else "*"
+    patterns = args.pattern if args.pattern else ["*"]
 
     # Remote mode variables (initialized here to avoid warnings)
     base_url = None
@@ -1016,7 +1016,7 @@ def main():
         if not args.folder:
             parser.error("--local mode requires a folder argument")
 
-        pipelines = find_tests_in_suite(folder_path, pattern, config)
+        pipelines = find_tests_in_suite(folder_path, patterns, config, args.wildcards)
     else:
         # REMOTE: Get pipelines from folder and match with backend
         base_url = args.base_url or load_from_env("BASE_URL") or load_from_env(
@@ -1115,7 +1115,8 @@ def main():
     # VALIDATE: Common for both modes
     # ========================================
     if not pipelines:
-        error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
+        pattern_display = ', '.join(patterns) if patterns != ['*'] else '*'
+        error_msg = f"No pipelines found matching pattern(s) '{pattern_display}'" if args.local else "No pipelines found matching criteria"
         print(f"Error: {error_msg}", file=sys.stderr)
         sys.exit(1)
 

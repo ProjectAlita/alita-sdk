@@ -245,9 +245,64 @@ jobs:
           # Build the results path first
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json"
           
-          # Single quotes inside the sh -c command keep the message as one argument
-          docker-compose run --rm alita-sdk \
-          sh -c "alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH}'" || echo "AI analysis completed with warnings"
+          # Run without --rm to keep container for file extraction
+          docker-compose run --name alita-sdk-fixer alita-sdk \
+          sh -c "alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${{ github.ref }}'" || echo "AI analysis completed with warnings"
+
+      - name: Copy AI analysis outputs
+        if: always()
+        run: |
+          echo "Copying fix analysis files from container..."
+          docker cp alita-sdk-fixer:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_output.json ./fix_output.json || echo "{}" > ./fix_output.json
+          docker cp alita-sdk-fixer:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_milestone.json ./fix_milestone.json || echo "{}" > ./fix_milestone.json
+          
+          echo "fix_output.json content:"
+          cat ./fix_output.json
+          
+          # Remove the fixer container after copying files
+          docker rm alita-sdk-fixer || true
+          
+      - name: Parse fix_output.json and check for blocked tests
+        if: always()
+        id: check_blocked
+        run: |
+          echo "Parsing fix_output.json for blocked tests..."
+          
+          # Check if file exists and is valid JSON
+          if [ ! -f ./fix_output.json ]; then
+            echo "fix_output.json not found"
+            echo "bug_report_needed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Parse blocked count
+          BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
+          echo "Blocked tests count: $BLOCKED_COUNT"
+          
+          # Check if any blocked tests need bug reports
+          if [ "$BLOCKED_COUNT" -gt 0 ]; then
+            BUG_REPORT_NEEDED=$(jq -r '[.blocked[]? | select(.bug_report_needed == true)] | length > 0' ./fix_output.json)
+            
+            if [ "$BUG_REPORT_NEEDED" = "true" ]; then
+              echo "::notice::Bug report needed for blocked tests"
+              echo "bug_report_needed=true" >> $GITHUB_OUTPUT
+              
+              # Export blocked tests details for bug report
+              jq -r '.blocked[]? | select(.bug_report_needed == true)' ./fix_output.json > blocked_tests_details.json
+              echo "Blocked tests requiring bug reports:"
+              cat blocked_tests_details.json
+            else
+              echo "bug_report_needed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No blocked tests found"
+            echo "bug_report_needed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create bug reports for blocked tests
+        if: ${{ always() && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        run: |
+          echo "::notice::Creating bug reports for blocked tests"
           
       - name: Stop docker-compose
         if: always()
@@ -261,6 +316,9 @@ jobs:
           path: |
             ./results.html
             ./docker-logs.txt
+            ./fix_output.json
+            ./fix_milestone.json
+            ./blocked_tests_details.json
           retention-days: 1
 
       - name: CLEAN UP WORKSPACE AFTER RUN
