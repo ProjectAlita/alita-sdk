@@ -965,7 +965,6 @@ def main():
     suite_name = "Custom"
     pipelines = []  # For remote mode
     test_files = []  # For local mode
-    pattern = args.pattern[0] if args.pattern else "*"
 
     # Remote mode variables (initialized here to avoid warnings)
     base_url = None
@@ -1000,7 +999,31 @@ def main():
         if not args.folder:
             parser.error("--local mode requires a folder argument")
 
-        pipelines = find_tests_in_suite(folder_path, pattern, config)
+        # Get all test files, then filter by pattern if specified
+        all_test_files = find_tests_in_suite(folder_path, "*", config)
+        
+        if args.pattern:
+            # Filter by patterns (same logic as remote mode)
+            filtered_files = []
+            for test_file in all_test_files:
+                # Load test name from YAML
+                try:
+                    with open(test_file) as f:
+                        import yaml
+                        data = yaml.safe_load(f)
+                        test_name = data.get('name', '')
+                        # Match against filename or test name
+                        if matches_any_pattern(test_file.name, args.pattern, args.wildcards) or \
+                           matches_any_pattern(test_name, args.pattern, args.wildcards):
+                            filtered_files.append(test_file)
+                except Exception:
+                    # If can't load, match by filename only
+                    if matches_any_pattern(test_file.name, args.pattern, args.wildcards):
+                        filtered_files.append(test_file)
+            pipelines = filtered_files
+            suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
+        else:
+            pipelines = all_test_files
     else:
         # REMOTE: Get pipelines from folder and match with backend
         base_url = args.base_url or load_from_env("BASE_URL") or load_from_env(

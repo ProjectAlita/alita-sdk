@@ -64,6 +64,14 @@ print_usage() {
     echo "  # Run with multiple patterns (wildcards)"
     echo "  $0 --all -w github_toolkit --pattern 'GH1[0-9]' --pattern 'GH2*'"
     echo ""
+    echo "  # Run multiple tests by listing patterns as arguments"
+    echo "  $0 -v --local suites/postman pst01 pst02 pst03  # Runs 3 tests: pst01, pst02, pst03"
+    echo "  $0 github_toolkit GH01 GH02 GH03                # Runs 3 tests matching these patterns"
+    echo ""
+    echo "  # Run all tests in suite (requires --pattern or test name)"
+    echo "  $0 --local suites/postman '*'                   # Runs all tests (wildcard)"
+    echo "  # $0 --local suites/postman                     # ❌ ERROR: pattern required"
+    echo ""
     echo "  # Full workflow for single test"
     echo "  $0 --all github_toolkit update_file"
     echo ""
@@ -72,6 +80,11 @@ print_usage() {
     echo ""
     echo "  # Run locally without backend"
     echo "  $0 --local github_toolkit update_file"
+    echo ""
+    echo "Note:"
+    echo "  - Multiple patterns can be specified as positional args (space-separated)"
+    echo "  - At least ONE pattern is always required (use '*' for all tests)"
+    echo "  - Local mode (--local) doesn't require setup/seed, runs tests directly"
     echo ""
     echo "Workflow:"
     echo "  1. First run:  $0 --setup --seed <suite> <pattern>"
@@ -146,7 +159,28 @@ done
 # Restore positional parameters
 set -- "${POSITIONAL[@]}"
 
-# Parse suite and optional pattern from positional args
+# ============================================================================
+# Parse suite and pattern(s) from positional arguments
+# ============================================================================
+# Examples of how patterns are parsed:
+#
+#   Command: run_test.sh -v --local suites/postman pst01 pst02 pst03
+#   Result:  SUITE="suites/postman", PATTERNS=("pst01" "pst02" "pst03")
+#            → Runs 3 tests matching pst01, pst02, pst03
+#
+#   Command: run_test.sh -v --local suites/postman
+#   Result:  ERROR - Pattern required (at least one pattern must be provided)
+#
+#   Command: run_test.sh --local suites/postman '*'
+#   Result:  SUITE="suites/postman", PATTERNS=("*")
+#            → Runs ALL tests in the suite (wildcard match)
+#
+#   Command: run_test.sh suites/postman --pattern pst01 --pattern pst02
+#   Result:  SUITE="suites/postman", PATTERNS=("pst01" "pst02")
+#            → Same as positional: runs both pst01 and pst02
+# ============================================================================
+
+# Parse suite and optional pattern(s) from positional args
 if [ $# -lt 1 ]; then
     echo -e "${RED}Error: Suite argument required${NC}"
     print_usage
@@ -154,11 +188,13 @@ if [ $# -lt 1 ]; then
 fi
 
 SUITE="$1"
-if [ $# -gt 1 ]; then
-    PATTERN="$2"
-    # If positional pattern provided but no --pattern flags, use positional
+shift  # Remove suite from positional args
+
+# Collect remaining args as patterns (if no --pattern flags were used)
+if [ $# -gt 0 ]; then
+    # If positional patterns provided but no --pattern flags, use all positional patterns
     if [ ${#PATTERNS[@]} -eq 0 ]; then
-        PATTERNS=("$PATTERN")
+        PATTERNS=("$@")  # Collect ALL remaining args
     fi
 elif [ ${#PATTERNS[@]} -eq 0 ]; then
     echo -e "${RED}Error: Pattern required (either as argument or via --pattern flag)${NC}\n"
