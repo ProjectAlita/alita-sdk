@@ -155,7 +155,7 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: cleanup_branch
+    transition: validate_results
 
   - id: validate_results
     type: llm
