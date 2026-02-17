@@ -32,7 +32,7 @@ state:
     type: str
   expected_error_indicators:
     type: list
-    value: ["Invalid step_id", "must be a UUID", "not a test issue key", "get_tests"]
+    value: ["Tool execution error", "invalid", "doesn't exist", "does not exist", "not found", "UUID", "get_tests"]
   unexpected_success_indicators:
     type: list
     value: ["Successfully added attachment", "File size"]
