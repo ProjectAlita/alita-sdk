@@ -317,6 +317,11 @@ run_suite() {
         return 1
     fi
 
+    # Create copy for bug reporter
+    if [ -f "$results_file" ]; then
+        cp "$results_file" "${suite_output_dir}/results_for_bug_reporter.json"
+    fi
+
     # Step 4: Cleanup
     if [ "$SKIP_CLEANUP" = false ]; then
         print_step "Step 4/4: Cleaning up $suite_spec"
@@ -433,6 +438,11 @@ run_suite_local() {
         else
             SUITE_RESULTS["$suite_spec"]="PASSED"
         fi
+    fi
+
+    # Create copy for bug reporter
+    if [ -f "$results_file" ]; then
+        cp "$results_file" "${suite_output_dir}/results_for_bug_reporter.json"
     fi
 
     # Step 3: Cleanup (with --local flag)

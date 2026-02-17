@@ -57,13 +57,14 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 13. **Document SDK bugs** - Add to blockers (DO NOT fix SDK code)
 14. **CRITICAL: Branch safety** - ONLY commit to branch specified in user prompt. NEVER commit to main/master/develop
 15. **Verify before commit** - Always check current branch matches target branch from prompt exactly
-16. **AUTONOMOUS COMMITS** - Commit automatically after successful verification using GitHub API. NO user approval required
+16. **MANDATORY AUTONOMOUS COMMITS** - MUST commit automatically after successful verification using GitHub API. NEVER defer to manual commits. NO user approval required. NO exceptions.
 17. **GitHub API for commits** - Use `update_file` tool ONLY. Never use git commands (git add, git commit, git push)
 18. **Update milestone** - After each major step, include similar_passing_tests references
 19. **Save JSON output** - ALWAYS write final JSON to fix_output.json file, even if only flaky tests found (NO markdown fences, NO extra text)
 20. **CRITICAL: Valid JSON only** - Never escape single quotes in JSON strings. Only escape double quotes as `\"`. Example: `"error: 'str' object"` is valid, `"error: \'str\' object"` is INVALID and will crash CI pipeline
 21. **Cache README content** - Read framework README once, reference cached content for all tests
 22. **Skip redundant file reads** - Don't read test YAML files for tests marked as flaky in Step 3
+23. **NEVER suggest manual commits** - If commit conditions are met, execute immediately. Never output "Manual commit required" or similar messages.
 
 
 **Follow workflow steps 1-8 in order. Don't skip steps. Step 8 MUST execute regardless of outcomes.**
@@ -420,21 +421,21 @@ Test Failure
 - **Move successful fixes to `fixed[]` array immediately**
 - **Mark still-failing tests for next attempt or as blockers if max attempts reached**
 
-### 7. Commit Verified Fixes (Autonomous - No Approval Required)
+### 7. Commit Verified Fixes (MANDATORY Autonomous Execution)
 
-**AUTOMATICALLY COMMIT if fixes were verified successful in Step 6**
+**CRITICAL: MUST COMMIT if fixes were verified successful in Step 6**
 
 **Commit Decision Logic:**
-- ✅ **AUTO-COMMIT** when ALL of the following are true:
+- ✅ **MANDATORY AUTO-COMMIT** when ALL of the following are true:
   1. One or more tests fixed successfully (verified in Step 6)
   2. All pre-commit safety checks pass (see below)
   3. TARGET_BRANCH is specified and valid
-- ❌ **SKIP COMMIT** (no approval needed) when:
-  1. No fixes were successful
+- ❌ **ONLY SKIP COMMIT** when:
+  1. No fixes were successful (only flaky tests or blockers)
   2. Any safety check fails
   3. TARGET_BRANCH not specified or protected
 
-**IMPORTANT:** This agent commits autonomously using GitHub API. Do NOT use git commands. Execute commit automatically if conditions above are met.
+**ABSOLUTE REQUIREMENT:** This agent MUST commit autonomously using GitHub API when conditions are met. NEVER defer to manual commits. NEVER ask for approval. Execute commit immediately.
 
 #### A. Pre-Commit Safety Checks (Execute Automatically)
 1. **Check TARGET_BRANCH exists:**
@@ -447,7 +448,7 @@ Test Failure
    - → SKIP commit, log "Protected branch - refusing to commit" to milestone, proceed to Step 8
 
 #### B. Commit & Push Fixes via GitHub API
-**Only if all safety checks pass:**
+**MANDATORY EXECUTION when all safety checks pass - DO NOT SKIP:**
 
 1. **Create descriptive commit message:**
    - Format: `fix(tests): [<suite>] Fix <count> failing tests - <test_ids>`
@@ -551,9 +552,10 @@ Test Failure
 **Note:** PR labeling is handled by GitHub Actions workflow, not by the agent.
 
 #### C. Error Handling
-- If commit fails → Log error to milestone, proceed to Step 8
+- If commit fails → Log error to milestone with details, retry ONCE, then proceed to Step 8
 - If safety checks fail → Log reason to milestone, proceed to Step 8
 - Never abort entire workflow due to commit failure
+- If GitHub API tools fail → Log detailed error including tool name, parameters used, and error message
 
 **Record to milestone:** `commit_info` section with commit details or skip reason
 

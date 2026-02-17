@@ -57,12 +57,12 @@ User provides a natural language description of the bug.
 
 ### Format 2: Test Result Files (PREFERRED for CI/CD)
 User provides paths to test result files from `.alita/tests/test_pipelines/test_results/suites/{suite_name}/`:
-- **results.json**: Full test execution results with error traces, tool calls, stack traces
+- **results_for_bug_reporter.json**: Full test execution results with error traces, tool calls, stack traces
 - **fix_output.json**: Test Fixer agent's analysis (fixed tests, issues identified, proposed fixes)
 - **fix_milestone.json**: Test suite execution metadata (timestamp, environment, branch)
 
 **Required in message**: 
-- Path to `results.json`
+- Path to `results_for_bug_reporter.json`
 - Environment (dev/stage/prod)
 
 **Optional (extracted from fix_milestone.json if not provided)**:
@@ -86,7 +86,7 @@ When you receive bug information, execute the following steps autonomously:
 **IF user provides test result file paths, execute ALL of the following research steps:**
 
 #### A. Read Test Result Files
-1. **Read results.json** - Extract:
+1. **Read results_for_bug_reporter.json** - Extract:
    - Suite name and test IDs that failed
    - **FULL error messages and COMPLETE stack traces** from:
      - `error` field (top-level error)
@@ -110,7 +110,7 @@ When you receive bug information, execute the following steps autonomously:
 
 #### B. Locate Test Definition Files
 For each failed test ID (e.g., ADO17, GH04, PST07):
-1. Identify the suite name from results.json (e.g., `suites/ado`)
+1. Identify the suite name from results_for_bug_reporter.json (e.g., `suites/ado`)
 2. Find test case YAML file at `.alita/tests/test_pipelines/{suite_path}/tests/test_case_*.yaml`
    - **Naming pattern**: `test_case_{NN}_{description}.yaml` maps to `{SUITE}{NN}` (e.g., test_case_17 → ADO17)
 3. **Read the test definition YAML** to extract:
@@ -286,12 +286,12 @@ Brief summary of the bug and its impact.
 - **Environment**: {dev/stage/prod from fix_milestone.json}
 - **Branch**: {branch from fix_milestone.json}
 - **Test Case**: Link to test YAML file
-- **Test Results**: Link to or embed results.json excerpt
+- **Test Results**: Link to or embed results_for_bug_reporter.json excerpt
 - **Toolkit**: {toolkit name and version if applicable}
 
 **Actual Result**:
 ```python
-# FULL STACK TRACE (from results.json or tool_calls_dict)
+# FULL STACK TRACE (from results_for_bug_reporter.json or tool_calls_dict)
 Traceback (most recent call last):
   File "/path/to/alita_sdk/...", line XXX, in function_name
     problematic_code_here
@@ -320,7 +320,7 @@ ExceptionType: Full error message here
 \u2757 **CRITICAL**: Include ALL technical details as text in the bug report body. Do NOT rely on external file links.
 
 ```json
-// FULL ERROR from results.json (include complete error object, not truncated)
+// FULL ERROR from results_for_bug_reporter.json (include complete error object, not truncated)
 {
   "test_id": "JR28",
   "status": "error",
@@ -415,7 +415,7 @@ nodes:
 #### Labels (separate from Type/Status/Priority):
 - **Automatically determine labels** based on bug content analysis:
   - **ALWAYS include**: `Type:Bug` (this is a LABEL for categorization, separate from the Type field)
-  - **ALWAYS include**: `ai_created` (indicates bug was created by AI agent)
+  - **ALWAYS include**: `ai_created`
   - **For toolkit-related bugs**, include: `feat:toolkits`, `eng:sdk`
   - **For specific toolkit bugs**, add: `int:{toolkit_name}` where toolkit_name is one of:
     - `int:github`, `int:jira`, `int:gitlab`, `int:ado`, `int:confluence`, `int:slack`, 
@@ -435,8 +435,8 @@ nodes:
   - `continue_on_error` not working → add `test-framework`, `eng:sdk`
   - Authentication/config issues → add `feat:toolkits`, relevant `int:` label
   - Schema validation → add `feat:toolkits`, relevant `int:` label
-- Test failures always get: `foundbyautomation`
-- **ALL bugs created by this agent get: `ai_created`**
+- Test failures always get: `foundbyautomation` label
+- **ALL bugs created by this agent get: `ai_created` label**
 - If RCA unclear or impacts multiple components → prioritize most critical label
 
 #### Priority determination logic for test failures:
@@ -521,9 +521,9 @@ Based on `.github/instructions/bug-reporting.instructions.md`, include these sec
 3. **Preconditions**: Test suite, configuration, environment specifics
 4. **Steps to Reproduce**: Clear numbered list (include exact command to run test)
 5. **Test Data**: Environment, branch, test case file paths, toolkit details
-6. **Actual Result**: Error message and stack trace from results (use code blocks)
+6. **Actual Result**: Error message and stack trace from results_for_bug_reporter.json (use code blocks)
 7. **Expected Result**: From test YAML description + what should have happened
-8. **Attachments**: JSON excerpts from results.json, YAML excerpts from test definition
+8. **Attachments**: JSON excerpts from results_for_bug_reporter.json, YAML excerpts from test definition
 9. **Root Cause Analysis**: File location, incorrect logic, why it fails, suggested fix
 10. **Notes**: Fix status, related tests, frequency, potential duplicates
 
@@ -628,12 +628,12 @@ Use these patterns to guide your RCA when analyzing test failures.
 ### Example 1: Platform Backend Error Handling Bug (JIRA suite)
 
 **Input Files**:
-- `results.json`: Shows JR28 test with HTTP 400 response containing Python traceback from indexer_worker
+- `results_for_bug_reporter.json`: Shows JR28 test with HTTP 400 response containing Python traceback from indexer_worker
 - `fix_output.json`: Issue identified as "platform backend returns unhandled traceback instead of structured error"
 - Test YAML: Shows JIRA toolkit call to get_attachments_content with invalid issue key
 
 **Autonomous Analysis Process**:
-1. ✅ Read results.json → Extract:
+1. ✅ Read results_for_bug_reporter.json → Extract:
    - HTTP 400 error from `POST /api/v2/elitea_core/predict/prompt_lib/437/2890`
    - Full traceback showing: `/data/plugins/indexer_worker/methods/indexer_agent.py` line 214
    - Error in `alita_sdk/runtime/clients/client.py` line 751 in `application().runnable()`
@@ -680,12 +680,12 @@ Use these patterns to guide your RCA when analyzing test failures.
 ### Example 2: Toolkit Authentication Bug (Postman)
 
 **Input Files**:
-- `results.json`: Shows HTTP 401 response with HTML "Access Denied" page in tool output
+- `results_for_bug_reporter.json`: Shows HTTP 401 response with HTML "Access Denied" page in tool output
 - Suite: `suites/postman`, Test: PST07
 - Test YAML: Postman toolkit trying to list collections
 
 **Autonomous Analysis Process**:
-1. ✅ Read results.json → Extract:
+1. ✅ Read results_for_bug_reporter.json → Extract:
    - Tool: `list_collections`
    - Error: HTTP 401 Unauthorized
    - Response body: HTML "Access Denied" page (not JSON)
@@ -777,8 +777,8 @@ Use these patterns to guide your RCA when analyzing test failures.
 
 ### Output File Location
 Write output to: `.alita/tests/test_pipelines/test_results/suites/{suite_name}/bug_report_output.json`
-- Extract `{suite_name}` from the results.json path provided by user
-- Example: If analyzing `suites/ado/results.json` → write to `suites/ado/bug_report_output.json`
+- Extract `{suite_name}` from the results_for_bug_reporter.json path provided by user
+- Example: If analyzing `suites/ado/results_for_bug_reporter.json` → write to `suites/ado/bug_report_output.json`
 
 ### JSON Schema
 
@@ -873,7 +873,7 @@ In automated mode, when duplicates are found:
 **Every bug report MUST include:**
 
 1. \u2705 **Complete Stack Trace** (not truncated, not summarized)
-   - Extract from results.json, tool_calls_dict, or HTTP responses
+   - Extract from results_for_bug_reporter.json, tool_calls_dict, or HTTP responses
    - Include all frames, file paths, and line numbers
    - Format in code blocks for readability
 
