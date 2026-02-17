@@ -9,7 +9,7 @@ step_limit: 50
 persona: "generic"
 lazy_tools_mode: false
 enable_planning: false
-filesystem_tools_preset: "safe"
+filesystem_tools_preset: "no_delete"
 ---
 # Bug Reporter Agent
 
