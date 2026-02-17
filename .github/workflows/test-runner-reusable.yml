@@ -360,15 +360,39 @@ jobs:
                 echo ""
                 echo "### 📋 Fix Milestone"
                 echo ""
-                MILESTONE=$(jq -r '.milestone // "No milestone data"' ./fix_milestone.json)
-                NEXT_STEPS=$(jq -r '.next_steps // []' ./fix_milestone.json)
                 
-                echo "$MILESTONE"
+                # Display key milestone fields
+                ENV=$(jq -r '.environment // "N/A"' ./fix_milestone.json)
+                BRANCH=$(jq -r '.ci_target_branch // "N/A"' ./fix_milestone.json)
+                SUITE=$(jq -r '.suite // "N/A"' ./fix_milestone.json)
+                FAILED_COUNT=$(jq -r '.failed_tests // 0' ./fix_milestone.json)
+                
+                echo "- **Environment:** $ENV"
+                echo "- **Target Branch:** \`$BRANCH\`"
+                echo "- **Suite:** $SUITE"
+                echo "- **Failed Tests Analyzed:** $FAILED_COUNT"
                 echo ""
                 
-                if [ "$NEXT_STEPS" != "[]" ]; then
-                  echo "**Next Steps:**"
-                  jq -r '.next_steps[]? | "- \(.)"' ./fix_milestone.json
+                # Show error patterns if any
+                ERROR_PATTERNS_COUNT=$(jq -r '.error_patterns // [] | length' ./fix_milestone.json)
+                if [ "$ERROR_PATTERNS_COUNT" -gt 0 ]; then
+                  echo "**Error Patterns Identified:**"
+                  jq -r '.error_patterns[]? | "- \(.description) (Tests: \(.test_ids | join(", ")))"' ./fix_milestone.json
+                  echo ""
+                fi
+                
+                # Show fix attempts summary
+                FIX_ATTEMPTS_COUNT=$(jq -r '.fix_attempts // [] | length' ./fix_milestone.json)
+                if [ "$FIX_ATTEMPTS_COUNT" -gt 0 ]; then
+                  echo "**Fix Attempts:** $FIX_ATTEMPTS_COUNT"
+                  jq -r '.fix_attempts[]? | "- Attempt \(.attempt): \(.fix_description)"' ./fix_milestone.json
+                  echo ""
+                fi
+                
+                # Show rerun attempts
+                RERUN_COUNT=$(jq -r '.rerun_attempts // [] | length' ./fix_milestone.json)
+                if [ "$RERUN_COUNT" -gt 0 ]; then
+                  echo "**Rerun Attempts:** $RERUN_COUNT"
                 fi
               fi
               
