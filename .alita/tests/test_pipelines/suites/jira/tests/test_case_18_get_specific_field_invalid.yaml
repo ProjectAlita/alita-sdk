@@ -44,6 +44,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true
     transition: process_results
 
   - id: process_results
@@ -62,14 +63,16 @@ nodes:
 
           Tool Result: {tool_result}
 
+          This test validates error handling for non-existent fields.
+
           Perform the following checks:
           1. Confirm the tool executed (result is not empty or null).
-          2. Examine any error message for specific meaning. Valid error patterns for invalid issues include:
-             - issue key does not exist or is invalid
-             - issue not found or cannot be accessed
-             - insufficient permissions to view the issue
-             - http error codes 404 (not found) or 403 (forbidden)
-          3. Determine if the error is about the invalid issue itself. Errors like "INVALID-99999 does not exist" are expected and correct. System errors unrelated to the invalid issue key are failures.
+          2. Examine any error message for specific meaning. Valid error patterns for invalid fields include:
+             - field name does not exist or is invalid
+             - field not found in the issue
+             - requested field doesn't exist
+             - unknown field name
+          3. Determine if the error is about the invalid field itself. Errors like "invalid_field_xyz doesn't exist" or "field not found" are expected and correct. System errors unrelated to the invalid field name are failures.
 
           Return a JSON object named test_results with the following structure:
 
