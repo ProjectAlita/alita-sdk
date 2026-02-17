@@ -363,7 +363,7 @@ jobs:
               if [ "$BLOCKED_COUNT" -gt 0 ]; then
                 echo "### ❌ Blocked Tests"
                 echo ""
-                jq -r '.blocked[]? | "- **\(.test_ids | join(", "))**\n  - Issue: \(.issue // "N/A")\n  - Recommendation: \(.recommendation // "N/A")\n  - Bug Report Needed: \(.bug_report_needed // false)\n"' ./fix_output.json
+                jq -r '.blocked[]? | "- **\(.test_ids | join(", "))**\n  - **Bug Description:** \(.bug_description // "N/A")\n  - **Expected Behavior:** \(.expected_behavior // "N/A")\n  - **Actual Behavior:** \(.actual_behavior // "N/A")\n  - **SDK Component:** \(.sdk_component // "N/A")\n  - **Affected Methods:** \(.affected_methods | join(", ") // "N/A")\n  - **Error Location:** \(.error_location // "N/A")\n  - **Bug Report Needed:** \(.bug_report_needed // false)\n"' ./fix_output.json
               fi
               
               # Add milestone summary if available
@@ -475,6 +475,27 @@ jobs:
             echo "bug_report_needed=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Prepare results for bug reporter
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        run: |
+          echo "Ensuring original results.json is available for bug reporter via volume mount..."
+          
+          # Create the target directory if it doesn't exist
+          mkdir -p .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}
+          
+          # Copy results.json back to the mounted directory so bug reporter can access it
+          if [ -f ./results.json ]; then
+            echo "✅ Copying original results.json to mounted directory"
+            cp ./results.json .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json
+            cat ./results.json | jq '.summary // {}'
+          else
+            echo "⚠️ results.json not found locally"
+          fi
+          
+          # Also copy fix_output.json and fix_milestone.json if they exist
+          [ -f ./fix_output.json ] && cp ./fix_output.json .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_output.json || true
+          [ -f ./fix_milestone.json ] && cp ./fix_milestone.json .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_milestone.json || true
+
       - name: Create bug reports for blocked tests
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
         run: |
@@ -489,7 +510,7 @@ jobs:
           # Build the results path
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
           
-          # Run bug reporter agent
+          # Run bug reporter agent (files are accessible via volume mount)
           docker-compose run --name alita-sdk-bug-reporter alita-sdk \
           sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . --message 'Analyze test failures in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
       
