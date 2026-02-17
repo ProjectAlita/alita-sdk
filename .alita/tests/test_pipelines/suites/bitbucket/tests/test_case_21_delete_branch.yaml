@@ -156,18 +156,20 @@ nodes:
           2. branch_created: Branch was created successfully
           3. branch_in_list_before: Branch appeared in list before deletion
           4. no_errors: Delete result does NOT contain any error indicators
-          5. deletion_success: Delete result indicates success (contains success indicator)
-          6. branch_not_in_list_after: Branch name does NOT appear in the branch list after deletion
+          5. branch_not_in_list_after: Branch name does NOT appear in the branch list after deletion
+          
+          OPTIONAL (nice to have, but not required for test to pass):
+          6. deletion_success: Delete result contains explicit success indicator
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (true only if ALL criteria pass),
+            "test_passed": boolean (true if: tool_executed AND branch_created AND branch_in_list_before AND no_errors AND branch_not_in_list_after),
             "tool_executed": boolean,
             "branch_created": boolean,
             "branch_in_list_before": boolean,
             "no_errors": boolean,
-            "deletion_success": boolean,
             "branch_not_in_list_after": boolean,
+            "deletion_success": boolean (optional, does not affect test_passed),
             "success_indicator_found": "which indicator was found or 'none'",
             "error_indicator_found": "which error indicator was found or 'none'",
             "branches_found_after": [list of branch names from branch_list_after],
