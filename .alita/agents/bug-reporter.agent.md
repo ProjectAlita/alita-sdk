@@ -1,6 +1,6 @@
 ---
 name: bug-reporter
-model: "gpt-5.2"
+model: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
 temperature: 0.1
 max_tokens: 16000
 toolkit_configs: 
