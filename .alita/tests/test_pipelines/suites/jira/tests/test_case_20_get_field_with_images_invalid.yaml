@@ -77,9 +77,11 @@ nodes:
           {{
             "test_passed": boolean,
             "summary": "Brief description of what the tool returned",
-            "error": "Error message if any, null otherwise",
+            "error": null,
             "explanation": "Why the test passed or failed based on the error meaning"
           }}
+
+          IMPORTANT: For negative tests that correctly handle invalid input, set "error" to null and "test_passed" to true.
 
           Return **ONLY** the JSON object. No markdown, no additional text.
       chat_history:
