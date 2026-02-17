@@ -28,7 +28,7 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 **START:** 
 1. Detect environment from user message (local/dev/stage/prod)
 2. Extract target branch from user prompt (e.g., "on branch feature/test-improvements")
-3. Read run.log in 100-line chunks and extract failed test IDs
+3. Read results.json to extract failed test IDs and error details
 4. **Read framework README** `.alita/tests/test_pipelines/README.md` first (focus on Test YAML Format section)
 5. **Find and read 2-3 similar passing tests but do not execute them** before attempting fixes
 6. Execute workflow steps 1-8 (using README and passing test patterns)
@@ -39,18 +39,21 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 1. **Follow workflow** - Execute steps 1-8 in order
 2. **Read files in chunks** - NEVER read more than 100 lines at once (prevents crashes)
 3. **Use bash -c for all commands** - Always wrap shell commands in `bash -c "..."` for Windows compatibility
-4. **Read run.log ONLY** - NEVER read results.json (causes hangs)
+4. **Read results.json for failures** - Use results.json as primary source for test failure information and error details
 5. **Batch reruns** - Run 2+ tests together when possible
-6. **ALWAYS read README first** - Read `.alita/tests/test_pipelines/README.md` before analyzing failures
-7. **Compare with passing tests** - Find 2-3 similar passing tests and use their patterns
-8. **Fix test YAMLs first** - 80% of issues are in test YAML, not framework. Don't search framework randomly
-9. **Fix test code** - Auto-fix assertions, timeouts, logic using established patterns
-10. **Document SDK bugs** - Add to blockers (DO NOT fix SDK code)
-11. **CRITICAL: Branch safety** - ONLY commit to branch specified in user prompt. NEVER commit to main/master/develop
-12. **Verify before commit** - Always check current branch matches target branch from prompt exactly
-13. **AUTONOMOUS COMMITS** - Commit automatically after successful verification. NO user approval required
-14. **Update milestone** - After each major step, include similar_passing_tests references
-15. **Save JSON output** - ALWAYS write final JSON to fix_output.json file, even if only flaky tests found (NO markdown fences, NO extra text)
+6. **Check run output for pass/fail** - When running tests, check terminal output to determine if tests passed or failed
+7. **Consult results.json selectively** - After reruns/verification, only read results.json when you need additional thinking about error details
+8. **Max 3 fix attempts** - Limit to 3 fix attempts per test to prevent infinite loops. If still failing after 3 attempts, document as blocker
+9. **ALWAYS read README first** - Read `.alita/tests/test_pipelines/README.md` before analyzing failures
+10. **Compare with passing tests** - Find 2-3 similar passing tests and use their patterns
+11. **Fix test YAMLs first** - 80% of issues are in test YAML, not framework. Don't search framework randomly
+12. **Fix test code** - Auto-fix assertions, timeouts, logic using established patterns
+13. **Document SDK bugs** - Add to blockers (DO NOT fix SDK code)
+14. **CRITICAL: Branch safety** - ONLY commit to branch specified in user prompt. NEVER commit to main/master/develop
+15. **Verify before commit** - Always check current branch matches target branch from prompt exactly
+16. **AUTONOMOUS COMMITS** - Commit automatically after successful verification. NO user approval required
+17. **Update milestone** - After each major step, include similar_passing_tests references
+18. **Save JSON output** - ALWAYS write final JSON to fix_output.json file, even if only flaky tests found (NO markdown fences, NO extra text)
 
 
 **Follow workflow steps 1-8 in order. Don't skip steps. Step 8 MUST execute regardless of outcomes.**
@@ -109,18 +112,19 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 - **Do NOT read environment variables** - branch must be explicitly in prompt
 - **Store extracted branch** in milestone under `ci_target_branch` field
 
-#### C. Read run.log
-- Read `.alita/tests/test_pipelines/test_results/suites/<suite>/run.log` using **CHUNKED READING**:
-  - **NEVER read entire file** (reading 800+ lines crashes execution)
-  - **Read in chunks of max 100 lines** at a time
-  - **Strategy:** Start from end of file (most recent test results)
-    1. First read: Last 100 lines (e.g., lines N-100 to N)
-    2. Extract failed test IDs from that chunk
-    3. Only read additional chunks (previous 100 lines) if needed for more context
-  - **Example:** For 800-line file, read lines 700-800 first, then 600-700 if needed
-- **NEVER read results.json or run.log entirely** directly (causes hangs) - only use as fallback for test IDs
-- If run.log not found → read `.alita/tests/test_pipelines/test_results/suites/<suite>/results.json` for failed test IDs (fallback only)
-- Extract failed test IDs (format: XR10, ADO15, GH08)
+#### C. Read results.json
+- Read `.alita/tests/test_pipelines/test_results/suites/<suite>/results.json` to extract:
+  - Failed test IDs (format: XR10, ADO15, GH08)
+  - Error messages and stack traces for each failure
+  - Test execution details (duration, status, etc.)
+- **JSON structure:** Results file contains array of test results with fields:
+  - `test_id`: Unique test identifier
+  - `status`: "passed", "failed", "error"
+  - `error_message`: Failure reason
+  - `error_type`: Category of error
+  - `duration`: Execution time
+- **Read strategy:** Parse JSON completely to get all failure information at once
+- If results.json not found or corrupted → read run.log as fallback (use chunked reading: max 100 lines at a time)
 
 ### 2. Group Failures by Error Pattern
 - Group tests with identical/similar errors
@@ -130,6 +134,8 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 - Use batch commands for 2+ tests in same group
 - Use environment-specific command format (see table above)
 - **ALWAYS use `bash -c "..."` wrapper** for Windows compatibility
+- **Check terminal/command output to determine pass/fail status** - look for "PASSED" or "FAILED" indicators in the run output
+- **After reruns:** Consult `.alita/tests/test_pipelines/test_results/suites/<suite>/results.json` ONLY if you need additional thinking about error patterns or test details
 - Record to milestone: `rerun_attempts` array
 - If passes on rerun → mark flaky, else → analyze
 - Rerun only failed tests (not full suite) to save time
@@ -178,6 +184,8 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 
 ### 5. Fix Tests (Auto-fix test code only)
 
+**CRITICAL: Maximum 3 fix attempts per test** - If a test still fails after 3 fix attempts, document as blocker and move on. This prevents infinite loops.
+
 #### A. Test YAML Fixes (Primary - Fix These First)
 
 **Test YAML Location:** `.alita/tests/test_pipelines/suites/<suite>/tests/*.yaml`
@@ -211,6 +219,12 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
    - Use patterns from passing tests
    - Don't invent new patterns - follow established conventions
    - Preserve test intent while fixing implementation
+
+5. **Track and verify:**
+   - Record this as attempt N (where N = 1, 2, or 3) in milestone
+   - Verify fix by rerunning test and checking terminal output
+   - If still fails and N < 3: Go back to step 1 with different approach
+   - If still fails and N = 3: Stop fixing, document as blocker with type "max_attempts_exceeded"
 
 **Common YAML Fix Scenarios:**
 
@@ -364,14 +378,19 @@ Test Failure
 - [ ] Fix is documented in milestone with clear rationale
 
 **Record to milestone:** `fix_attempts` array with:
+- `attempt` - Attempt number for this test (1, 2, or 3)
 - `files_modified` - What was changed
 - `fix_rationale` - Why this fix works
 - `similar_passing_tests` - Which tests were used as reference
 - `readme_section_consulted` - Which README sections were referenced
 - `alternatives_considered` - Other approaches considered
 
+**Important:** Track attempts per test. If a test reaches 3 attempts without success, stop fixing and document as blocker with reason "Max fix attempts (3) exceeded".
+
 ### 6. Verify Fixes
 - Rerun fixed tests in batch using `bash -c "..."` wrapper
+- **Check terminal/command output to determine pass/fail status** - look for "PASSED" or "FAILED" indicators in the run output
+- **After verification:** Consult `.alita/tests/test_pipelines/test_results/suites/<suite>/results.json` ONLY if you need additional details about failures
 - Record to milestone: `verification_result`
 
 ### 7. Commit Verified Fixes (Autonomous - No Approval Required)
@@ -647,6 +666,18 @@ Test Failure
       "workaround": "None available - tests will fail until SDK fix",
       "priority": "high",
       "timestamp": "2026-02-13T15:40:00Z"
+    },
+    {
+      "blocker_id": "blocker_2",
+      "test_ids": ["XR12"],
+      "blocker_type": "max_attempts_exceeded",
+      "title": "Test XR12 still failing after 3 fix attempts",
+      "description": "Attempted 3 different fixes (assertion logic, timeout increase, state variable fix) but test continues to fail. Requires deeper investigation beyond automated fixes.",
+      "fix_attempts_made": ["Attempt 1: Updated assertion logic", "Attempt 2: Increased timeout to 120s", "Attempt 3: Fixed state variable initialization"],
+      "last_error": "AssertionError: Expected 'success' but got 'undefined'",
+      "requires_action_from": "QA/Dev team for manual investigation",
+      "priority": "medium",
+      "timestamp": "2026-02-13T16:10:00Z"
     }
   ],
   "flaky_tests": [
