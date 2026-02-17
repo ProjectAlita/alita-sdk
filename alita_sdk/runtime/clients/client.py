@@ -640,7 +640,7 @@ class AlitaClient:
             return resp.json()
         logger.error(f"Failed to fetch application version details: {resp.status_code} - {resp.text}."
                      f" Application ID: {application_id}, Version ID: {application_version_id}, Project ID: {self.project_id}")
-        raise ApiDetailsRequestError(f"Failed to fetch application version details for {application_id}/{application_version_id}.")
+        raise ApiDetailsRequestError(f"Failed to fetch application version details for {application_id}/{application_version_id}: {resp.status_code} - {resp.text}")
 
     def get_integration_details(self, integration_id: str, format_for_model: bool = False):
         url = f"{self.integration_details}/{integration_id}"
