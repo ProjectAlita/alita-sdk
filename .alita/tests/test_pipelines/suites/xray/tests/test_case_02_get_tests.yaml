@@ -1,0 +1,103 @@
+name: "XR02 - get_tests: Retrieve tests by JQL query"
+description: |
+  Verify the Xray 'get_tests' tool retrieves tests using JQL query.
+
+  Objective: Test JQL-based test retrieval from Xray
+
+  Expected Behavior:
+  - JQL query executes without errors
+  - Returns list of tests matching query
+  - Response contains test details
+  - No error indicators in output
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  jql_query:
+    type: str
+    value: "labels in (ELITEA_AI_CREATED) ORDER BY assignee"
+  get_tests_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["Extracted tests", "issueId", "jira"]
+  error_indicators:
+    type: list
+    value: ["Unable to get tests", "error", "failed", "exception"]
+  test_results:
+    type: dict
+
+entry_point: get_tests
+nodes:
+  - id: get_tests
+    type: toolkit
+    input:
+      - jql_query
+    input_mapping:
+      jql:
+        type: variable
+        value: jql_query
+    output:
+      - get_tests_result
+    structured_output: false
+    tool: get_tests
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - get_tests_result
+      - jql_query
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_tests' tool execution.
+
+          JQL Query: {jql_query}
+          Get Tests Result: {get_tests_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test retrieval.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran without throwing an exception
+          2. no_errors: Output does NOT contain error indicators
+          3. has_extracted_tests: Response indicates "Extracted tests" with count
+          4. has_test_data: Response contains test details (issueId, jira fields)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "has_extracted_tests": boolean,
+            "has_test_data": boolean,
+            "tests_count": integer (number of tests found, or 0 if none),
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

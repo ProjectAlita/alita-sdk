@@ -1,0 +1,27 @@
+{
+  "type": "qtest",
+  "toolkit_name": "qtest",
+  "id": 1,
+  "qtest_configuration": {
+    "alita_title": "qtest",
+    "private": true
+  },
+  "qtest_project_id": 1,
+  "selected_tools": [
+    "search_by_dql",
+    "create_test_cases",
+    "find_test_case_by_id",
+    "update_test_case",
+    "delete_test_case",
+    "get_modules",
+    "get_all_test_cases_fields_for_project",
+    "find_test_cases_by_requirement_id",
+    "find_requirements_by_test_case_id",
+    "find_test_runs_by_test_case_id",
+    "find_defects_by_test_run_id",
+    "add_file_to_test_case",
+    "search_entities_by_dql",
+    "find_entity_by_id"
+  ],
+  "no_of_tests_shown_in_dql_search": 10
+}

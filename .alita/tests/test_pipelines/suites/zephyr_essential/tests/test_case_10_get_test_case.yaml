@@ -1,0 +1,186 @@
+name: "ZE10 - get_test_case: Retrieve test case by key"
+description: |
+  Verify the Zephyr Essential 'get_test_case' tool retrieves test case details by key.
+
+  Objective: Test test case retrieval by key after creation in AI tests folder (ID: 32965916)
+
+  Expected Behavior:
+  - Test case is created first in AI tests folder
+  - Test case details are retrieved without errors
+  - Returns test case with matching key
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  create_result:
+    type: str
+  error_indicators:
+    type: list
+    value:
+      - error
+      - failed
+      - exception
+      - not found
+      - unauthorized
+  expected_success_indicators:
+    type: list
+    value:
+      - key
+      - id
+      - name
+  get_result:
+    type: str
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  test_case_json:
+    type: str
+  test_case_key:
+    type: str
+  test_case_name:
+    type: str
+  test_results:
+    type: dict
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        import json
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique test case name
+        test_case_name = f"Test Case ZE10 {timestamp}-{random_suffix}"
+
+        # Create JSON payload for test case creation
+        test_case_data = {
+            "name": test_case_name,
+            "projectKey": "${ZEPHYR_PROJECT_KEY:ASDKSUP}",
+            "folderId": 32965916,
+            "priority": "Normal",
+            "status": "Draft"
+        }
+        test_case_json = json.dumps(test_case_data)
+
+        {"test_case_name": test_case_name, "test_case_json": test_case_json}
+    output:
+      - test_case_name
+      - test_case_json
+    structured_output: true
+    transition: create_test_case
+  - id: create_test_case
+    type: toolkit
+    input:
+      - test_case_json
+    input_mapping:
+      json:
+        type: variable
+        value: test_case_json
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: extract_test_case_key
+  - id: extract_test_case_key
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        data = alita_state.get("create_result", {})
+        key_value = data['key']
+
+        {"test_case_key": key_value}
+    input:
+      - create_result
+    output:
+      - test_case_key
+    structured_output: true
+    transition: get_test_case
+  - id: get_test_case
+    type: toolkit
+    input:
+      - test_case_key
+    input_mapping:
+      test_case_key:
+        type: variable
+        value: test_case_key
+    output:
+      - get_result
+    structured_output: true
+    tool: get_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - get_result
+      - test_case_key
+      - test_case_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_test_case' tool execution.
+
+          Test Case Name: {test_case_name}
+          Test Case Key: {test_case_key}
+          Create Result: {create_result}
+          Get Result: {get_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test case retrieval.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Both tools ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. testcase_created: Test case was created successfully
+          4. testcase_retrieved: Test case details were retrieved successfully
+          5. correct_testcase: Test case key in get result matches created test case key
+          6. correct_name: Test case name in get result matches created test case name
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "testcase_created": boolean,
+            "testcase_retrieved": boolean,
+            "correct_testcase": boolean,
+            "correct_name": boolean,
+            "testcase_key_found": "key from get result or 'none'",
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: gpt-4o-2024-11-20
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

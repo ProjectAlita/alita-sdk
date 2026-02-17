@@ -1,0 +1,234 @@
+name: "XR06 - add_attachment_to_test_step: Add attachment to test step"
+description: |
+  Verify the Xray 'add_attachment_to_test_step' tool adds an attachment to a test step.
+
+  Objective: Test adding an attachment (text content) to an existing test step
+
+  Expected Behavior:
+  - Attachment is added without errors
+  - Returns success message with step info
+  - File name and size are confirmed
+  - No error indicators in output
+
+toolkits:
+  - id: ${XRAY_TOOLKIT_ID}
+    name: ${XRAY_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${XRAY_PROJECT_KEY:EL}
+  test_summary:
+    type: str
+  graphql_mutation:
+    type: str
+  create_result:
+    type: str
+  step_id:
+    type: str
+  attachment_filename:
+    type: str
+  attachment_content:
+    type: str
+  add_attachment_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["Successfully added attachment", "attachment", "step"]
+  error_indicators:
+    type: list
+    value: ["Failed to add", "Invalid step_id", "error", "exception"]
+  test_results:
+    type: dict
+
+entry_point: create_test_with_steps
+nodes:
+  - id: create_test_with_steps
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique test
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        test_summary = f"XR06 Attachment Test {timestamp}-{random_suffix}"
+        project_key = alita_state.get("project_key", "EL")
+        
+        # Create simple test with one step
+        graphql_mutation = f'''mutation {{
+          createTest(
+            testType: {{ name: "Manual" }},
+            steps: [
+              {{
+                action: "Test step for attachment",
+                result: "Step ready for attachment"
+              }}
+            ],
+            jira: {{
+              fields: {{
+                summary: "{test_summary}",
+                project: {{ key: "{project_key}" }},
+                description: "Test for XR06 attachment validation",
+                labels: ["ELITEA_AI_CREATED", "XR06_TEST"]
+              }}
+            }}
+          ) {{
+            test {{
+              issueId
+              steps {{
+                id
+                action
+              }}
+              jira(fields: ["key", "summary"])
+            }}
+          }}
+        }}'''
+        
+        {"test_summary": test_summary, "graphql_mutation": graphql_mutation}
+    input:
+      - project_key
+    output:
+      - test_summary
+      - graphql_mutation
+    structured_output: true
+    transition: create_test
+
+  - id: create_test
+    type: toolkit
+    input:
+      - graphql_mutation
+    input_mapping:
+      graphql_mutation:
+        type: variable
+        value: graphql_mutation
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    transition: extract_step_id
+
+  - id: extract_step_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        # Extract step ID from creation result
+        result_str = alita_state.get("create_result", "")
+        step_id = ""
+        
+        # Look for step id (UUID format)
+        step_id_match = re.search(r"'id':\s*'([a-f0-9\-]{36})'", result_str)
+        if not step_id_match:
+            step_id_match = re.search(r'"id":\s*"([a-f0-9\-]{36})"', result_str)
+        if step_id_match:
+            step_id = step_id_match.group(1)
+        
+        step_id
+    input:
+      - create_result
+    output:
+      - step_id
+    structured_output: false
+    transition: prepare_attachment
+
+  - id: prepare_attachment
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        attachment_filename = f"test-attachment-{timestamp}.txt"
+        attachment_content = f"Test attachment content\\nCreated: {timestamp}\\nThis validates XR06 attachment functionality."
+        
+        {"attachment_filename": attachment_filename, "attachment_content": attachment_content}
+    output:
+      - attachment_filename
+      - attachment_content
+    structured_output: true
+    transition: add_attachment
+
+  - id: add_attachment
+    type: toolkit
+    input:
+      - step_id
+      - attachment_filename
+      - attachment_content
+    input_mapping:
+      step_id:
+        type: variable
+        value: step_id
+      filename:
+        type: variable
+        value: attachment_filename
+      filedata:
+        type: variable
+        value: attachment_content
+    output:
+      - add_attachment_result
+    structured_output: false
+    tool: add_attachment_to_test_step
+    toolkit_name: ${XRAY_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - add_attachment_result
+      - step_id
+      - attachment_filename
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'add_attachment_to_test_step' tool execution.
+
+          Step ID: {step_id}
+          Attachment Filename: {attachment_filename}
+          Add Attachment Result: {add_attachment_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful attachment addition.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool executed without throwing exception
+          2. no_errors: Output does NOT contain error indicators
+          3. attachment_added: Attachment was successfully added
+          4. has_success_message: Response confirms attachment addition
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "attachment_added": boolean,
+            "has_success_message": boolean,
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

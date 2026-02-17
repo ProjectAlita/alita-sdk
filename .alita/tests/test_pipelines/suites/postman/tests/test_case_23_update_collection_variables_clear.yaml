@@ -1,0 +1,86 @@
+name: "PST23 update collection"
+priority: High
+description: |
+  Validates that the update_collection_variables tool properly handles clearing
+  all collection variables by passing null or empty array.
+  
+  Objective: Verify clearing collection variables
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - All collection variables are cleared
+  - Returns confirmation of the update
+  - Collection has no variables after operation
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  variables:
+    type: str
+    value: null
+entry_point: invoke_update_collection_variables
+
+nodes:
+  - id: invoke_update_collection_variables
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_collection_variables
+    input:
+      - variables
+    input_mapping:
+      variables:
+        type: variable
+        value: variables
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_collection_variables' tool when clearing variables.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_collection_variables clears all variables.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the variables were cleared or set to empty.
+          3. Check for success confirmation.
+          4. Validate no errors occurred during the operation.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if variables were cleared successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

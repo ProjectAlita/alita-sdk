@@ -13,23 +13,6 @@ on:
         required: false
         type: string
         default: 'local'
-       
-  workflow_dispatch:
-    inputs:
-      test_cases_dir:
-        description: 'Test cases directory (e.g., github, ado, confluence) or anything from .alita/tests/test_pipelines/suites'
-        required: true
-        type: string
-      environment:
-        description: 'Environment to run tests in'
-        required: true
-        type: choice
-        default: 'local'
-        options:
-          - local
-          - dev
-          - stage
-          - prod
 
 env:
   REGISTRY: ghcr.io
@@ -103,6 +86,11 @@ jobs:
           export JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}"
           export FIGMA_API_TOKEN="${{ secrets.FIGMA_API_TOKEN }}"
           export BITBUCKET_TOKEN="${{ secrets.BITBUCKET_TOKEN }}"
+          export XRAY_CLIENT_SECRET="${{ secrets.XRAY_CLIENT_SECRET }}"
+          export XRAY_CLIENT_ID="${{ secrets.XRAY_CLIENT_ID }}"
+          export ZEPHYR_ESENTIALS_KEY="${{ secrets.ZEPHYR_ESENTIALS_KEY }}"
+          export GITLAB_PRIVATE_TOKEN="${{ secrets.GITLAB_PRIVATE_TOKEN }}"
+          export POSTMAN_API_KEY="${{ secrets.POSTMAN_API_KEY }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"

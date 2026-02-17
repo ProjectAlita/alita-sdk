@@ -373,6 +373,19 @@ def parse_pipeline_yaml(yaml_path: Path, env_substitutions: dict = None) -> dict
         instructions_data = {k: v for k, v in data.items() if k not in ("name", "description")}
         instructions_yaml = yaml.dump(instructions_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
+    # Strip out continue_on_error from nodes (test framework metadata, not platform config)
+    if 'nodes' in data:
+        nodes = data['nodes']
+        if isinstance(nodes, list):
+            for node in nodes:
+                if isinstance(node, dict) and 'continue_on_error' in node:
+                    # Remove from data dict so it doesn't get serialized
+                    node.pop('continue_on_error', None)
+            
+            # Re-serialize nodes without continue_on_error
+            instructions_data = {k: v for k, v in data.items() if k not in ("name", "description")}
+            instructions_yaml = yaml.dump(instructions_data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
     # Apply environment variable substitutions using resolve_env_value
     # This automatically resolves ${VAR} references from:
     # 1. env_substitutions dict (from execution.substitutions in pipeline.yaml)
@@ -531,13 +544,14 @@ def run(
     dry_run: bool = False,
     logger: TestLogger = None,
     local: bool = False,
+    use_wildcards: bool = False,
 ) -> dict:
     """Run seed pipelines programmatically.
     
     Args:
         folder: Pipeline definitions folder
         env_file: Path to env file to load
-        pattern: Filter test files by name pattern
+        pattern: Filter test files by name pattern (supports wildcards if use_wildcards=True)
         base_url: Platform base URL
         project_id: Project ID
         token: Bearer token for authentication
@@ -643,7 +657,7 @@ def run(
         filtered_files = []
         for yaml_file in yaml_files:
             # Check if any pattern matches the filename
-            if matches_any_pattern(yaml_file.name, pattern):
+            if matches_any_pattern(yaml_file.name, pattern, use_wildcards):
                 filtered_files.append(yaml_file)
                 continue
             
@@ -652,7 +666,7 @@ def run(
                 with open(yaml_file, "r", encoding="utf-8") as f:
                     yaml_content = yaml.safe_load(f)
                     pipeline_name = yaml_content.get("name", "")
-                    if pipeline_name and matches_any_pattern(pipeline_name, pattern):
+                    if pipeline_name and matches_any_pattern(pipeline_name, pattern, use_wildcards):
                         filtered_files.append(yaml_file)
             except Exception:
                 # If we can't read the YAML, just skip checking the name
@@ -834,6 +848,12 @@ def main():
         action="store_true",
         help="Print detailed output",
     )
+    parser.add_argument(
+        "--wildcards",
+        "-w",
+        action="store_true",
+        help="Use shell-style wildcards in patterns (*, ?)",
+    )
 
     args = parser.parse_args()
 
@@ -855,6 +875,7 @@ def main():
             dry_run=args.dry_run,
             logger=logger,
             local=args.local,
+            use_wildcards=args.wildcards,
         )
     except Exception as e:
         logger.error(f"{e}")

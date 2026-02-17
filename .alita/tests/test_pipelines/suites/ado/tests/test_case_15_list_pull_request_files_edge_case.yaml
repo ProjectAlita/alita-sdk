@@ -38,6 +38,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true
     tool: list_pull_request_files
     toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
     transition: validate_results
@@ -71,14 +72,13 @@ nodes:
           2. graceful_handling: Output contains error indicator, empty list, or null
           3. no_unhandled_exception: Output does NOT contain 'unhandled', 'traceback', 'stack trace'
 
-          Return a JSON object with structure:
+          Return a JSON test_results with structure:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
             "tool_executed": boolean,
             "graceful_handling": boolean,
             "no_unhandled_exception": boolean,
-            "error_indicator_found": "which indicator was found or 'none'",
-            "error": string | null
+            "error_indicator_found": "which indicator was found or 'none'"
           }}
 
           Return ONLY the JSON object (no markdown or explanation).

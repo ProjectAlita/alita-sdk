@@ -1,0 +1,113 @@
+name: zephyr_essential_toolkit
+description: |
+  Zephyr Essential (Zephyr Scale) toolkit integration tests
+
+  Test Structure:
+  - Project Operations (ZE01-ZE02): Test project listing and retrieval
+  - Test Case Operations (ZE03-ZE08): Test case CRUD operations
+  - Folder Operations (ZE09-ZE12): Test folder management
+  - Test Cycle Operations (ZE13-ZE16): Test cycle CRUD operations
+  - Test Execution Operations (ZE17-ZE20): Test execution CRUD operations
+  - Link Operations (ZE21-ZE24): Test link management for test cases and cycles
+  - Health Check (ZE25): Test API health check
+
+env_mapping:
+  toolkit_config: ${ZEPHYR_ESSENTIAL_CONFIG_PATH:../../configs/zephyr-essential-config.json}
+  base_url: ${ZEPHYR_ESSENTIAL_BASE_URL:https://prod-api.zephyr4jiracloud.com/v2}
+  token: ${ZEPHYR_ESENTIALS_KEY}
+  project_key: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  jira_project_id: ${JIRA_PROJECT_ID:10033}
+
+setup:
+  - name: Setup Zephyr Essential Configuration
+    type: configuration
+    config:
+      config_type: zephyr_essential
+      alita_title: ${ZEPHYR_ESSENTIAL_SECRET_NAME:zephyr_essential}
+      data:
+        base_url: ${ZEPHYR_ESSENTIAL_BASE_URL:https://prod-api.zephyr4jiracloud.com/v2}
+        token: ${ZEPHYR_ESENTIALS_KEY}
+
+  - name: Create Zephyr Essential Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ${ZEPHYR_ESSENTIAL_CONFIG_PATH:../../configs/zephyr-essential-config.json}
+      toolkit_type: zephyr_essential
+      toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME:zephyr-essential-testing}
+    save_to_env:
+      - key: ZEPHYR_ESSENTIAL_TOOLKIT_ID
+        value: $.id
+      - key: ZEPHYR_ESSENTIAL_TOOLKIT_NAME
+        value: $.name
+
+composable_pipelines: []
+
+execution:
+  test_directory: .
+  order:
+    # Health Check (ZE01)
+    - test_case_01_*.yaml  # healthcheck (Critical)
+    
+    # Project Operations (ZE02-ZE03)
+    - test_case_02_*.yaml  # list_projects (Critical)
+    - test_case_03_*.yaml  # get_project (Critical)
+    
+    # Folder Operations (ZE04-ZE07)
+    - test_case_04_*.yaml  # list_folders (Important)
+    - test_case_05_*.yaml  # create_folder (Important)
+    - test_case_06_*.yaml  # get_folder (Important)
+    - test_case_07_*.yaml  # find_folder_by_name (Important)
+    
+    # Test Case Operations (ZE08-ZE13)
+    - test_case_08_*.yaml  # list_test_cases (Critical)
+    - test_case_09_*.yaml  # create_test_case (Critical)
+    - test_case_10_*.yaml  # get_test_case (Critical)
+    - test_case_11_*.yaml  # update_test_case (Critical)
+    - test_case_12_*.yaml  # create_test_case_test_steps (Important)
+    - test_case_13_*.yaml  # get_test_case_test_steps (Important)
+    
+    # Test Cycle Operations (ZE14-ZE17)
+    - test_case_14_*.yaml  # list_test_cycles (Critical)
+    - test_case_15_*.yaml  # create_test_cycle (Critical)
+    - test_case_16_*.yaml  # get_test_cycle (Critical)
+    - test_case_17_*.yaml  # update_test_cycle (Critical)
+    
+    # Test Execution Operations (ZE18-ZE21)
+    - test_case_18_*.yaml  # list_test_executions (Critical)
+    - test_case_19_*.yaml  # create_test_execution (Critical)
+    - test_case_20_*.yaml  # get_test_execution (Critical)
+    - test_case_21_*.yaml  # update_test_execution (Critical)
+    
+    # Link Operations (ZE22-ZE24)
+    - test_case_22_*.yaml  # create_test_case_web_link (Important)
+    - test_case_23_*.yaml  # get_test_case_links (Important)
+    - test_case_24_*.yaml  # delete_link (Important)
+
+  substitutions:
+    ZEPHYR_ESSENTIAL_TOOLKIT_ID: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    ZEPHYR_ESSENTIAL_TOOLKIT_NAME: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+    ZEPHYR_PROJECT_KEY : EL
+
+  settings:
+    timeout: 180
+    parallel: 1
+    stop_on_failure: false
+
+exclude_tests: []
+
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "ZE*"
+    continue_on_error: true
+
+  - name: Delete Zephyr Essential Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

@@ -12,7 +12,6 @@
     "read_multiple_files",
     "get_file_type",
     "readFile",
-    "read_file_chunk",
     "grep_file",
     "listFiles",
     "createNewBucket",

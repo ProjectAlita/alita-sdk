@@ -1,0 +1,132 @@
+name: "ART17 - Delete File: Non-Existent File (Error Handling)"
+priority: High
+description: |
+  Verify that deleteFile returns appropriate error when attempting to delete a non-existent file.
+  
+  Objective: Validate error handling for file that doesn't exist in the bucket
+  
+  Expected Behavior:
+  - Tool returns error message indicating file doesn't exist
+  - Error message is descriptive and actionable
+  - No false success message like "File deleted successfully"
+  - Error type indicates resource not found
+
+toolkits:
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  bucket_name:
+    type: str
+    value: ${TEST_BUCKET}
+  nonexistent_filename:
+    type: str
+    value: "nonexistent-file-${TIMESTAMP}.txt"
+  expected_error_indicators:
+    type: list
+    value: ["not found", "does not exist", "404", "no such file", "error", "failed"]
+  files_in_bucket:
+    type: str
+  delete_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: list_existing_files
+
+nodes:
+  - id: list_existing_files
+    type: toolkit
+    tool: listFiles
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    input:
+      - bucket_name
+    input_mapping:
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - files_in_bucket
+    structured_output: true
+    transition: attempt_delete_nonexistent
+
+  - id: attempt_delete_nonexistent
+    type: toolkit
+    tool: deleteFile
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    input:
+      - nonexistent_filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: nonexistent_filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - delete_result
+    structured_output: true
+    continue_on_error: true
+    transition: validate_error
+
+  - id: validate_error
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - files_in_bucket
+      - delete_result
+      - nonexistent_filename
+      - expected_error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'deleteFile' with NON-EXISTENT file.
+          
+          Files in Bucket: {files_in_bucket}
+          Delete Attempt Result: {delete_result}
+          Non-Existent Filename: {nonexistent_filename}
+          Expected Error Indicators: {expected_error_indicators}
+          
+          This is a NEGATIVE test - we expect the tool to handle invalid input gracefully.
+          
+          Validation Criteria for test_passed=true:
+          REQUIRED (ALL must pass):
+          1. list_files_worked: File listing executed successfully
+          2. delete_failed: Delete operation failed (contains error indicator)
+          3. error_indicates_not_found: Error message indicates file not found
+          4. file_not_in_list: The file '{nonexistent_filename}' does NOT appear in file list
+          5. no_false_success: Result does NOT contain "deleted successfully" message
+          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          
+          OPTIONAL (nice to have, but not required for test to pass):
+          7. error_message_helpful: Error message provides useful information
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (SET TO TRUE if: list_files_worked AND delete_failed AND error_indicates_not_found AND file_not_in_list AND no_false_success AND no_unhandled_exception),
+            "list_files_worked": boolean,
+            "delete_failed": boolean,
+            "error_indicates_not_found": boolean,
+            "file_not_in_list": boolean,
+            "no_false_success": boolean,
+            "no_unhandled_exception": boolean,
+            "error_message_helpful": boolean (optional, does not affect test_passed),
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "files_count_in_bucket": number,
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

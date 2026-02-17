@@ -1,0 +1,86 @@
+name: "PST21 update collection"
+priority: High
+description: |
+  Validates that the update_collection_description tool handles updating
+  a collection with an empty or minimal description.
+  
+  Objective: Verify handling of empty description updates
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Empty description is accepted and applied
+  - Returns confirmation of the update
+  - Collection description is cleared or set to empty
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  new_description:
+    type: str
+    value: ""
+entry_point: invoke_update_collection_description
+
+nodes:
+  - id: invoke_update_collection_description
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: update_collection_description
+    input:
+      - new_description
+    input_mapping:
+      description:
+        type: variable
+        value: new_description
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_collection_description' tool with empty description.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that update_collection_description handles empty descriptions.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the empty description was accepted.
+          3. Check for success confirmation.
+          4. Validate the operation completed without errors.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if empty description was accepted),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

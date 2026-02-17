@@ -1,0 +1,199 @@
+name: "QT15 - update_test_case: Handle invalid field values (Negative Test)"
+description: |
+  Verify the QTest 'update_test_case' tool properly handles invalid field values.
+
+  Objective: Test error handling when updating with non-existent field values
+
+  Expected Behavior (NEGATIVE TEST):
+  - Tool returns validation error for invalid field values
+  - Error message indicates which field/value is invalid
+  - Proper error handling without crashing
+  - Test case is not modified
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID:1}
+  test_case_id:
+    type: str
+  dql_query:
+    type: str
+  search_result:
+    type: str
+  invalid_update_json:
+    type: str
+  update_result:
+    type: str
+  expected_error_indicators:
+    type: list
+    value: ["error", "invalid", "not allowed", "validation", "failed"]
+  unexpected_success_indicators:
+    type: list
+    value: ["successfully", "updated", "modified"]
+  test_results:
+    type: dict
+
+entry_point: find_existing_test_case
+nodes:
+  - id: find_existing_test_case
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Search for any existing test case to attempt invalid update
+        dql_query = "Status is 'not empty'"
+        {"dql_query": dql_query}
+    input:
+      - project_id
+    output:
+      - dql_query
+    structured_output: true
+    transition: search_test_cases
+
+  - id: search_test_cases
+    type: toolkit
+    input:
+      - dql_query
+    input_mapping:
+      dql:
+        type: variable
+        value: dql_query
+    output:
+      - search_result
+    structured_output: false
+    tool: search_by_dql
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: extract_test_case_id
+
+  - id: extract_test_case_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        # Extract first test case ID from search results
+        result_str = alita_state.get("search_result", "")
+        test_case_id = "TC-1"  # fallback
+        
+        try:
+            # Look for TC-xxx pattern
+            match = re.search(r"(TC-\d+)", result_str)
+            if match:
+                test_case_id = match.group(1)
+        except Exception:
+            pass
+        
+        {"test_case_id": test_case_id}
+    input:
+      - search_result
+    output:
+      - test_case_id
+    structured_output: true
+    transition: prepare_invalid_update
+
+  - id: prepare_invalid_update
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        test_case_id = alita_state.get("test_case_id", "TC-1")
+        
+        # Attempt to update with invalid Status value (not in allowed values)
+        invalid_update = {
+            "Id": test_case_id,
+            "Status": "COMPLETELY_INVALID_STATUS_VALUE_12345",
+            "Priority": "INVALID_PRIORITY_999"
+        }
+        
+        invalid_update_json = json.dumps(invalid_update)
+        {"invalid_update_json": invalid_update_json}
+    input:
+      - test_case_id
+    output:
+      - invalid_update_json
+    structured_output: true
+    transition: attempt_invalid_update
+
+  - id: attempt_invalid_update
+    type: toolkit
+    input:
+      - test_case_id
+      - invalid_update_json
+    input_mapping:
+      test_id:
+        type: variable
+        value: test_case_id
+      test_case_content:
+        type: variable
+        value: invalid_update_json
+    output:
+      - update_result
+    structured_output: false
+    tool: update_test_case
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - update_result
+      - test_case_id
+      - invalid_update_json
+      - expected_error_indicators
+      - unexpected_success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'update_test_case' tool execution with invalid values.
+          
+          This is a NEGATIVE test - we EXPECT an error for invalid field values.
+
+          Update Result: {update_result}
+          Test Case ID: {test_case_id}
+          Invalid Update Attempted: {invalid_update_json}
+          Expected Error Indicators: {expected_error_indicators}
+          Unexpected Success Indicators: {unexpected_success_indicators}
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool was called (even if it returned an error)
+          2. returned_error: Output contains error/validation message
+          3. mentions_validation: Error indicates invalid or not allowed values
+          4. no_success_indicators: Output does NOT contain success indicators
+          5. test_protected: Test case was not modified with invalid values
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass - proper error handling),
+            "tool_executed": boolean,
+            "returned_error": boolean,
+            "mentions_validation": boolean,
+            "no_success_indicators": boolean,
+            "test_protected": boolean,
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "unexpected_success_found": "which success indicator was found or 'none' (should be 'none')",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output: true
+    transition: end
+
+  - id: end
+    type: end

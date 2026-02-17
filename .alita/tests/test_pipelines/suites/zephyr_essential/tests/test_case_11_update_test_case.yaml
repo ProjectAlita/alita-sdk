@@ -1,0 +1,275 @@
+name: "ZE11 - update_test_case: Update test case successfully"
+description: |
+  Verify the Zephyr Essential 'update_test_case' tool updates an existing test case.
+
+  Objective: Test test case update functionality in AI tests folder (ID: 32965916)
+
+  Expected Behavior:
+  - Test case is created in the AI tests folder first
+  - Test case is updated without errors
+  - Test case is retrieved to verify update
+  - Updated values (name) are reflected in the retrieved result
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  create_result:
+    type: str
+  error_indicators:
+    type: list
+    value:
+      - error
+      - failed
+      - exception
+      - not found
+  expected_success_indicators:
+    type: list
+    value:
+      - key
+      - id
+      - name
+  folder_id:
+    type: str
+    value: "32965916"
+  get_result:
+    type: str
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  test_case_json:
+    type: str
+  test_case_key:
+    type: str
+  test_case_name:
+    type: str
+  test_case_before_update:
+    type: str
+  test_results:
+    type: dict
+  update_json:
+    type: str
+  update_result:
+    type: str
+  updated_name:
+    type: str
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        import json
+
+        # Get state variables
+        folder_id = alita_state.get("folder_id", "")
+        project_key = alita_state.get("project_key", "")
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique test case names
+        test_case_name = f"Test Case ZE11 {timestamp}-{random_suffix}"
+        updated_name = f"Updated Test Case ZE11 {timestamp}-{random_suffix}"
+
+        # Create JSON payload for test case creation with proper format
+        test_case_data = {
+            "name": test_case_name,
+            "description": f"Test case created for ZE11 validation at {timestamp}",
+            "projectKey": project_key,
+            "folderId": folder_id
+        }
+
+        {"test_case_name": test_case_name, "updated_name": updated_name, "test_case_json": json.dumps(test_case_data)}
+    input:
+      - folder_id
+      - project_key
+    output:
+      - test_case_name
+      - updated_name
+      - test_case_json
+    structured_output: true
+    transition: create_test_case
+  - id: create_test_case
+    type: toolkit
+    input:
+      - test_case_json
+    input_mapping:
+      json:
+        type: variable
+        value: test_case_json
+    output:
+      - create_result
+    structured_output: false
+    tool: create_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: extract_test_case_key
+  - id: extract_test_case_key
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        data = alita_state.get("create_result", {})
+        key_value = data['key']
+
+        {"test_case_key": key_value}
+    input:
+      - create_result
+    output:
+      - test_case_key
+    structured_output: true
+    transition: get_test_case_before_update
+  - id: get_test_case_before_update
+    type: toolkit
+    input:
+      - test_case_key
+    input_mapping:
+      test_case_key:
+        type: variable
+        value: test_case_key
+    output:
+      - test_case_before_update
+    structured_output: true
+    tool: get_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: prepare_update
+  - id: prepare_update
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+
+        # Get state variables
+        updated_name = alita_state.get("updated_name", "")
+        test_case_data = alita_state.get("test_case_before_update", {})
+
+        # Parse the existing test case data if it's a string
+        if isinstance(test_case_data, str):
+            test_case_data = json.loads(test_case_data)
+
+        # Merge existing fields with updates
+        update_data = {
+            **test_case_data,  # Preserve all existing fields (priority, status, project, id, key, etc.)
+            "name": updated_name,
+            "description": "Updated test case description for ZE11 validation"
+        }
+        update_json = json.dumps(update_data)
+
+        {"update_json": update_json}
+    input:
+      - updated_name
+      - test_case_before_update
+    output:
+      - update_json
+    structured_output: true
+    transition: update_test_case
+  - id: update_test_case
+    type: toolkit
+    input:
+      - test_case_key
+      - update_json
+    input_mapping:
+      json:
+        type: variable
+        value: update_json
+      test_case_key:
+        type: variable
+        value: test_case_key
+    output:
+      - update_result
+    structured_output: true
+    tool: update_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: get_test_case
+  - id: get_test_case
+    type: toolkit
+    input:
+      - test_case_key
+    input_mapping:
+      test_case_key:
+        type: variable
+        value: test_case_key
+    output:
+      - get_result
+    structured_output: true
+    tool: get_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+  - id: validate_results
+    type: llm
+    input:
+      - create_result
+      - update_result
+      - get_result
+      - test_case_key
+      - test_case_name
+      - updated_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_test_case', 'update_test_case', and 'get_test_case' tool executions.
+
+          Original Test Case Name: {test_case_name}
+          Updated Test Case Name: {updated_name}
+          Test Case Key: {test_case_key}
+          Create Result: {create_result}
+          Update Result: {update_result}
+          Get Result: {get_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test case creation, update, and retrieval.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: All three tools ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. testcase_created: Test case was created successfully in AI tests folder (ID: 32965916)
+          4. testcase_updated: Test case was updated successfully
+          5. testcase_retrieved: Test case details were retrieved after update
+          6. name_changed: Test case name in get result matches new updated name
+          7. different_from_original: Updated name is different from original name
+          8. correct_key: Test case key matches across all operations
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "testcase_created": boolean,
+            "testcase_updated": boolean,
+            "testcase_retrieved": boolean,
+            "name_changed": boolean,
+            "different_from_original": boolean,
+            "correct_key": boolean,
+            "updated_name_found": "name from get result or 'none'",
+            "testcase_key_found": "key from get result or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: gpt-4o-2024-11-20
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

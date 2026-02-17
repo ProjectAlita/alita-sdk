@@ -1,0 +1,112 @@
+name: "ZE06 - get_folder: Retrieve folder by ID"
+description: |
+  Verify the Zephyr Essential 'get_folder' tool retrieves folder details by ID.
+
+  Objective: Test folder retrieval by ID using AI tests folder (ID: 32965916)
+
+  Expected Behavior:
+  - Folder details are retrieved without errors using known folder ID
+  - Returns folder with matching ID and name
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  error_indicators:
+    type: list
+    value:
+      - error
+      - failed
+      - exception
+      - not found
+      - unauthorized
+  expected_success_indicators:
+    type: list
+    value:
+      - id
+      - name
+      - folder
+  folder_id:
+    type: str
+    value: "32965916"
+  folder_name:
+    type: str
+    value: "AI tests"
+  get_result:
+    type: str
+  test_results:
+    type: dict
+entry_point: get_folder
+nodes:
+  - id: get_folder
+    type: toolkit
+    input:
+      - folder_id
+    input_mapping:
+      folder_id:
+        type: variable
+        value: folder_id
+    output:
+      - get_result
+    structured_output: true
+    tool: get_folder
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+  - id: validate_results
+    type: llm
+    input:
+      - get_result
+      - folder_id
+      - folder_name
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'get_folder' tool execution.
+
+          Expected Folder Name: {folder_name}
+          Expected Folder ID: {folder_id}
+          Get Result: {get_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful folder retrieval.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: Tool ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. folder_retrieved: Folder details were retrieved successfully
+          4. correct_folder: Folder ID in get result matches expected folder ID (32965916)
+          5. correct_name: Folder name in get result matches expected folder name (AI tests)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "folder_retrieved": boolean,
+            "correct_folder": boolean,
+            "correct_name": boolean,
+            "folder_id_found": "id from get result or 'none'",
+            "success_indicator_found": "which indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: gpt-4o-2024-11-20
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

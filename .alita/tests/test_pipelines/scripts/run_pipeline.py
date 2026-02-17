@@ -281,7 +281,16 @@ def process_pipeline_result(
                 # Check if this tool call failed
                 finish_reason = tool_call.get("finish_reason")
                 if finish_reason == "error":
-                    # Tool execution failed - extract error details
+                    # Tool execution failed - check if from continue_on_error node first
+                    node_name = tool_call.get("metadata", {}).get("langgraph_node", "unknown")
+                    
+                    # Check if error is from a node with continue_on_error: true
+                    if node_name in nodes_with_continue_on_error:
+                        if logger:
+                            logger.debug(f"Error from node '{node_name}' with continue_on_error: true - not treating as failure")
+                        continue  # Skip this error, don't mark test as failed
+                    
+                    # Error is NOT from continue_on_error node - treat as failure
                     tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
                     tool_error = tool_call.get("error", "Unknown error")
                     
@@ -473,6 +482,11 @@ def process_pipeline_result(
         # Direct test_passed field
         if "test_passed" in result_data:
             test_passed = result_data.get("test_passed")
+        # Check for test_results at top level (validation nodes often use this)
+        elif "test_results" in result_data:
+            test_results = result_data.get("test_results", {})
+            if isinstance(test_results, dict) and "test_passed" in test_results:
+                test_passed = test_results.get("test_passed")
         # Nested in result field
         elif "result" in result_data:
             nested = result_data.get("result", {})
@@ -557,6 +571,16 @@ def process_pipeline_result(
                                     else:
                                         output = parsed
                                     break
+                                # Check for test_results at top level (common in validation nodes)
+                                elif "test_results" in parsed:
+                                    test_results = parsed.get("test_results", {})
+                                    if isinstance(test_results, dict) and "test_passed" in test_results:
+                                        test_passed = test_results.get("test_passed")
+                                        if isinstance(output, dict):
+                                            output["result"] = test_results
+                                        else:
+                                            output = test_results
+                                        break
                                 elif "result" in parsed:
                                     nested = parsed.get("result", {})
                                     if isinstance(nested, dict):

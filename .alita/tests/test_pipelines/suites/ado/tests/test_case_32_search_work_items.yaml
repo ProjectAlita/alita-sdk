@@ -1,0 +1,77 @@
+name: "ADO32 - Search Work Items"
+description: "Verify the ADO 'search_work_items' tool retrieves work items using WIQL query"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+
+state:
+  wiql_query:
+    type: str
+    value: "SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType] FROM WorkItems WHERE [System.State] = 'To Do' ORDER BY [System.Id] DESC"
+  tool_result:
+    type: list
+  test_results:
+    type: dict
+
+entry_point: invoke_search_work_items
+nodes:
+  - id: invoke_search_work_items
+    type: toolkit
+    input:
+      - wiql_query
+    input_mapping:
+      query:
+        type: variable
+        value: wiql_query
+      limit:
+        type: fixed
+        value: 10
+    output:
+      - tool_result
+    structured_output: true
+    tool: search_work_items
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'search_work_items' tool.
+
+          Tool Result: {tool_result}
+
+          Validation rules:
+           - tool_executed: True if result is a list or string (could be "No work items found.")
+           - test_passed: True if tool_executed is True and (result is list with at least 1 work item OR message about no items)
+           - work_item_count: number of work items returned (0 if no items)
+           - has_required_fields: True if work items have 'id', 'System.Title', 'System.State' fields
+           - error: string or null
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "work_item_count": integer,
+            "has_required_fields": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

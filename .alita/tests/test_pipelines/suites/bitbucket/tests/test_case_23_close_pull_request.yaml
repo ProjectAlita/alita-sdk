@@ -1,0 +1,377 @@
+name: "BB23 - close_pull_request: Close PR successfully (Cloud only)"
+description: |
+  Verify the Bitbucket 'close_pull_request' tool closes a PR without merging (Cloud only).
+
+  Objective: Test successful PR closure
+
+  Expected Behavior:
+  - Source branch is created
+  - Test file is added to source branch
+  - PR is created successfully
+  - PR is closed without merging
+  - PR status reflects closure
+  - Branch is cleaned up
+
+toolkits:
+  - id: ${BITBUCKET_TOOLKIT_ID}
+    name: ${BITBUCKET_TOOLKIT_NAME}
+
+state:
+  source_branch:
+    type: str
+  test_file_path:
+    type: str
+  test_file_content:
+    type: str
+    value: |
+      Test file for BB23 - Close PR Test
+      ===================================
+
+      This file is created to test the close_pull_request functionality.
+      The PR containing this change will be closed without merging.
+  pr_title:
+    type: str
+    value: "BB23: Test PR for Closure"
+  pr_description:
+    type: str
+    value: |
+      This PR is created by the Bitbucket test suite to verify PR closure.
+
+      ## Purpose
+      - Test close_pull_request tool
+      - Verify PR can be declined without merging
+  close_message:
+    type: str
+    value: "This PR is being closed as part of automated testing (BB23)."
+  expected_success_indicators:
+    type: list
+    value: ["closed", "declined", "success"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "unauthorized", "forbidden", "not found"]
+  branch_result:
+    type: str
+  switch_result:
+    type: str
+  file_result:
+    type: str
+  pr_json_data:
+    type: str
+  pr_result:
+    type: str
+  pr_id:
+    type: str
+  close_result:
+    type: str
+  pr_status_after_close:
+    type: str
+  delete_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique branch and file names
+        source_branch = f"feature/bb23-close-pr-{timestamp}-{random_suffix}"
+        test_file_path = f"test-files/bb23-close-pr-test-{timestamp}-{random_suffix}.txt"
+
+        {"source_branch": source_branch, "test_file_path": test_file_path}
+    output:
+      - source_branch
+      - test_file_path
+    structured_output: true
+    transition: create_source_branch
+
+  - id: create_source_branch
+    type: toolkit
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - branch_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: switch_to_source_branch
+
+  - id: switch_to_source_branch
+    type: toolkit
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - switch_result
+    structured_output: true
+    tool: set_active_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    input:
+      - test_file_path
+      - test_file_content
+      - source_branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: variable
+        value: test_file_content
+      branch:
+        type: variable
+        value: source_branch
+    output:
+      - file_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: build_pr_json
+
+  - id: build_pr_json
+    type: code
+    code:
+      type: fstring
+      value: |-
+        import json
+
+        title = alita_state.get('pr_title')
+        branch = alita_state.get('source_branch')
+        description = alita_state.get('pr_description')
+
+        pr_data = {
+            "title": title,
+            "description": description,
+            "source": {
+                "branch": {
+                    "name": branch
+                }
+            },
+            "destination": {
+                "branch": {
+                    "name": "main"
+                }
+            }
+        }
+
+        json.dumps(pr_data)
+    input:
+      - pr_title
+      - pr_description
+      - source_branch
+    output:
+      - pr_json_data
+    structured_output: true
+    transition: create_pull_request
+
+  - id: create_pull_request
+    type: toolkit
+    input:
+      - pr_json_data
+    input_mapping:
+      pr_json_data:
+        type: variable
+        value: pr_json_data
+    output:
+      - pr_result
+    structured_output: true
+    tool: create_pull_request
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: extract_pr_id
+
+  - id: extract_pr_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+        import json
+
+        pr_result = alita_state.get('pr_result', '')
+        
+        # Try to extract PR ID from the result
+        pr_id = None
+        
+        # Try JSON parsing first
+        try:
+            if isinstance(pr_result, str) and '{' in pr_result:
+                # Extract JSON from the result string
+                json_match = re.search(r'\{.*\}', pr_result, re.DOTALL)
+                if json_match:
+                    pr_data = json.loads(json_match.group())
+                    pr_id = str(pr_data.get('id', ''))
+        except:
+            pass
+        
+        # If JSON parsing failed, try regex patterns
+        if not pr_id:
+            patterns = [
+                # Bitbucket Cloud URL format: .../pullrequests/7
+                r'/pullrequests?[/](\d+)',
+                # Bitbucket Server URL format: .../pull-requests/7
+                r'/pull-requests?[/](\d+)',
+                # JSON format: "id": 123
+                r'"id"\s*:\s*(\d+)',
+                # PR reference: #123
+                r'#(\d+)',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, str(pr_result), re.IGNORECASE)
+                if match:
+                    pr_id = match.group(1)
+                    break
+        
+        if not pr_id:
+            pr_id = "PR_ID_NOT_FOUND"
+        
+        {"pr_id": pr_id}
+    input:
+      - pr_result
+    output:
+      - pr_id
+    structured_output: true
+    transition: close_pull_request
+
+  - id: close_pull_request
+    type: toolkit
+    input:
+      - pr_id
+      - close_message
+    input_mapping:
+      pr_id:
+        type: variable
+        value: pr_id
+      message:
+        type: variable
+        value: close_message
+    output:
+      - close_result
+    structured_output: true
+    tool: close_pull_request
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: verify_pr_closed
+
+  - id: verify_pr_closed
+    type: toolkit
+    input:
+      - pr_id
+    input_mapping:
+      pr_id:
+        type: variable
+        value: pr_id
+    output:
+      - pr_status_after_close
+    structured_output: true
+    tool: get_pull_request
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - branch_result
+      - switch_result
+      - file_result
+      - pr_result
+      - pr_id
+      - close_result
+      - pr_status_after_close
+      - close_message
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from 'close_pull_request' tool execution.
+
+          Branch Creation Result: {branch_result}
+          Branch Switch Result: {switch_result}
+          File Creation Result: {file_result}
+          PR Creation Result: {pr_result}
+          Extracted PR ID: {pr_id}
+          Close Result: {close_result}
+          PR Status After Close: {pr_status_after_close}
+          Close Message: {close_message}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful PR closure.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. branch_created: Source branch was created successfully
+          2. branch_switched: Successfully switched to source branch
+          3. file_created: Test file was created in the branch
+          4. pr_created: PR was created successfully
+          5. pr_id_extracted: PR ID was successfully extracted
+          6. no_errors: No error indicators in close_result
+          7. close_succeeded: Close result indicates success
+          8. pr_status_closed: PR status shows it is closed/declined (check for "DECLINED", "CLOSED", "state" field)
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "branch_created": boolean,
+            "branch_switched": boolean,
+            "file_created": boolean,
+            "pr_created": boolean,
+            "pr_id_extracted": boolean,
+            "no_errors": boolean,
+            "close_succeeded": boolean,
+            "pr_status_closed": boolean,
+            "pr_id": "extracted PR ID or 'not found'",
+            "pr_state": "state from pr_status_after_close or 'unknown'",
+            "success_indicator_found": "which success indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: END

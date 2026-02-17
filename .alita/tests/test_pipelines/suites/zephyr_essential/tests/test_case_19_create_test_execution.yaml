@@ -1,0 +1,245 @@
+name: "ZE19 - create_test_execution: Create new test execution successfully"
+description: |
+  Verify the Zephyr Essential 'create_test_execution' tool creates a new test execution.
+
+  Objective: Test successful test execution creation with test case in AI tests folder (ID: 32965916)
+
+  Expected Behavior:
+  - Test case is created first in AI tests folder
+  - Test cycle is created
+  - Test execution is created without errors
+  - Returns test execution details with key
+  - No error indicators in output
+
+toolkits:
+  - id: ${ZEPHYR_ESSENTIAL_TOOLKIT_ID}
+    name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+
+state:
+  project_key:
+    type: str
+    value: ${ZEPHYR_PROJECT_KEY:ASDKSUP}
+  test_case_name:
+    type: str
+  cycle_name:
+    type: str
+  test_case_json:
+    type: str
+  cycle_json:
+    type: str
+  execution_json:
+    type: str
+  test_case_key:
+    type: str
+  cycle_key:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["id", "self"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "forbidden"]
+  testcase_result:
+    type: str
+  cycle_result:
+    type: str
+  execution_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        import json
+
+        # Generate unique identifiers
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        # Generate unique names
+        test_case_name = f"Test Case ZE19 {timestamp}-{random_suffix}"
+        cycle_name = f"Test Cycle ZE19 {timestamp}-{random_suffix}"
+        
+        # Create JSONs
+        test_case_data = {
+            "name": test_case_name,
+            "projectKey": "${ZEPHYR_PROJECT_KEY:ASDKSUP}",
+            "folderId": 32965916,
+            "priority": "Normal",
+            "status": "Draft"
+        }
+        test_case_json = json.dumps(test_case_data)
+        
+        cycle_data = {
+            "name": cycle_name,
+            "projectKey": "${ZEPHYR_PROJECT_KEY:ASDKSUP}",
+            "status": "Not Started"
+        }
+        cycle_json = json.dumps(cycle_data)
+
+        {"test_case_name": test_case_name, "cycle_name": cycle_name, "test_case_json": test_case_json, "cycle_json": cycle_json}
+    output:
+      - test_case_name
+      - cycle_name
+      - test_case_json
+      - cycle_json
+    structured_output: true
+    transition: create_test_case
+
+  - id: create_test_case
+    type: toolkit
+    input:
+      - test_case_json
+    input_mapping:
+      json:
+        type: variable
+        value: test_case_json
+    output:
+      - testcase_result
+    structured_output: true
+    tool: create_test_case
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: create_test_cycle
+
+  - id: create_test_cycle
+    type: toolkit
+    input:
+      - cycle_json
+    input_mapping:
+      json:
+        type: variable
+        value: cycle_json
+    output:
+      - cycle_result
+    structured_output: true
+    tool: create_test_cycle
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: prepare_execution
+
+  - id: prepare_execution
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        # Extract input variables from state
+        testcase_result = alita_state.get('testcase_result', '')
+        cycle_result = alita_state.get('cycle_result', '')
+        
+        # Parse results to extract keys
+        try:
+            tc_data = json.loads(testcase_result) if isinstance(testcase_result, str) else testcase_result
+            test_case_key = tc_data.get('key', '')
+            
+            cycle_data = json.loads(cycle_result) if isinstance(cycle_result, str) else cycle_result
+            cycle_key = cycle_data.get('key', '')
+        except:
+            test_case_key = ''
+            cycle_key = ''
+        
+        # Create execution JSON
+        execution_data = {
+            "projectKey": "${ZEPHYR_PROJECT_KEY:ASDKSUP}",
+            "testCaseKey": test_case_key,
+            "testCycleKey": cycle_key,
+            "statusName": "Not Executed"
+        }
+        execution_json = json.dumps(execution_data)
+        
+        {"test_case_key": test_case_key, "cycle_key": cycle_key, "execution_json": execution_json}
+    input:
+      - testcase_result
+      - cycle_result
+    output:
+      - test_case_key
+      - cycle_key
+      - execution_json
+    structured_output: true
+    transition: create_test_execution
+
+  - id: create_test_execution
+    type: toolkit
+    input:
+      - execution_json
+    input_mapping:
+      json:
+        type: variable
+        value: execution_json
+    output:
+      - execution_result
+    structured_output: true
+    tool: create_test_execution
+    toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - testcase_result
+      - cycle_result
+      - execution_result
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON.
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_test_execution' tool execution.
+
+          Test Case Result: {testcase_result}
+          Cycle Result: {cycle_result}
+          Execution Result: {execution_result}
+          Expected Success Indicators: {expected_success_indicators}
+          Error Indicators: {error_indicators}
+
+          This is a POSITIVE test - we expect successful test execution creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: All tools ran and returned results
+          2. no_errors: Output does NOT contain any error indicators
+          3. testcase_created: Test case was created successfully
+          4. cycle_created: Test cycle was created successfully
+          5. execution_created: Test execution was created successfully with 'id' and 'self' fields
+
+          For execution_created validation:
+          - Response MUST contain 'id' field (numeric execution ID)
+          - Response MUST contain 'self' field (URL to the test execution)
+          - Example: {{"id": 2168272947, "self": "https://prod-play.zephyr4jiracloud.com/connect/v2/testexecutions/2168272947"}}
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "testcase_created": boolean,
+            "cycle_created": boolean,
+            "execution_created": boolean,
+            "execution_id": "id from response or 'none'",
+            "execution_self_url": "self URL from response or 'none'",
+            "success_indicators_found": ["list of indicators found"],
+            "error_indicator_found": "which error indicator was found or 'none'",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

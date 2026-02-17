@@ -1,0 +1,246 @@
+name: "PST12 get request script happy"
+priority: Critical
+description: |
+  Validates that the get_request_script tool successfully retrieves test script
+  content from a specific request.
+  
+  Objective: Verify script content retrieval
+  
+  Expected Behavior:
+  - Test folder and request are created with a test script
+  - get_request_script retrieves the script content
+  - Returns proper script structure with content
+  - Cleanup removes both request and folder
+
+toolkits:
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+  request_name:
+    type: str
+  request_method:
+    type: str
+    value: "GET"
+  request_url:
+    type: str
+    value: "https://api.example.com/test-script"
+  test_script:
+    type: str
+    value: |
+      pm.test("Status code is 200", function () {
+          pm.response.to.have.status(200);
+      });
+  folder_path:
+    type: str
+  request_path:
+    type: str
+  script_type:
+    type: str
+    value: "test"
+  create_folder_result:
+    type: str
+  create_request_result:
+    type: str
+  tool_result:
+    type: dict
+  delete_request_result:
+    type: str
+  delete_folder_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique names
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        folder_name = f"PST12_Folder_{timestamp}_{random_suffix}"
+        request_name = f"PST12_Request_{timestamp}_{random_suffix}"
+        
+        # Build paths
+        folder_path = folder_name
+        request_path = f"{folder_name}/{request_name}"
+        
+        {
+          "folder_name": folder_name,
+          "request_name": request_name,
+          "folder_path": folder_path,
+          "request_path": request_path
+        }
+    output:
+      - folder_name
+      - request_name
+      - folder_path
+      - request_path
+    structured_output: true
+    transition: create_test_folder
+
+  - id: create_test_folder
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+    output:
+      - create_folder_result
+    structured_output: true
+    transition: create_test_request
+
+  - id: create_test_request
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - folder_path
+      - request_name
+      - request_method
+      - request_url
+      - test_script
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: variable
+        value: request_method
+      url:
+        type: variable
+        value: request_url
+      tests:
+        type: variable
+        value: test_script
+    output:
+      - create_request_result
+    structured_output: true
+    transition: invoke_get_request_script
+
+  - id: invoke_get_request_script
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_request_script
+    input:
+      - request_path
+      - script_type
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      script_type:
+        type: variable
+        value: script_type
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - create_folder_result
+      - create_request_result
+      - tool_result
+      - test_script
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from Postman script retrieval operations.
+          
+          Folder Creation Result: {create_folder_result}
+          Request Creation Result: {create_request_result}
+          Get Script Result: {tool_result}
+          Expected Script Content: {test_script}
+          
+          This is a POSITIVE test - we expect successful script retrieval.
+          
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. folder_created: Folder was created successfully
+          2. request_created: Request with test script was created
+          3. script_retrieved: get_request_script returned script details
+          4. has_success_flag: Result has success=true indicator
+          5. has_script_content: Result contains script_content field
+          6. script_not_empty: Script content is not empty
+          7. correct_script_type: Script type is "test"
+          8. no_errors: No error indicators in any output
+          
+          Return JSON test_results:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "folder_created": boolean,
+            "request_created": boolean,
+            "script_retrieved": boolean,
+            "has_success_flag": boolean,
+            "has_script_content": boolean,
+            "script_not_empty": boolean,
+            "correct_script_type": boolean,
+            "no_errors": boolean,
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+          
+          Return ONLY the JSON object. No markdown formatting.
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_delete_request
+
+  - id: cleanup_delete_request
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_request
+    input:
+      - request_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+    output:
+      - delete_request_result
+    structured_output: true
+    transition: cleanup_delete_folder
+
+  - id: cleanup_delete_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - folder_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+    output:
+      - delete_folder_result
+    structured_output: true
+    transition: END

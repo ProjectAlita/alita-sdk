@@ -1,0 +1,207 @@
+name: "ADO38 - Link Work Items"
+description: "Verify the ADO 'link_work_items' tool creates a link between two work items"
+
+toolkits:
+  - id: ${ADO_BOARDS_TOOLKIT_ID}
+    name: ${ADO_BOARDS_TOOLKIT_NAME}
+
+state:
+  work_item_json_source:
+    type: str
+    value: '{"fields": {"System.Title": "ADO38 Source Work Item", "System.Description": "Created by test automation", "System.AreaPath": "TestProject", "System.IterationPath": "TestProject"}}'
+  work_item_json_target:
+    type: str
+    value: '{"fields": {"System.Title": "ADO38 Target Work Item", "System.Description": "Created by test automation", "System.AreaPath": "TestProject", "System.IterationPath": "TestProject"}}'
+  work_item_type:
+    type: str
+    value: "Task"
+  source_result:
+    type: dict
+  target_result:
+    type: dict
+  source_work_item_id:
+    type: int
+  target_work_item_id:
+    type: int
+  link_type:
+    type: str
+    value: "System.LinkTypes.Related"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+  cleanup_source_result:
+    type: str
+  cleanup_target_result:
+    type: str
+
+entry_point: create_source_work_item
+nodes:
+  - id: create_source_work_item
+    type: toolkit
+    input:
+      - work_item_json_source
+      - work_item_type
+    input_mapping:
+      work_item_json:
+        type: variable
+        value: work_item_json_source
+      wi_type:
+        type: variable
+        value: work_item_type
+    output:
+      - source_result
+    structured_output: true
+    tool: create_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: extract_source_id
+
+  - id: extract_source_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        result_data = alita_state.get("source_result", {})
+        source_work_item_id = result_data.get('id', 0)
+        {"source_work_item_id": source_work_item_id}
+    input:
+      - source_result
+    output:
+      - source_work_item_id
+    structured_output: true
+    transition: create_target_work_item
+
+  - id: create_target_work_item
+    type: toolkit
+    input:
+      - work_item_json_target
+      - work_item_type
+    input_mapping:
+      work_item_json:
+        type: variable
+        value: work_item_json_target
+      wi_type:
+        type: variable
+        value: work_item_type
+    output:
+      - target_result
+    structured_output: true
+    tool: create_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: extract_target_id
+
+  - id: extract_target_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        result_data = alita_state.get("target_result", {})
+        target_work_item_id = result_data.get('id', 0)
+        {"target_work_item_id": target_work_item_id}
+    input:
+      - target_result
+    output:
+      - target_work_item_id
+    structured_output: true
+    transition: invoke_link_work_items
+  - id: invoke_link_work_items
+    type: toolkit
+    input:
+      - source_work_item_id
+      - target_work_item_id
+      - link_type
+    input_mapping:
+      source_id:
+        type: variable
+        value: source_work_item_id
+      target_id:
+        type: variable
+        value: target_work_item_id
+      link_type:
+        type: variable
+        value: link_type
+      attributes:
+        type: fixed
+        value: {"comment": "Linked by automation test"}
+    output:
+      - tool_result
+    structured_output: false
+    tool: link_work_items
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - tool_result
+      - source_work_item_id
+      - target_work_item_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator.
+      task:
+        type: fstring
+        value: |
+          Validate the output from 'link_work_items' tool.
+
+          Tool Result: {tool_result}
+          Source Work Item ID: {source_work_item_id}
+          Target Work Item ID: {target_work_item_id}
+
+          Validation rules:
+           - tool_executed: True if result is a string
+           - test_passed: True if tool_executed is True and message contains "linked"
+           - contains_source_id: True if message mentions source work item ID
+           - contains_target_id: True if message mentions target work item ID
+           - error: string or null
+
+          Return JSON test_results:
+          {{
+            "test_passed": boolean,
+            "tool_executed": boolean,
+            "contains_source_id": boolean,
+            "contains_target_id": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: cleanup_source_work_item
+
+  - id: cleanup_source_work_item
+    type: toolkit
+    input:
+      - source_work_item_id
+    input_mapping:
+      id:
+        type: variable
+        value: source_work_item_id
+    output:
+      - cleanup_source_result
+    structured_output: false
+    tool: delete_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: cleanup_target_work_item
+
+  - id: cleanup_target_work_item
+    type: toolkit
+    input:
+      - target_work_item_id
+    input_mapping:
+      id:
+        type: variable
+        value: target_work_item_id
+    output:
+      - cleanup_target_result
+    structured_output: false
+    tool: delete_work_item
+    toolkit_name: ${ADO_BOARDS_TOOLKIT_NAME}
+    transition: END

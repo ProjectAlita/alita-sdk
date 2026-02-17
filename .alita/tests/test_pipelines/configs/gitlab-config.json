@@ -1,0 +1,30 @@
+{
+  "repository": "Aliaksei_Breilian/alita-automation",
+  "branch": "main",
+  "gitlab_configuration": {
+    "private": true,
+    "alita_title": "gitlab"
+  },
+  "selected_tools": [
+    "list_branches_in_repo",
+    "create_branch",
+    "delete_branch",
+    "list_files",
+    "list_folders",
+    "create_file",
+    "read_file",
+    "update_file",
+    "append_file",
+    "edit_file",
+    "delete_file",
+    "grep_file",
+    "get_issue",
+    "comment_on_issue",
+    "create_pull_request",
+    "comment_on_pr",
+    "create_pr_change_comment",
+    "get_pr_changes",
+    "get_commits",
+    "set_active_branch"
+  ]
+}

@@ -1,0 +1,107 @@
+name: "PST34 create request happy path"
+priority: Critical
+description: |
+  Validates that the create_request tool successfully creates a new API request
+  in a folder with basic properties.
+  
+  Objective: Verify request creation functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - New request is created in the specified folder
+  - Request has the specified name, method, and URL
+  - Returns request ID and confirmation
+
+toolkits:
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
+
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  folder_path:
+    type: str
+    value: ${TEST_FOLDER_PATH}
+  request_name:
+    type: str
+    value: "Test_API_Request"
+  method:
+    type: str
+    value: "GET"
+  url:
+    type: str
+    value: "https://api.example.com/test"
+entry_point: invoke_create_request
+
+nodes:
+  - id: invoke_create_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - folder_path
+      - request_name
+      - method
+      - url
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: variable
+        value: method
+      url:
+        type: variable
+        value: url
+    output:
+
+      - tool_result
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'create_request' tool.
+          
+          Tool Result: {tool_result}
+          
+          This test validates that create_request creates a new API request.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates a new request was created.
+          3. Check for request ID or confirmation.
+          4. Validate the request has the specified properties.
+          
+          Return a JSON object named test_results with the following structure:
+          
+          {{
+            "test_passed": boolean (true if request was created successfully),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
