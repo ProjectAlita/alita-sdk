@@ -39,6 +39,7 @@ services:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk
       - ./.git:/app/.git
+      - ./github:/app/.github
     command: >
       sh -c "$${DOCKER_COMMAND:-.alita/tests/test_pipelines/run_all_suites.sh --local suites/github}"
 

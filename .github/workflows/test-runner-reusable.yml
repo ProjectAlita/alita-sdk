@@ -469,6 +469,96 @@ jobs:
         run: |
           echo "::notice::Creating bug reports for blocked tests"
           
+          # Export required environment variables
+          export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
+          export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
+          export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
+          export GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          
+          # Build the results path
+          RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          
+          # Run bug reporter agent
+          docker-compose run --name alita-sdk-bug-reporter alita-sdk \
+          sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . --message 'Analyze test failures in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
+      
+      - name: Copy bug reporter outputs
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        run: |
+          echo "Copying bug report files from container..."
+          docker cp alita-sdk-bug-reporter:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/bug_report_output.json ./bug_report_output.json || echo "{}" > ./bug_report_output.json
+          
+          echo "bug_report_output.json content:"
+          cat ./bug_report_output.json
+          
+          # Remove the bug reporter container after copying files
+          docker rm alita-sdk-bug-reporter || true
+      
+      - name: Post Bug Report Summary to GitHub
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        run: |
+          if [ ! -f ./bug_report_output.json ]; then
+            echo "::warning::No bug report output found"
+            exit 0
+          fi
+          
+          # Check if file is valid JSON
+          if ! jq empty ./bug_report_output.json 2>/dev/null; then
+            echo "::warning::Invalid JSON in bug_report_output.json"
+            exit 0
+          fi
+          
+          # Parse bug report results
+          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
+          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
+          FAILED=$(jq -r '.summary.failed // 0' ./bug_report_output.json)
+          TOTAL=$(jq -r '.summary.total_analyzed // 0' ./bug_report_output.json)
+          
+          # Write Bug Report Summary to GitHub Step Summary
+          if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+            {
+              echo ""
+              echo "## 🐛 Bug Reporter Summary"
+              echo ""
+              echo '```'
+              echo "═══════════════════════════════════════════════════════════════"
+              echo "  Automated Bug Reporting"
+              echo "═══════════════════════════════════════════════════════════════"
+              echo ""
+              printf "%-25s %s\n" "Total Test Failures:" "$TOTAL"
+              printf "%-25s %s\n" "Bugs Created:" "$BUGS_CREATED"
+              printf "%-25s %s\n" "Duplicates Skipped:" "$DUPLICATES_SKIPPED"
+              printf "%-25s %s\n" "Failed to Report:" "$FAILED"
+              echo '```'
+              echo ""
+              
+              # Show created bugs
+              if [ "$BUGS_CREATED" -gt 0 ]; then
+                echo "### ✅ Bugs Created on ELITEA Board"
+                echo ""
+                jq -r '.bugs_created[]? | "#### [\(.title)](\(.issue_url))\n\n- **Issue:** #\(.issue_number)\n- **Tests:** \(.test_ids | join(", "))\n- **Labels:** \(.labels | join(", "))\n- **Component:** \(.affected_component // "N/A")\n- **Root Cause:** \(.root_cause // "See issue description")\n\n"' ./bug_report_output.json
+              fi
+              
+              # Show skipped duplicates
+              if [ "$DUPLICATES_SKIPPED" -gt 0 ]; then
+                echo "### ⏭️ Duplicates Skipped"
+                echo ""
+                echo "The following test failures matched existing bugs and were not re-reported:"
+                echo ""
+                jq -r '.duplicates_skipped[]? | "- **Tests:** \(.test_ids | join(", "))\n  - **Similar to:** [\(.existing_issue_title)](\(.existing_issue_url))\n  - **Reason:** \(.similarity_reason // "N/A")\n"' ./bug_report_output.json
+              fi
+              
+              # Show failures
+              if [ "$FAILED" -gt 0 ]; then
+                echo "### ❌ Failed to Report"
+                echo ""
+                echo "The following test failures could not be automatically reported:"
+                echo ""
+                jq -r '.failed[]? | "- **Tests:** \(.test_ids | join(", "))\n  - **Reason:** \(.reason // "N/A")\n  - **Action:** \(.action_needed // "Manual review required")\n"' ./bug_report_output.json
+              fi
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          
       - name: Stop docker-compose
         if: always()
         run: docker-compose down --remove-orphans
@@ -484,6 +574,7 @@ jobs:
             ./fix_output.json
             ./fix_milestone.json
             ./blocked_tests_details.json
+            ./bug_report_output.json
           retention-days: 1
 
       - name: CLEAN UP WORKSPACE AFTER RUN
