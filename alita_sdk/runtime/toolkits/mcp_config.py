@@ -67,8 +67,6 @@ def _create_stdio_tool_func(original_tool_name: str, server_name: str, server_co
 
     def tool_func(**kwargs) -> str:
         """Execute the MCP tool with proper session management using MCP SDK directly."""
-        import json
-
         async def _execute():
             try:
                 from mcp import ClientSession, StdioServerParameters
@@ -286,7 +284,7 @@ def _substitute_placeholders(value: Any, user_config: Dict[str, Any]) -> Any:
         def replacer(match):
             key = match.group(1)
             return str(user_config.get(key, match.group(0)))
-        return re.sub(r'\{(\w+)\}', replacer, value)
+        return re.sub(r'{(\w+)}', replacer, value)
     elif isinstance(value, dict):
         return {k: _substitute_placeholders(v, user_config) for k, v in value.items()}
     elif isinstance(value, list):
@@ -370,6 +368,7 @@ class McpConfigToolkit(BaseToolkit):
         excluded_tools: Optional[List[str]] = None,
         toolkit_name: Optional[str] = None,
         client=None,
+        mcp_tokens: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> 'McpConfigToolkit':
         """
@@ -387,6 +386,9 @@ class McpConfigToolkit(BaseToolkit):
 
         if user_config is None:
             user_config = {}
+
+        if mcp_tokens is None:
+            mcp_tokens = {}
 
         server_type = server_config.get('type', 'stdio')
 
@@ -408,6 +410,7 @@ class McpConfigToolkit(BaseToolkit):
                 excluded_tools=excluded_tools,
                 toolkit_name=toolkit_name or server_name,
                 client=client,
+                mcp_tokens=mcp_tokens,
             )
         else:
             raise ValueError(f"Unknown MCP server type: {server_type}")
@@ -585,26 +588,57 @@ class McpConfigToolkit(BaseToolkit):
 
     @classmethod
     def _load_http_tools(
-        cls,
-        server_name: str,
-        server_config: Dict[str, Any],
-        user_config: Dict[str, Any],
-        selected_tools: Optional[List[str]],
-        excluded_tools: Optional[List[str]],
-        toolkit_name: str,
-        client=None,
+            cls,
+            server_name: str,
+            server_config: Dict[str, Any],
+            user_config: Dict[str, Any],
+            selected_tools: Optional[List[str]],
+            excluded_tools: Optional[List[str]],
+            toolkit_name: str,
+            client=None,
+            mcp_tokens: Optional[Dict[str, Any]] = None,  # Add parameter
     ) -> List[BaseTool]:
         """Load tools from HTTP MCP server using existing McpToolkit."""
         from .mcp import McpToolkit
+
+        if mcp_tokens is None:
+            mcp_tokens = {}
 
         # Substitute placeholders in URL and headers
         url = _substitute_placeholders(server_config.get('url', ''), user_config)
         headers = _substitute_placeholders(server_config.get('headers', {}), user_config)
         timeout = server_config.get('timeout', 60)
-        # Check user_config first (user's toolkit settings), then server_config, default True
         ssl_verify = user_config.get('ssl_verify', server_config.get('ssl_verify', True))
 
-        logger.info(f"[MCP Config] Connecting to HTTP server {server_name} at {url} (ssl_verify={ssl_verify})")
+        # Apply OAuth token if available: find if it ends with server_name or toolkit_name for flexibility
+        token_data = None
+        for key in mcp_tokens:
+            if key.endswith(server_name) or key.endswith(toolkit_name or ''):
+                token_data = mcp_tokens[key]
+                break
+        if not token_data:
+            token_data = mcp_tokens.get(server_name) or mcp_tokens.get(toolkit_name)
+
+        logger.debug(f"[MCP Config] MCP Server {server_name} loaded: {token_data}")
+        if not token_data:
+            # Try to find by URL match
+            for token_key, token_info in mcp_tokens.items():
+                if isinstance(token_info, dict) and token_info.get('url') == url:
+                    token_data = token_info
+                    break
+
+        if token_data:
+            access_token = token_data.get('access_token')
+            token_type = token_data.get('token_type', 'Bearer')
+
+            if access_token:
+                if headers is None:
+                    headers = {}
+                headers['Authorization'] = f"{token_type} {access_token}"
+                logger.info(f"[MCP Config] Applied OAuth token for HTTP server {server_name}")
+
+        logger.debug(f"[MCP Config] Connecting to HTTP server {server_name} at {url} (ssl_verify={ssl_verify}) with headers: {headers})")
+
 
         # Use existing McpToolkit for HTTP servers
         mcp_toolkit = McpToolkit.get_toolkit(
@@ -619,11 +653,11 @@ class McpConfigToolkit(BaseToolkit):
 
         tools = mcp_toolkit.get_tools()
 
-        # Apply excluded_tools filter (McpToolkit only supports selected_tools)
+        # Apply excluded_tools filter
         if excluded_tools:
             tools = [t for t in tools if t.name not in excluded_tools]
 
-        logger.info(f"[MCP Config] Loaded {len(tools)} tools from HTTP server {server_name}")
+        logger.debug(f"[MCP Config] Loaded {len(tools)} tools from HTTP server {server_name}")
 
         return tools
 
@@ -642,6 +676,7 @@ def _discover_tools_for_http_server(url: str, headers: Optional[Dict[str, Any]] 
     Returns empty list if discovery fails (e.g., auth required).
     """
     try:
+        logger.debug(f"[MCP Config] Attempting to discover tools from HTTP server at {url}")
         from ..utils.mcp_adapter import UnifiedMcpClient
         import asyncio
 
@@ -703,8 +738,6 @@ def _create_check_connection_for_stdio(server_name: str, server_config: Dict[str
             Dict with 'tools' list on success, error message string on failure
         """
         import asyncio
-        import subprocess
-        import signal
 
         # Resolve environment variables from user config
         env = dict(os.environ)  # Start with current environment
@@ -877,11 +910,11 @@ def get_mcp_config_toolkit_schemas() -> List[BaseModel]:
     Returns Pydantic models that the platform can use to display available toolkits.
     Each configured MCP server appears as a separate toolkit in the UI.
     """
-    from pydantic import create_model, ConfigDict, SecretStr
-    from typing import Literal
+    from pydantic import create_model, ConfigDict
 
     schemas = []
     servers = get_all_mcp_server_configs()
+    logger.debug(f"[MCP Config] >>> Found {len(servers)} servers")
 
     for server_name, config in servers.items():
         server_type = config.get('type', 'stdio')
