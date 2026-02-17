@@ -157,21 +157,6 @@ nodes:
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: cleanup_branch
 
-  - id: cleanup_branch
-    type: toolkit
-    input:
-      - test_branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: test_branch_name
-    output:
-      - cleanup_branch_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: validate_results
-
   - id: validate_results
     type: llm
     input:
@@ -181,7 +166,6 @@ nodes:
       - initial_content
       - duplicate_content
       - expected_error_indicators
-      - cleanup_branch_result
     input_mapping:
       chat_history:
         type: fixed
@@ -200,7 +184,6 @@ nodes:
           Initial Content: {initial_content}
           Duplicate Content Attempted: {duplicate_content}
           Expected Error Indicators: {expected_error_indicators}
-          Branch Cleanup Result: {cleanup_branch_result}
 
           This is a NEGATIVE test - we expect the duplicate creation to fail.
 
@@ -212,21 +195,19 @@ nodes:
           4. original_content_preserved: Current content matches initial content (not duplicate)
           5. content_not_overwritten: Duplicate content does NOT appear in current file
           6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
-          7. branch_cleanup_successful: Test branch was deleted successfully
           
           OPTIONAL (nice to have, but not required for test to pass):
-          8. error_message_helpful: Error message provides useful information
+          7. error_message_helpful: Error message provides useful information
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (SET TO TRUE if: first_creation_succeeded AND duplicate_creation_failed AND error_indicates_exists AND original_content_preserved AND content_not_overwritten AND no_unhandled_exception AND branch_cleanup_successful),
+            "test_passed": boolean (SET TO TRUE if: first_creation_succeeded AND duplicate_creation_failed AND error_indicates_exists AND original_content_preserved AND content_not_overwritten AND no_unhandled_exception),
             "first_creation_succeeded": boolean,
             "duplicate_creation_failed": boolean,
             "error_indicates_exists": boolean,
             "original_content_preserved": boolean,
             "content_not_overwritten": boolean,
             "no_unhandled_exception": boolean,
-            "branch_cleanup_successful": boolean,
             "error_message_helpful": boolean (optional, does not affect test_passed),
             "error_indicator_found": "which error indicator was found or 'none'",
             "error": string | null
@@ -238,4 +219,20 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END
