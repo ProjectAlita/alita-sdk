@@ -953,7 +953,10 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.create_new_bucket,
                 "name": "createNewBucket",
-                "description": "Creates new bucket specified by user.",
+                "description": """Create a new bucket. 
+                **ONLY use when user explicitly requests bucket creation** (e.g., 'create bucket named xyz'). 
+                For file operations (save, create, append), use toolkit's configured bucket or buckets from chat history. 
+                Do not infer bucket creation from filenames.""",
                 "args_schema": create_model(
                     "createNewBucket",
                     bucket_name=(str, Field(
