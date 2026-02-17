@@ -321,6 +321,7 @@ jobs:
           
           # Parse AI analysis results
           FIXED_COUNT=$(jq -r '.summary.fixed // 0' ./fix_output.json)
+          FLAKY_COUNT=$(jq -r '.summary.flaky // 0' ./fix_output.json)
           BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
           TOTAL_ANALYZED=$(jq -r '.summary.total_analyzed // 0' ./fix_output.json)
           
@@ -337,6 +338,7 @@ jobs:
               echo ""
               printf "%-20s %s\n" "Total Analyzed:" "$TOTAL_ANALYZED"
               printf "%-20s %s\n" "Fixed:" "$FIXED_COUNT"
+              printf "%-20s %s\n" "Flaky:" "$FLAKY_COUNT"
               printf "%-20s %s\n" "Blocked:" "$BLOCKED_COUNT"
               echo '```'
               echo ""
@@ -346,6 +348,15 @@ jobs:
                 echo "### ✅ Fixed Tests"
                 echo ""
                 jq -r '.fixed[]? | "- **\(.test_ids | join(", "))**\n  - Root Cause: \(.issue // "N/A")\n  - Fix Applied: \(.fix // "N/A")\n"' ./fix_output.json
+              fi
+              
+              # Show flaky tests details
+              if [ "$FLAKY_COUNT" -gt 0 ]; then
+                echo "### ⚠️ Flaky Tests"
+                echo ""
+                echo "The following tests failed initially but passed on rerun:"
+                echo ""
+                jq -r '.flaky[]? | "- **\(.test_ids | join(", "))**\n  - Reason: \(.reason // "N/A")\n"' ./fix_output.json
               fi
               
               # Show blocked tests details

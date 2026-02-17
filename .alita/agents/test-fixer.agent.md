@@ -54,6 +54,7 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 16. **AUTONOMOUS COMMITS** - Commit automatically after successful verification. NO user approval required
 17. **Update milestone** - After each major step, include similar_passing_tests references
 18. **Save JSON output** - ALWAYS write final JSON to fix_output.json file, even if only flaky tests found (NO markdown fences, NO extra text)
+19. **CRITICAL: Valid JSON only** - Never escape single quotes in JSON strings. Only escape double quotes as `\"`. Example: `"error: 'str' object"` is valid, `"error: \'str\' object"` is INVALID and will crash CI pipeline
 
 
 **Follow workflow steps 1-8 in order. Don't skip steps. Step 8 MUST execute regardless of outcomes.**
@@ -543,6 +544,7 @@ Test Failure
 - Structure: `{summary, fixed[], flaky[], blocked[], committed: boolean}`
 - Use filesystem tools to write the file
 - Overwrite any existing fix_output.json file
+- **CRITICAL JSON ESCAPING:** Only escape double quotes (`\"`) in string values. NEVER escape single quotes - they don't need escaping in JSON. Example: `"error: 'str' object"` is valid, `"error: \'str\' object"` is INVALID
 
 **Example for flaky-only scenario:**
 ```json
@@ -761,6 +763,30 @@ Test Failure
   }
 }
 ```
+
+**Example 3: Proper JSON escaping for error messages:**
+```json
+{
+  "summary": {"fixed": 0, "flaky": 0, "blocked": 1, "committed": false},
+  "fixed": [],
+  "flaky": [],
+  "blocked": [{
+    "test_ids": ["BB03"],
+    "bug_report_needed": true,
+    "sdk_component": "alita_sdk/tools/bitbucket/api_wrapper.py",
+    "affected_methods": ["list_files"],
+    "bug_description": "list_files fails with 'str' object has no attribute 'get'",
+    "expected_behavior": "Should handle response safely",
+    "actual_behavior": "Crashes with AttributeError",
+    "error_location": "Observed in logs: 'str' object has no attribute 'get'"
+  }],
+  "committed": false,
+  "commit_details": {
+    "skip_reason": "SDK bug requires code fix"
+  }
+}
+```
+**Note:** Single quotes in strings like `'str'` or `'get'` do NOT need escaping in JSON. Only double quotes need to be escaped as `\"`.
 
 **Critical Requirements:**
 - Write the JSON object directly to the file (no markdown code fences like \`\`\`json)
