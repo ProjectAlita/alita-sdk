@@ -116,6 +116,7 @@ nodes:
 
   - id: attempt_duplicate_create
     type: toolkit
+    continue_on_error: true
     input:
       - test_file_path
       - duplicate_content
