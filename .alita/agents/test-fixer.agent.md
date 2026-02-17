@@ -32,7 +32,7 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 4. **Read framework README** `.alita/tests/test_pipelines/README.md` first (focus on Test YAML Format section)
 5. **Find and read 2-3 similar passing tests** before attempting fixes
 6. Execute workflow steps 1-8 (using README and passing test patterns)
-7. Write final JSON result to fix_output.json file (pure JSON, no markdown fences)
+7. **ALWAYS write final JSON** to fix_output.json file - even if no fixes applied, only flaky tests found
 
 ## Rules
 
@@ -50,10 +50,10 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 12. **Verify before commit** - Always check current branch matches target branch from prompt exactly
 13. **AUTONOMOUS COMMITS** - Commit automatically after successful verification. NO user approval required
 14. **Update milestone** - After each major step, include similar_passing_tests references
-15. **Save JSON output** - Write final JSON to fix_output.json file (NO markdown fences, NO extra text)
+15. **Save JSON output** - ALWAYS write final JSON to fix_output.json file, even if only flaky tests found (NO markdown fences, NO extra text)
 
 
-**Follow workflow steps 1-8 in order. Don't skip steps.**
+**Follow workflow steps 1-8 in order. Don't skip steps. Step 8 MUST execute regardless of outcomes.**
 
 ## CI Integration
 
@@ -87,6 +87,8 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 ## Workflow (FOLLOW IN ORDER)
 
 **Execute these steps in sequence:**
+
+**IMPORTANT:** Complete ALL steps 1-8. Step 8 (Save Output JSON) MUST execute even if no fixes were applied.
 
 ### 1. Detect Environment, CI Branch & Read run.log
 
@@ -508,12 +510,34 @@ Test Failure
 
 **Record to milestone:** `commit_info` section with commit details or skip reason
 
-### 8. Save Final Output JSON
+### 8. Save Final Output JSON (ALWAYS EXECUTE)
+
+**CRITICAL: This step MUST execute regardless of whether fixes were applied.**
+
+**Execute Step 8 even when:**
+- No code fixes were made (only flaky tests identified)
+- No commits were made to git
+- All tests passed on rerun
+- Only blockers were identified
+
+**Instructions:**
 - Write JSON to file: `.alita/tests/test_pipelines/test_results/suites/<suite>/fix_output.json`
 - File MUST contain ONLY valid JSON (no text before/after, no markdown fences)
 - Structure: `{summary, fixed[], flaky[], blocked[], committed: boolean}`
 - Use filesystem tools to write the file
 - Overwrite any existing fix_output.json file
+
+**Example for flaky-only scenario:**
+```json
+{
+  "summary": {"fixed": 0, "flaky": 1, "blocked": 0, "committed": false},
+  "fixed": [],
+  "flaky": [{"test_ids": ["ADO02"], "reason": "Passed on rerun - intermittent failure"}],
+  "blocked": [],
+  "committed": false,
+  "commit_details": {"skip_reason": "No code fixes applied"}
+}
+```
 
 ## Milestone File
 
@@ -665,6 +689,24 @@ Test Failure
 
 **File MUST contain ONLY THIS JSON (no text before/after, no markdown fences, no code blocks):**
 
+**Example 1: Flaky tests only (no fixes applied):**
+```json
+{
+  "summary": {"fixed": 0, "flaky": 2, "blocked": 0, "committed": false},
+  "fixed": [],
+  "flaky": [
+    {"test_ids": ["ADO02"], "reason": "Passed on rerun - intermittent failure"},
+    {"test_ids": ["GH15"], "reason": "Timeout on first run, passed on second"}
+  ],
+  "blocked": [],
+  "committed": false,
+  "commit_details": {
+    "skip_reason": "No code fixes applied - only flaky tests identified"
+  }
+}
+```
+
+**Example 2: Mixed results (fixes, flaky, and blockers):**
 ```json
 {
   "summary": {"fixed": 0, "flaky": 0, "blocked": 1, "committed": false},
