@@ -415,6 +415,7 @@ nodes:
 #### Labels (separate from Type/Status/Priority):
 - **Automatically determine labels** based on bug content analysis:
   - **ALWAYS include**: `Type:Bug` (this is a LABEL for categorization, separate from the Type field)
+  - **ALWAYS include**: `ai_created` (indicates bug was created by AI agent)
   - **For toolkit-related bugs**, include: `feat:toolkits`, `eng:sdk`
   - **For specific toolkit bugs**, add: `int:{toolkit_name}` where toolkit_name is one of:
     - `int:github`, `int:jira`, `int:gitlab`, `int:ado`, `int:confluence`, `int:slack`, 
@@ -435,6 +436,7 @@ nodes:
   - Authentication/config issues → add `feat:toolkits`, relevant `int:` label
   - Schema validation → add `feat:toolkits`, relevant `int:` label
 - Test failures always get: `foundbyautomation`
+- **ALL bugs created by this agent get: `ai_created`**
 - If RCA unclear or impacts multiple components → prioritize most critical label
 
 #### Priority determination logic for test failures:
@@ -470,7 +472,7 @@ nodes:
   - **Type**: `Bug` (GitHub issue type field)
   - **Status**: Will default to `To Do` (automatically set by ELITEA Board)
   - **Priority**: `P0`, `P1`, or `P2` (based on severity assessment)
-  - **Labels**: All determined labels (e.g., `Type:Bug`, `foundbyautomation`, `int:github`, `eng:sdk`, etc.)
+  - **Labels**: All determined labels (MUST include `Type:Bug`, `ai_created`, plus context-specific labels like `foundbyautomation`, `int:github`, `eng:sdk`, etc.)
 - **POST-CREATE VERIFICATION (MANDATORY):**
   - Immediately re-read the created issue to verify:
     - Title format is correct (`[BUG] ...`)
@@ -481,7 +483,7 @@ nodes:
       - Root Cause Analysis with specific bug location
     - **Type field** is set to `Bug`
     - **Priority field** is set (P0/P1/P2)
-    - **Labels** include at minimum `Type:Bug` and `foundbyautomation`
+    - **Labels** include at minimum `Type:Bug`, `ai_created`, and `foundbyautomation`
     - Issue is added to ELITEA Board (Project #3)
   - If Type field, Priority field, or labels are missing/incorrect, update the issue immediately
   - If project assignment failed, update the issue to add it to the project
@@ -489,7 +491,7 @@ nodes:
     - Create the correct issue in `ProjectAlita/projectalita.github.io`
     - Add a comment to the wrong issue linking to the correct one
     - Close the wrong issue as duplicate
-- Report completion to user: "✅ Bug report created: [link to issue] (Type: Bug, Priority: P[0-2], Status: To Do, Labels: <label list>, Project: ELITEA Board)"
+- Report completion to user: "✅ Bug report created: [link to issue] (Type: Bug, Priority: P[0-2], Status: To Do, Labels: Type:Bug, ai_created, [other labels], Project: ELITEA Board)"
 
 ## Available GitHub Tools
 
@@ -654,7 +656,7 @@ Use these patterns to guide your RCA when analyzing test failures.
 - **Title**: `[BUG] Platform POST /predict/prompt_lib returns HTTP 400 with Python traceback instead of structured error payload`
 - **Type**: `Bug` (issue type field)
 - **Priority**: `P0` (priority field - blocks entire suite)
-- **Labels**: `Type:Bug`, `eng:sdk`, `int:platform`, `foundbyautomation`
+- **Labels**: `Type:Bug`, `ai_created`, `eng:sdk`, `int:platform`, `foundbyautomation`
 - **Description**:
   - **Affected Component**: Platform indexer_worker + SDK runtime client
   - **Impact**: JIRA suite execution blocked on DEV (tests error before pipeline runs)
@@ -714,7 +716,7 @@ Use these patterns to guide your RCA when analyzing test failures.
 - **Title**: `[BUG] Postman toolkit constructor parameter mismatch causes authentication failure (expects 'api_key', config provides 'token')`
 - **Type**: `Bug` (issue type field)
 - **Priority**: `P0` (priority field - blocks all Postman operations)
-- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:postman`, `foundbyautomation`
+- **Labels**: `Type:Bug`, `ai_created`, `feat:toolkits`, `eng:sdk`, `int:postman`, `foundbyautomation`
 - **Description**:
   - **Affected Component**: `alita_sdk/tools/postman/api_wrapper.py` → `PostmanAPIWrapper.__init__()`
   - **Impact**: All Postman toolkit operations return 401 Unauthorized
@@ -745,28 +747,29 @@ Use these patterns to guide your RCA when analyzing test failures.
 ### Example 1: GitHub toolkit bug
 - **Type field**: `Bug`
 - **Priority field**: `P1`
-- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:github`, `foundbyautomation`
+- **Labels**: `Type:Bug`, `ai_created`, `feat:toolkits`, `eng:sdk`, `int:github`, `foundbyautomation`
 
 ### Example 2: JIRA toolkit bug
 - **Type field**: `Bug`
 - **Priority field**: `P2`
-- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:jira`, `foundbyautomation`
+- **Labels**: `Type:Bug`, `ai_created`, `feat:toolkits`, `eng:sdk`, `int:jira`, `foundbyautomation`
 
 ### Example 3: Critical pipeline bug
 - **Type field**: `Bug`
 - **Priority field**: `P0`
-- **Labels**: `Type:Bug`, `eng:sdk`, `test-framework`, `foundbyautomation`
+- **Labels**: `Type:Bug`, `ai_created`, `eng:sdk`, `test-framework`, `foundbyautomation`
 
 ### Example 4: CLI/Runtime bug
 - **Type field**: `Bug`
 - **Priority field**: `P1`
-- **Labels**: `Type:Bug`, `eng:sdk`, `foundbyautomation`
+- **Labels**: `Type:Bug`, `ai_created`, `eng:sdk`, `foundbyautomation`
 
 **IMPORTANT**: The Type field and labels are different:
 - **Type field** = `Bug` (GitHub issue type - set via `issue_type` parameter)
 - **Type:Bug label** = Label for categorization (set via `labels` array)
+- **ai_created label** = Label indicating AI-created bug (REQUIRED for all bugs)
 - **Priority field** = `P0`/`P1`/`P2` (set via `priority` parameter, NOT in labels)
-- Both Type field and Type:Bug label should be set for every bug
+- Every bug should have: Type field = `Bug`, and labels including `Type:Bug` + `ai_created`
 
 ## JSON Output Format (CRITICAL for CI/CD Integration)
 
@@ -789,7 +792,7 @@ Write output to: `.alita/tests/test_pipelines/test_results/suites/{suite_name}/b
       "title": "[BUG] Pipeline execution treats expected ToolException as error",
       "type": "Bug",
       "priority": "P1",
-      "labels": ["Type:Bug", "eng:sdk", "test-framework", "foundbyautomation"],
+      "labels": ["Type:Bug", "ai_created", "eng:sdk", "test-framework", "foundbyautomation"],
       "created_at": "2026-02-17T10:30:00Z",
       "duplicates_found": false,
       "root_cause": "Pipeline executor doesn't check continue_on_error flag",
