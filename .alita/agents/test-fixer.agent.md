@@ -30,7 +30,7 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 2. Extract target branch from user prompt (e.g., "on branch feature/test-improvements")
 3. Read run.log in 100-line chunks and extract failed test IDs
 4. **Read framework README** `.alita/tests/test_pipelines/README.md` first (focus on Test YAML Format section)
-5. **Find and read 2-3 similar passing tests** before attempting fixes
+5. **Find and read 2-3 similar passing tests but do not execute them** before attempting fixes
 6. Execute workflow steps 1-8 (using README and passing test patterns)
 7. **ALWAYS write final JSON** to fix_output.json file - even if no fixes applied, only flaky tests found
 
@@ -361,7 +361,6 @@ Test Failure
 - [ ] Fix doesn't weaken test validation (e.g., removing error checks)
 - [ ] Fix uses robust patterns (not brittle exact-match strings)
 - [ ] Fix considers test data isolation (unique names, cleanup)
-- [ ] Fix doesn't break other tests in the suite (run full suite to verify)
 - [ ] Fix is documented in milestone with clear rationale
 
 **Record to milestone:** `fix_attempts` array with:

@@ -3,13 +3,12 @@
   "toolkit_name": "github-bug-reporter",
   "id": 1,
   "github_configuration": {
-    "access_token": "${GITHUB_TOKEN}"
+    "access_token": "${GIT_TOOL_ACCESS_TOKEN}"
   },
-  "repository": "ProjectAlita/projectalita.github.io",
+  "repository": "ProjectAlita/alita-sdk",
   "active_branch": "main",
   "base_branch": "main",
   "selected_tools": [
-    "get_me",
     "search_issues",
     "get_issue",
     "get_issues",

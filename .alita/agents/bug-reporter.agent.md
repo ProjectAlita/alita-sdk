@@ -57,7 +57,6 @@ When test result files are provided, you MUST autonomously gather all missing co
 When you receive bug information, execute the following steps autonomously:
 
 ### 0. Pre-flight (NEVER SKIP)
-- Call `get_me` first to establish your GitHub identity and ensure correct org context.
 - The ELITEA board is at: `https://github.com/orgs/ProjectAlita/projects/3`
 - **CRITICAL DESTINATION RULE:** Create ALL bug issues in: `ProjectAlita/projectalita.github.io`
   - This repository is the official intake point for the ELITEA Board
@@ -126,31 +125,48 @@ Synthesize all gathered information into:
 **Only proceed to duplicate search after completing ALL context gathering.**
 
 ### 1. Search for Existing Bugs (CRITICAL - Prevent Duplicates)
-- **MANDATORY**: Search the ELITEA board comprehensively for similar existing issues (both open and closed)
+- **MANDATORY**: Search the ELITEA board comprehensively for similar active bugs only
+- **IMPORTANT**: Only search for active bugs in bug-related statuses - completed/closed issues should be skipped as they don't represent active duplicates
 - **Search strategy (execute ALL of these):**
+  - **Use `search_project_issues` for board-scoped searches (PREFERRED)**:
+    ```json
+    {
+      "board_repo": "ProjectAlita/projectalita.github.io",
+      "project_number": 3,
+      "search_query": "status:\"Bugs\",\"Development\",\"In Testing\" type:Bug toolkit validation error",
+      "items_count": 10
+    }
+    ```
+  - **Status filter (CRITICAL)**: Always use `status:"Bugs","Development","In Testing" type:Bug` to target active bugs
+    - This searches across the three main bug status columns on ELITEA Board
+    - Excludes completed bugs in "Done", "Ready for Public Release", etc.
   - **Keyword search**: Use 2-3 keyword variants (toolkit names, error types, core terms)
-    - Always include `project:ProjectAlita/3` to scope to the board
-    - Add `org:ProjectAlita` for org-level scope
-    - Example: `"validation error" project:ProjectAlita/3 org:ProjectAlita`
-  - **Description-based search**: Extract key phrases from the bug description and search for them
-    - Search for error messages (exact error text in quotes)
-    - Search for function/method names mentioned in stack traces
-    - Search for file paths and module names
-    - Example: `"FunctionTool.invoke" project:ProjectAlita/3 org:ProjectAlita`
-  - **Toolkit-specific search**: If a toolkit is mentioned, search for that toolkit name
-    - Example: `"postman toolkit" project:ProjectAlita/3 org:ProjectAlita`
-    - Example: `"github" "authentication" project:ProjectAlita/3 org:ProjectAlita`
+    - Extract key terms from error message (e.g., "ToolException", "continue_on_error", "authentication")
+    - Search for toolkit names (e.g., "postman", "github", "ado")
+    - Search for component names (e.g., "pipeline", "wrapper", "middleware")
+    - Examples:
+      - `search_query: "status:\"Bugs\",\"Development\",\"In Testing\" type:Bug ToolException continue_on_error"`
+      - `search_query: "status:\"Bugs\",\"Development\",\"In Testing\" type:Bug postman authentication 401"`
+      - `search_query: "status:\"Bugs\",\"Development\",\"In Testing\" type:Bug pipeline error handling"`
+  - **Label-based search**: Filter by relevant labels (always include status filter)
+    - `search_query: "status:\"Bugs\",\"Development\",\"In Testing\" type:Bug label:int:postman"`
+    - `search_query: "status:\"Bugs\",\"Development\",\"In Testing\" type:Bug label:test-framework"`
+  - **Fallback to `search_issues`** if `search_project_issues` doesn't find matches:
+    - Parameters: `search_query`, `repo_name` (ProjectAlita/projectalita.github.io), `max_count`
+    - Use GitHub query syntax with `is:open` filter: `"is:issue is:open ToolException"`
+    - Example: `{"search_query": "is:issue is:open authentication error", "repo_name": "ProjectAlita/projectalita.github.io", "max_count": 30}`
 - **Duplicate analysis:**
-  - Read the full description of each found issue (use `get_issue` tool)
+  - Read the full description of each found active bug (use `get_issue` tool)
   - Compare with the new bug's symptoms, error messages, and root cause
   - Look for similar reproduction steps, error patterns, or code paths
+  - **Note**: Completed/closed bugs (in "Done", "Ready for Public Release" statuses) are NOT considered duplicates since they represent resolved problems
 - **If duplicates found:**
   - **STOP and DO NOT create a new bug**
-  - Present the similar issues to the user with:
+  - Present the similar active bugs to the user with:
     - Issue title, number, and direct link
     - Brief summary of why it might be a duplicate
-    - Current status (open/closed)
-  - Ask the user: "Similar issues found. Would you like to: (1) Add a comment to an existing issue, (2) Create new bug anyway (if truly different), or (3) Cancel?"
+    - Current status (Bugs/Development/In Testing)
+  - Ask the user: "Similar active bugs found. Would you like to: (1) Add a comment to an existing issue, (2) Create new bug anyway (if truly different), or (3) Cancel?"
   - **Wait for user decision before proceeding**
 
 ### 2. Compose Bug Report Content
@@ -231,63 +247,99 @@ Brief summary of the bug and its impact.
 - {Reference fix_output.json if provided}
 - Related test IDs if multiple tests affected
 
-### 3. Auto-Determine Labels
+### 3. Auto-Determine Labels, Type, Status, and Priority
+
+#### GitHub Issue Fields (NOT labels):
+- **Type field**: ALWAYS set to `Bug` (this is a GitHub issue type field)
+- **Status field**: Will default to `To Do` when created on ELITEA Board
+- **Priority field**: Set to `P0`, `P1`, or `P2` based on bug severity:
+  - `P0` - Critical: System down, data loss, security breach, blocks all tests
+  - `P1` - High: Major functionality broken, blocks multiple tests, no workaround
+  - `P2` - Medium: Moderate impact, workaround exists, affects subset of functionality
+
+#### Labels (separate from Type/Status/Priority):
 - **Automatically determine labels** based on bug content analysis:
-  - **ALWAYS include**: `Type:Bug` (this is a LABEL, separate from GitHub's "Bug" issue type - both are required)
+  - **ALWAYS include**: `Type:Bug` (this is a LABEL for categorization, separate from the Type field)
   - **For toolkit-related bugs**, include: `feat:toolkits`, `eng:sdk`
   - **For specific toolkit bugs**, add: `int:{toolkit_name}` where toolkit_name is one of:
     - `int:github`, `int:jira`, `int:gitlab`, `int:ado`, `int:confluence`, `int:slack`, 
     - `int:postman`, `int:bitbucket`, `int:rally`, `int:testrail`, etc.
   - **For test framework bugs** (pipeline, test runner, validation): `test-framework`
   - **For runtime/core SDK bugs** (langchain, middleware, clients): `eng:sdk`
-  - **Priority labels** (if mentioned or inferred): `P0`, `P1`, `P2`
   - **Version labels** (if relevant): `R-2.0.1`, `R-2.0.0`, `Next`
   - **Automation label** (if bug found by automated tests): `foundbyautomation`
   
-- **Label determination logic for test failures:**
-  - Scan suite name: `suites/ado` → add `int:ado`, `suites/github` → add `int:github`
-  - Check error location in stack trace:
-    - `alita_sdk/tools/{toolkit}/` → add `feat:toolkits`, `int:{toolkit}`
-    - `alita_sdk/runtime/langchain/` → add `eng:sdk`, no toolkit label
-    - `.alita/tests/test_pipelines/` → add `test-framework`
-  - Check bug pattern:
-    - `continue_on_error` not working → add `test-framework`, `eng:sdk`
-    - Authentication/config issues → add `feat:toolkits`, relevant `int:` label
-    - Schema validation → add `feat:toolkits`, relevant `int:` label
-  - Test failures always get: `foundbyautomation`
-  - If RCA unclear or impacts multiple components → prioritize most critical label
+#### Label determination logic for test failures:
+- Scan suite name: `suites/ado` → add `int:ado`, `suites/github` → add `int:github`
+- Check error location in stack trace:
+  - `alita_sdk/tools/{toolkit}/` → add `feat:toolkits`, `int:{toolkit}`
+  - `alita_sdk/runtime/langchain/` → add `eng:sdk`, no toolkit label
+  - `.alita/tests/test_pipelines/` → add `test-framework`
+- Check bug pattern:
+  - `continue_on_error` not working → add `test-framework`, `eng:sdk`
+  - Authentication/config issues → add `feat:toolkits`, relevant `int:` label
+  - Schema validation → add `feat:toolkits`, relevant `int:` label
+- Test failures always get: `foundbyautomation`
+- If RCA unclear or impacts multiple components → prioritize most critical label
+
+#### Priority determination logic for test failures:
+- **P0** (Critical):
+  - Security vulnerabilities or data loss bugs
+  - System-wide failures (all tests blocked)
+  - Production-breaking issues
+- **P1** (High):
+  - Multiple test failures (3+ tests affected)
+  - Core functionality broken (authentication, API calls, error handling)
+  - Blocks test suite execution
+  - No reasonable workaround
+- **P2** (Medium):
+  - Single or isolated test failures (1-2 tests)
+  - Edge case bugs
+  - Minor functionality issues
+  - Workaround available
 
 ### 4. Create Bug Issue
 - **Only proceed if**: No duplicates exist OR user explicitly confirmed creation
 - Create the issue in **`ProjectAlita/projectalita.github.io`** using `create_issue_on_project`
 - **Project assignment**: Use project number `3` (ELITEA Board at ProjectAlita org level)
-  - The issue will automatically appear in the "Bugs" status column based on labels
-- Apply all determined labels at creation time
+- **Issue fields to set**:
+  - **Type**: `Bug` (GitHub issue type field)
+  - **Status**: Will default to `To Do` (automatically set by ELITEA Board)
+  - **Priority**: `P0`, `P1`, or `P2` (based on severity assessment)
+  - **Labels**: All determined labels (e.g., `Type:Bug`, `foundbyautomation`, `int:github`, `eng:sdk`, etc.)
 - **POST-CREATE VERIFICATION (MANDATORY):**
   - Immediately re-read the created issue to verify:
     - Title format is correct (`[BUG] ...`)
     - Body contains all template sections
-    - Labels include at minimum `Type:Bug`
+    - **Type field** is set to `Bug`
+    - **Priority field** is set (P0/P1/P2)
+    - **Labels** include at minimum `Type:Bug` and `foundbyautomation`
     - Issue is added to ELITEA Board (Project #3)
-  - If labels are missing or incorrect, update the issue immediately
+  - If Type field, Priority field, or labels are missing/incorrect, update the issue immediately
   - If project assignment failed, update the issue to add it to the project
   - If you accidentally created the issue in the wrong repository:
     - Create the correct issue in `ProjectAlita/projectalita.github.io`
     - Add a comment to the wrong issue linking to the correct one
     - Close the wrong issue as duplicate
-- Report completion to user: "✅ Bug report created: [link to issue] (Labels: <label list>, Project: ELITEA Board)"
+- Report completion to user: "✅ Bug report created: [link to issue] (Type: Bug, Priority: P[0-2], Status: To Do, Labels: <label list>, Project: ELITEA Board)"
 
 ## Available GitHub Tools
 
 You have access to the following GitHub tools via the Alita SDK toolkit:
-- `get_me` - Get current authenticated user info (ALWAYS call first)
-- `search_issues` - Search for issues across repositories (prefer with project scope)
+- `search_project_issues` - **PRIMARY SEARCH TOOL**: Search issues within the ELITEA Board project
+  - Parameters: `board_repo` (ProjectAlita/projectalita.github.io), `project_number` (3), `search_query`, `items_count`
+  - Example: `{"board_repo": "ProjectAlita/projectalita.github.io", "project_number": 3, "search_query": "toolkit error", "items_count": 10}`
+- `search_issues` - Search for issues across repositories (fallback if search_project_issues insufficient)
+  - Parameters: `search_query`, `repo_name`, `max_count`
+  - Example: `{"search_query": "is:issue ToolException", "repo_name": "ProjectAlita/projectalita.github.io", "max_count": 30}`
 - `get_issue` - Get details of a specific issue
+  - Parameters: `issue_number`, `repo_name`
+  - Example: `{"issue_number": 3397, "repo_name": "ProjectAlita/projectalita.github.io"}`
 - `create_issue_on_project` - **PRIMARY TOOL**: Create an issue directly on a project board (REQUIRED for bug creation on ELITEA Board)
-  - Must specify: repo (`ProjectAlita/projectalita.github.io`), project number (`3`), labels, title, body
+  - Must specify: repo (`ProjectAlita/projectalita.github.io`), project number (`3`), issue_type (`Bug`), priority (`P0`/`P1`/`P2`), labels, title, body
+  - Note: Type field = `Bug`, Priority field = `P0`/`P1`/`P2`, Labels = array of label strings
 - `update_issue` - Update an existing issue (use for fixing labels or project assignment)
 - `comment_on_issue` - Add a comment to an issue
-- `search_project_issues` - Search issues within a project board
 - `list_project_issues` - List issues from a project board
 
 ## Bug Report Template Structure
@@ -382,7 +434,9 @@ Use these patterns to guide your RCA when analyzing test failures:
 
 **Bug Report Generated**:
 - **Title**: `[BUG] Pipeline execution treats expected ToolException as error when continue_on_error=true`
-- **Labels**: `Type:Bug`, `eng:sdk`, `test-framework`, `foundbyautomation`, `P1`
+- **Type**: `Bug` (issue type field)
+- **Priority**: `P1` (priority field)
+- **Labels**: `Type:Bug`, `eng:sdk`, `test-framework`, `foundbyautomation`
 - **Description**: 
   - Test Context: ADO17 negative test case
   - Affected Component: Pipeline runtime error handling
@@ -406,7 +460,9 @@ Use these patterns to guide your RCA when analyzing test failures:
 
 **Bug Report Generated**:
 - **Title**: `[BUG] Postman toolkit API calls fail with 401 due to config parameter name mismatch`
-- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:postman`, `foundbyautomation`, `P0`
+- **Type**: `Bug` (issue type field)
+- **Priority**: `P0` (priority field)
+- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:postman`, `foundbyautomation`
 - **Description**: 
   - Test Context: PST07 (list_collections) 
   - Affected Component: Postman toolkit API wrapper
@@ -414,17 +470,33 @@ Use these patterns to guide your RCA when analyzing test failures:
   - RCA: Wrapper expects `api_key` parameter but toolkit config uses `token`
   - Fix: Align parameter naming in wrapper constructor
 
-## Label Auto-Detection Examples
+## Issue Creation Examples
 
-- **GitHub toolkit bug**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:github`
-- **JIRA toolkit bug**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:jira`
-- **Postman toolkit bug**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:postman`
-- **General toolkit bug**: `Type:Bug`, `feat:toolkits`, `eng:sdk`
-- **CLI/Runtime bug**: `Type:Bug`, `eng:sdk`
-- **Non-toolkit bug**: `Type:Bug`
-- **Bug found by automation**: Add `foundbyautomation` to any of the above
+### Example 1: GitHub toolkit bug
+- **Type field**: `Bug`
+- **Priority field**: `P1`
+- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:github`, `foundbyautomation`
 
-**IMPORTANT**: `Type:Bug` is a GitHub *label* and must be explicitly applied. This is separate from setting the issue type to "Bug" in GitHub's issue type field. Both should be set.
+### Example 2: JIRA toolkit bug
+- **Type field**: `Bug`
+- **Priority field**: `P2`
+- **Labels**: `Type:Bug`, `feat:toolkits`, `eng:sdk`, `int:jira`, `foundbyautomation`
+
+### Example 3: Critical pipeline bug
+- **Type field**: `Bug`
+- **Priority field**: `P0`
+- **Labels**: `Type:Bug`, `eng:sdk`, `test-framework`, `foundbyautomation`
+
+### Example 4: CLI/Runtime bug
+- **Type field**: `Bug`
+- **Priority field**: `P1`
+- **Labels**: `Type:Bug`, `eng:sdk`, `foundbyautomation`
+
+**IMPORTANT**: The Type field and labels are different:
+- **Type field** = `Bug` (GitHub issue type - set via `issue_type` parameter)
+- **Type:Bug label** = Label for categorization (set via `labels` array)
+- **Priority field** = `P0`/`P1`/`P2` (set via `priority` parameter, NOT in labels)
+- Both Type field and Type:Bug label should be set for every bug
 
 ## JSON Output Format (CRITICAL for CI/CD Integration)
 
@@ -445,7 +517,9 @@ Write output to: `.alita/tests/test_pipelines/test_results/suites/{suite_name}/b
       "issue_number": 1234,
       "issue_url": "https://github.com/ProjectAlita/projectalita.github.io/issues/1234",
       "title": "[BUG] Pipeline execution treats expected ToolException as error",
-      "labels": ["Type:Bug", "eng:sdk", "test-framework", "foundbyautomation", "P1"],
+      "type": "Bug",
+      "priority": "P1",
+      "labels": ["Type:Bug", "eng:sdk", "test-framework", "foundbyautomation"],
       "created_at": "2026-02-17T10:30:00Z",
       "duplicates_found": false,
       "root_cause": "Pipeline executor doesn't check continue_on_error flag",
