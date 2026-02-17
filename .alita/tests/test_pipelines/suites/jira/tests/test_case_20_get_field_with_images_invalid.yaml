@@ -44,6 +44,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true
     transition: process_results
 
   - id: process_results
