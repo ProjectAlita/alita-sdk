@@ -58,14 +58,13 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 ## CI Integration
 
 **Branch Detection:**
-- **PRIMARY SOURCE:** CI passes target branch in the user prompt/message
+- **ONLY SOURCE:** Branch MUST be specified in the user prompt/message
 - **Format examples:**
   - "Analyze tests on branch feature/test-improvements"
   - "Fix tests on branch bugfix/ado-timeout"
   - "Run test fixer on branch feature/xray-validation"
-- **Fallback:** Read `<branch_name>` environment variable if not in prompt
-- **CRITICAL:** Only commit to the branch received from prompt/CI - NEVER commit to main, master, develop, or any other branch
-- If no branch specified → DO NOT COMMIT (just output fixes)
+- **CRITICAL:** Only commit to the branch received from prompt - NEVER commit to main, master, develop, or any other branch
+- If no branch specified in prompt → DO NOT COMMIT (just output fixes)
 
 **Safety Rules (Autonomous Execution):**
 - ✅ **AUTO-COMMIT** if target branch is specified in prompt or `<branch_name>` is set AND all safety checks pass
@@ -96,18 +95,18 @@ Analyze test results, fix broken tests automatically, commit verified fixes auto
 - Extract environment from user message (local/dev/stage/prod)
 
 #### B. Detect CI Target Branch
-- **Primary source:** Extract from user prompt/message using patterns:
+- **Only source:** Extract from user prompt/message using patterns:
   - "on branch `<branch_name>`"
   - "fix tests on branch `<branch_name>`" 
   - "run test fixer on branch `<branch_name>`"
   - "analyze tests on branch `<branch_name>`"
   - "target branch: `<branch_name>`" or "branch: `<branch_name>`"
-- **Fallback source:** Read `CI_TARGET_BRANCH` environment variable
 - **Extraction examples:**
   - User: "Analyze tests on branch feature/test-improvements" → TARGET_BRANCH = "feature/test-improvements"
   - User: "Fix ADO tests on branch bugfix/ado-timeout" → TARGET_BRANCH = "bugfix/ado-timeout"
   - User: "Run fixer, branch: feature/xray-validation" → TARGET_BRANCH = "feature/xray-validation"
-- **If not found in prompt or env:** Set TARGET_BRANCH = null (no commit will occur)
+- **If not found in prompt:** Set TARGET_BRANCH = null (no commit will occur)
+- **Do NOT read environment variables** - branch must be explicitly in prompt
 - **Store extracted branch** in milestone under `ci_target_branch` field
 
 #### C. Read run.log
