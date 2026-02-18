@@ -122,7 +122,7 @@ nodes:
     structured_output: true
     transition: read_file_after_create
 
-  # Step 5: Read the file to verify it was created
+  # Step 5: Read the file to verify it was created (optional due to GitHub API propagation delay)
   - id: read_file_after_create
     type: toolkit
     tool: read_file
@@ -136,6 +136,7 @@ nodes:
     output:
       - read_result
     structured_output: true
+    continue_on_error: true
     transition: validate_create
 
   # Step 6: Validate file creation with LLM
