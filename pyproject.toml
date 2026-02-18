@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alita_sdk"
-version = "0.3.682"
+version = "0.3.685"
 description = "SDK for building langchain agents using resources from Alita"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -47,7 +47,7 @@ Homepage = "https://projectalita.ai"
 Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
 
 [tool.setuptools.package-data]
-alita_sdk = [ "*.md", "*.txt", "*.yml", "*.yaml", "prompts/*.md", "docs/*.md", "docs/code/*.md", "docs/faq/*.md",]
+alita_sdk = [ "*.md", "*.txt", "*.yml", "*.yaml", "prompts/*.md", "docs/*.md", "docs/code/*.md", "docs/faq/*.md", "docs/prompts/*.md",]
 
 [tool.setuptools.packages.find]
 where = [ ".",]
