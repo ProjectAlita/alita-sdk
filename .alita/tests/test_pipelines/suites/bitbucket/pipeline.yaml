@@ -57,7 +57,7 @@ execution:
 
   settings:
     timeout: 180
-    parallel: 1
+    parallel: 5
     stop_on_failure: false
 
 cleanup:
