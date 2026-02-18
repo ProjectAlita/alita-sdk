@@ -192,11 +192,16 @@ jobs:
           ERRORS=$(jq -r '.errors // 0' ./results.json)
           SKIPPED=$(jq -r '.skipped // 0' ./results.json)
           
-          # Determine status based on failures and errors
-          if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
-            STATUS_DISPLAY="❌ TESTS_FAILED"
+          # Determine status based on failures, errors, and container exit code
+          TESTS_FAILED="${{ steps.wait_tests.outputs.tests_failed }}"
+          if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ] || [ "$TESTS_FAILED" = "true" ]; then
+            STATUS_DISPLAY="❌ FAILED"
+            ALERT_TYPE="CAUTION"
+            ALERT_MSG="Tests failed for suite **${SUITE}**"
           else
-            STATUS_DISPLAY="✅ TESTS_PASSED"
+            STATUS_DISPLAY="✅ PASSED"
+            ALERT_TYPE="TIP"
+            ALERT_MSG="All tests passed for suite **${SUITE}**"
           fi
                     
           # Write to GitHub Step Summary
@@ -205,17 +210,13 @@ jobs:
               echo ""
               echo "## 📊 Test Execution Summary"
               echo ""
-              echo '```'
-              echo "═══════════════════════════════════════════════════════════════"
-              echo "  Execution Summary"
-              echo "═══════════════════════════════════════════════════════════════"
+              echo "> [!${ALERT_TYPE}]"
+              echo "> ${ALERT_MSG}"
               echo ""
-              echo "Suite Results:"
+              echo "| Suite | Status | Passed | Failed | Errors | Skipped |"
+              echo "|-------|--------|--------|--------|--------|--------|"
+              echo "| ${SUITE} | ${STATUS_DISPLAY} | ${PASSED} | ${FAILED} | ${ERRORS} | ${SKIPPED} |"
               echo ""
-              printf "%-20s %-23s %-8s %-8s %-8s %-8s\n" "SUITE" "STATUS" "PASSED" "FAILED" "ERRORS" "SKIPPED"
-              echo "───────────────────────────────────────────────────────────────────────────────────"
-              printf "%-20s %-23s %-8s %-8s %-8s %-8s\n" "$SUITE" "$STATUS_DISPLAY" "$PASSED" "$FAILED" "$ERRORS" "$SKIPPED"
-              echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -330,7 +331,7 @@ jobs:
           FIXED_COUNT=$(jq -r '.summary.fixed // 0' ./fix_output.json)
           FLAKY_COUNT=$(jq -r '.summary.flaky // 0' ./fix_output.json)
           BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
-          TOTAL_ANALYZED=$(jq -r '.summary.total_analyzed // 0' ./fix_output.json)
+          TOTAL_ANALYZED=$(jq -r '(.summary.total_analyzed // ((.summary.fixed // 0) + (.summary.flaky // 0) + (.summary.blocked // 0)))' ./fix_output.json)
           
           # Write AI Analysis Summary to GitHub Step Summary
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
@@ -338,111 +339,126 @@ jobs:
               echo ""
               echo "## 🤖 AI Analysis Summary"
               echo ""
-              echo '```'
-              echo "═══════════════════════════════════════════════════════════════"
-              echo "  Test Fixer Agent Analysis"
-              echo "═══════════════════════════════════════════════════════════════"
-              echo ""
-              printf "%-20s %s\n" "Total Analyzed:" "$TOTAL_ANALYZED"
-              printf "%-20s %s\n" "Fixed:" "$FIXED_COUNT"
-              printf "%-20s %s\n" "Flaky:" "$FLAKY_COUNT"
-              printf "%-20s %s\n" "Blocked:" "$BLOCKED_COUNT"
-              echo '```'
+              echo "| Metric | Count |"
+              echo "|--------|-------|"
+              echo "| Total Analyzed | **${TOTAL_ANALYZED}** |"
+              echo "| ✅ Fixed | ${FIXED_COUNT} |"
+              echo "| ⚠️ Flaky | ${FLAKY_COUNT} |"
+              echo "| ❌ Blocked | ${BLOCKED_COUNT} |"
               echo ""
               
               # Show fixed tests details
               if [ "$FIXED_COUNT" -gt 0 ]; then
                 echo "### ✅ Fixed Tests"
                 echo ""
-                jq -r '.fixed[]? | "- **\((.test_ids // []) | join(", "))**\n  - Root Cause: \(.issue // "N/A")\n  - Fix Applied: \(.fix // "N/A")\n"' ./fix_output.json
+                echo "| Test | Root Cause | Fix Applied |"
+                echo "|------|------------|-------------|"
+                jq -r '.fixed[]? | "| \((.test_ids // []) | join(", ")) | \(.issue // "N/A") | \(.fix // "N/A") |"' ./fix_output.json
+                echo ""
               fi
               
               # Show flaky tests details
               if [ "$FLAKY_COUNT" -gt 0 ]; then
                 echo "### ⚠️ Flaky Tests"
                 echo ""
-                echo "The following tests failed initially but passed on rerun:"
+                echo "> [!WARNING]"
+                echo "> The following tests failed initially but passed on rerun"
                 echo ""
-                jq -r '.flaky[]? | "- **\((.test_ids // []) | join(", "))**\n  - Reason: \(.reason // "N/A")\n"' ./fix_output.json
+                echo "| Test | Reason |"
+                echo "|------|--------|"
+                jq -r '.flaky[]? | "| \((.test_ids // []) | join(", ")) | \(.reason // "N/A") |"' ./fix_output.json
+                echo ""
               fi
               
               # Show blocked tests details
               if [ "$BLOCKED_COUNT" -gt 0 ]; then
                 echo "### ❌ Blocked Tests"
                 echo ""
-                jq -r '.blocked[]? | "- **\((.test_ids // []) | join(", "))**\n  - **Bug Description:** \(.bug_description // "N/A")\n  - **Expected Behavior:** \(.expected_behavior // "N/A")\n  - **Actual Behavior:** \(.actual_behavior // "N/A")\n  - **SDK Component:** \(.sdk_component // "N/A")\n  - **Affected Methods:** \((.affected_methods // []) | join(", "))\n  - **Error Location:** \(.error_location // "N/A")\n  - **Bug Report Needed:** \(.bug_report_needed // false)\n"' ./fix_output.json
+                jq -r '.blocked[]? | "<details>\n<summary><b>\((.test_ids // []) | join(", "))</b> — \(.bug_description // "N/A")</summary>\n\n| Field | Detail |\n|-------|--------|\n| Bug Description | \(.bug_description // "N/A") |\n| Expected Behavior | \(.expected_behavior // "N/A") |\n| Actual Behavior | \(.actual_behavior // "N/A") |\n| SDK Component | \(.sdk_component // "N/A") |\n| Affected Methods | \((.affected_methods // []) | join(", ")) |\n| Error Location | \(.error_location // "N/A") |\n| Bug Report Needed | \(.bug_report_needed // false) |\n\n</details>\n"' ./fix_output.json
+                echo ""
               fi
               
-              # Add milestone summary if available
+              # Add milestone summary if available (collapsible)
               if [ -f ./fix_milestone.json ]; then
                 if jq empty ./fix_milestone.json 2>/dev/null; then
+                  # Gather milestone data
+                  MS_ENV=$(jq -r '.environment // "N/A"' ./fix_milestone.json)
+                  MS_BRANCH=$(jq -r '.ci_target_branch // "N/A"' ./fix_milestone.json)
+                  MS_SUITE=$(jq -r '.suite // "N/A"' ./fix_milestone.json)
+                  MS_FAILED_COUNT=$(jq -r '.initial_failures // [] | length' ./fix_milestone.json)
+                  FIX_ATTEMPTS_COUNT=$(jq -r '.fix_attempts // [] | length' ./fix_milestone.json)
+                  RERUN_COUNT=$(jq -r '.rerun_attempts // [] | length' ./fix_milestone.json)
+                  
+                  echo "<details>"
+                  echo "<summary>📋 <b>Fix Milestone</b> — ${MS_FAILED_COUNT} failures, ${FIX_ATTEMPTS_COUNT} fix attempts</summary>"
                   echo ""
-                  echo "### 📋 Fix Milestone"
+                  echo "| Field | Value |"
+                  echo "|-------|-------|"
+                  echo "| Environment | ${MS_ENV} |"
+                  echo "| Branch | \`${MS_BRANCH}\` |"
+                  echo "| Suite | ${MS_SUITE} |"
+                  echo "| Failed Tests | ${MS_FAILED_COUNT} |"
                   echo ""
                   
-                  # Display key milestone fields
-                  ENV=$(jq -r '.environment // "N/A"' ./fix_milestone.json)
-                  BRANCH=$(jq -r '.ci_target_branch // "N/A"' ./fix_milestone.json)
-                  SUITE=$(jq -r '.suite // "N/A"' ./fix_milestone.json)
-                  FAILED_COUNT=$(jq -r '.failed_tests // 0' ./fix_milestone.json)
-                  
-                  echo "- **Environment:** $ENV"
-                  echo "- **Target Branch:** \`$BRANCH\`"
-                  echo "- **Suite:** $SUITE"
-                  echo "- **Failed Tests Analyzed:** $FAILED_COUNT"
-                  echo ""
-                  
-                  # Show error patterns if any
+                  # Show error patterns as table
                   ERROR_PATTERNS_COUNT=$(jq -r '.error_patterns // [] | length' ./fix_milestone.json)
                   if [ "$ERROR_PATTERNS_COUNT" -gt 0 ]; then
-                    echo "**Error Patterns Identified:**"
-                    jq -r '.error_patterns[]? | "- \(.description) (Tests: \((.test_ids // []) | join(", ")))"' ./fix_milestone.json
+                    echo "**Error Patterns:**"
+                    echo ""
+                    echo "| Pattern | Tests |"
+                    echo "|---------|-------|"
+                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) |"' ./fix_milestone.json
                     echo ""
                   fi
                   
-                  # Show fix attempts summary
-                  FIX_ATTEMPTS_COUNT=$(jq -r '.fix_attempts // [] | length' ./fix_milestone.json)
+                  # Show fix attempts as table
                   if [ "$FIX_ATTEMPTS_COUNT" -gt 0 ]; then
-                    echo "**Fix Attempts:** $FIX_ATTEMPTS_COUNT"
-                    jq -r '.fix_attempts[]? | "- Attempt \(.attempt): \(.fix_description)"' ./fix_milestone.json
+                    echo "**Fix Attempts:**"
+                    echo ""
+                    echo "| # | Result |"
+                    echo "|---|--------|"
+                    jq -r '.fix_attempts[]? | "| \(.attempt) | \(.fix_rationale // "N/A") |"' ./fix_milestone.json
                     echo ""
                   fi
                   
                   # Show rerun attempts
-                  RERUN_COUNT=$(jq -r '.rerun_attempts // [] | length' ./fix_milestone.json)
                   if [ "$RERUN_COUNT" -gt 0 ]; then
-                    echo "**Rerun Attempts:** $RERUN_COUNT"
+                    echo "**Rerun Attempts:** ${RERUN_COUNT}"
+                    echo ""
                   fi
+                  
+                  echo "</details>"
+                  echo ""
                 fi
               fi
               
               # Add commit information if fixes were committed
               COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
               if [ "$COMMITTED" = "true" ]; then
-                echo ""
-                echo "### 🔧 Commits & Push"
-                echo ""
-                COMMIT_MSG=$(jq -r '.commit_details.commit_message // "N/A"' ./fix_output.json)
+                COMMIT_MSG=$(jq -r '.commit_details.commit_message // null' ./fix_output.json)
+                if [ "$COMMIT_MSG" = "null" ] && [ -f ./fix_milestone.json ]; then
+                  COMMIT_MSG=$(jq -r '.commit_info.commit_message // "N/A"' ./fix_milestone.json)
+                fi
                 BRANCH=$(jq -r '.commit_details.branch // "N/A"' ./fix_output.json)
                 FILES_COUNT=$(jq -r '.commit_details.files_count // 0' ./fix_output.json)
                 PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
                 
-                echo "✅ **Fixes committed and pushed to GitHub**"
+                echo "> [!TIP]"
+                echo "> Fixes committed and pushed to branch \`${BRANCH}\`"
                 echo ""
-                echo "- **Branch:** \`$BRANCH\`"
-                echo "- **Files updated:** $FILES_COUNT"
-                echo "- **Commit message:** $COMMIT_MSG"
-                echo "- **Method:** GitHub API (direct push)"
+                echo "| Detail | Value |"
+                echo "|--------|-------|"
+                echo "| Files updated | ${FILES_COUNT} |"
+                echo "| Commit message | ${COMMIT_MSG} |"
                 
                 # Add PR info if found
                 if [ "$PR_NUMBER" != "null" ]; then
-                  echo ""
-                  echo "🔗 **Associated PR:** [#$PR_NUMBER](https://github.com/ProjectAlita/alita-sdk/pull/$PR_NUMBER)"
-                  echo "- Label 'tests_ai_healed' will be added automatically"
+                  echo "| PR | [#${PR_NUMBER}](https://github.com/ProjectAlita/alita-sdk/pull/${PR_NUMBER}) |"
+                  echo "| Label | \`tests_ai_healed\` (auto-applied) |"
                 else
-                  echo ""
-                  echo "ℹ️ **No PR found** for branch \`$BRANCH\`"
+                  echo "| PR | _No PR found for branch_ |"
                 fi
+                echo ""
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
@@ -540,41 +556,52 @@ jobs:
               echo ""
               echo "## 🐛 Bug Reporter Summary"
               echo ""
-              echo '```'
-              echo "═══════════════════════════════════════════════════════════════"
-              echo "  Automated Bug Reporting"
-              echo "═══════════════════════════════════════════════════════════════"
-              echo ""
-              printf "%-25s %s\n" "Total Test Failures:" "$TOTAL"
-              printf "%-25s %s\n" "Bugs Created:" "$BUGS_CREATED"
-              printf "%-25s %s\n" "Duplicates Skipped:" "$DUPLICATES_SKIPPED"
-              printf "%-25s %s\n" "Failed to Report:" "$FAILED"
-              echo '```'
+              echo "| Metric | Count |"
+              echo "|--------|-------|"
+              echo "| Total Analyzed | **${TOTAL}** |"
+              echo "| ✅ Bugs Created | ${BUGS_CREATED} |"
+              echo "| ⏭️ Duplicates Skipped | ${DUPLICATES_SKIPPED} |"
+              echo "| ❌ Failed to Report | ${FAILED} |"
               echo ""
               
               # Show created bugs
               if [ "$BUGS_CREATED" -gt 0 ]; then
                 echo "### ✅ Bugs Created on ELITEA Board"
                 echo ""
-                jq -r '.bugs_created[]? | "#### [\(.title)](\(.issue_url))\n\n- **Issue:** #\(.issue_number)\n- **Tests:** \((.test_ids // []) | join(", "))\n- **Labels:** \((.labels // []) | join(", "))\n- **Component:** \(.affected_component // "N/A")\n- **Root Cause:** \(.root_cause // "See issue description")\n\n"' ./bug_report_output.json
+                echo "| Issue | Tests | Component | Labels |"
+                echo "|-------|-------|-----------|--------|"
+                jq -r '.bugs_created[]? | "| [\(.title)](\(.issue_url)) | \((.test_ids // []) | join(", ")) | \(.affected_component // "N/A") | \((.labels // []) | join(", ")) |"' ./bug_report_output.json
+                echo ""
               fi
               
-              # Show skipped duplicates
+              # Show skipped duplicates (collapsible)
               if [ "$DUPLICATES_SKIPPED" -gt 0 ]; then
-                echo "### ⏭️ Duplicates Skipped"
+                echo "<details>"
+                echo "<summary>⏭️ <b>Duplicates Skipped</b> (${DUPLICATES_SKIPPED})</summary>"
                 echo ""
-                echo "The following test failures matched existing bugs and were not re-reported:"
+                echo "> [!NOTE]"
+                echo "> The following test failures matched existing bugs and were not re-reported"
                 echo ""
                 jq -r '.duplicates_skipped[]? | . as $e | (if $e.existing_issue_titles then [$e.existing_issue_titles, ($e.existing_issue_urls // [])] | transpose | map("  - **Similar to:** [\(.[0])](\(.[1]))") elif $e.existing_issue_title then ["  - **Similar to:** [\($e.existing_issue_title)](\($e.existing_issue_url // "N/A"))"] else ["  - **Similar to:** N/A"] end) as $links | "- **Tests:** \(($e.test_ids // []) | join(", "))\n" + ($links | join("\n")) + "\n  - **Reason:** \($e.similarity_reason // "N/A")\n"' ./bug_report_output.json
+                echo ""
+                echo "</details>"
+                echo ""
               fi
               
-              # Show failures
+              # Show failures (collapsible)
               if [ "$FAILED" -gt 0 ]; then
-                echo "### ❌ Failed to Report"
+                echo "<details>"
+                echo "<summary>❌ <b>Failed to Report</b> (${FAILED})</summary>"
                 echo ""
-                echo "The following test failures could not be automatically reported:"
+                echo "> [!CAUTION]"
+                echo "> The following test failures could not be automatically reported"
                 echo ""
-                jq -r '.failed[]? | "- **Tests:** \((.test_ids // []) | join(", "))\n  - **Reason:** \(.reason // "N/A")\n  - **Action:** \(.action_needed // "Manual review required")\n"' ./bug_report_output.json
+                echo "| Tests | Reason | Action |"
+                echo "|-------|--------|--------|"
+                jq -r '.failed[]? | "| \((.test_ids // []) | join(", ")) | \(.reason // "N/A") | \(.action_needed // "Manual review required") |"' ./bug_report_output.json
+                echo ""
+                echo "</details>"
+                echo ""
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
