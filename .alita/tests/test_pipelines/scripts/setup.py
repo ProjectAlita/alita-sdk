@@ -268,7 +268,11 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
 
     # Extract top-level fields
     toolkit_name = config.get("toolkit_name", file_config.get("toolkit_name", file_config.get("name", "test-toolkit")))
-    toolkit_type = config.get("toolkit_type", file_config.get("type", "github"))
+    toolkit_type = config.get("toolkit_type", file_config.get("type"))
+    
+    # Validate required fields
+    if not toolkit_type:
+        return {"success": False, "error": "toolkit_type is required in config or file_config"}
 
     # Build settings from file config (exclude top-level metadata fields)
     metadata_fields = {"type", "name", "toolkit_name"}
@@ -300,7 +304,13 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
     # Check if toolkit exists
     existing = find_toolkit_by_name(ctx, toolkit_name)
     if existing:
-        ctx.log(f"Toolkit already exists with ID: {existing['id']}", "info")
+        existing_type = existing.get("type")
+        if existing_type != toolkit_type:
+            error_msg = f"Toolkit name collision: '{toolkit_name}' exists with type '{existing_type}', but requested type is '{toolkit_type}'"
+            ctx.log(f"ERROR: {error_msg}", "error")
+            return {"success": False, "error": error_msg}
+        
+        ctx.log(f"Toolkit already exists with ID: {existing['id']} (type: {existing_type})", "info")
         return {"success": True, "id": existing["id"], "name": toolkit_name, "existed": True}
 
     # Create toolkit via API

@@ -25,7 +25,7 @@ setup:
         jira_configuration:
           private: true
           alita_title: ${JIRA_SECRET_NAME:jira}
-      toolkit_name: ${JIRA_TOOLKIT_NAME:testing}
+      toolkit_name: ${JIRA_TOOLKIT_NAME:testing-jira}
     save_to_env:
       - key: JIRA_TOOLKIT_ID
         value: $.id
@@ -64,7 +64,8 @@ setup:
 execution:
   test_directory: tests
   test_pattern: "test_case_*.yaml"
-  parallel: false
+  settings:
+    parallel: 4
   
   # Variables to substitute in test YAML files
   substitutions:

@@ -46,7 +46,7 @@ setup:
         active_branch: ${GITHUB_BASE_BRANCH:main}
         base_branch: ${GITHUB_BASE_BRANCH:main}
       # Name for the toolkit on platform
-      toolkit_name: ${GITHUB_TOOLKIT_NAME:testing}
+      toolkit_name: ${GITHUB_TOOLKIT_NAME:testing-github}
     # Save created toolkit ID to environment for pipeline substitution
     save_to_env:
       - key: GITHUB_TOOLKIT_ID
