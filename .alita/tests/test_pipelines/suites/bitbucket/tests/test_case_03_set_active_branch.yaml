@@ -5,35 +5,64 @@ description: |
   Objective: Test branch switching functionality
 
   Expected Behavior:
-  - Branch is created successfully for testing
-  - Switching between branches works correctly
-  - Active branch is properly updated
-  - No errors during switch operations
+  - Pre-created test branch contains a unique marker file
+  - Marker file does NOT exist on base branch
+  - After switching to test branch, marker file IS visible in file list
+  - This proves the branch switch worked correctly
 
 toolkits:
   - id: ${BITBUCKET_TOOLKIT_ID}
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  base_branch:
+    type: str
+    value: main
   test_branch_name:
     type: str
     value: test-branch-bb03-switch
+  test_file_path:
+    type: str
+    value: test.txt
   expected_switch_indicators:
     type: list
     value: ["Switched to branch", "Active branch", "set as active", "checkout"]
   error_indicators:
     type: list
     value: ["error", "failed", "not found", "does not exist", "permission denied"]
+  files_on_base_branch:
+    type: list
   switch_result:
     type: str
-  files_in_active_branch:
-    type: str
+  files_after_switch:
+    type: list
   test_results:
     type: dict
 
-entry_point: switch_to_test_branch
+entry_point: verify_file_not_on_base
 
 nodes:
+  - id: verify_file_not_on_base
+    type: toolkit
+    input:
+      - base_branch
+    input_mapping:
+      path:
+        type: fixed
+        value: ""
+      recursive:
+        type: fixed
+        value: true
+      branch:
+        type: variable
+        value: base_branch
+    output:
+      - files_on_base_branch
+    structured_output: true
+    tool: list_files
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: switch_to_test_branch
+
   - id: switch_to_test_branch
     type: toolkit
     input:
@@ -47,23 +76,24 @@ nodes:
     structured_output: true
     tool: set_active_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: verify_active_branch
+    transition: list_files_after_switch
 
-  - id: verify_active_branch
+  - id: list_files_after_switch
     type: toolkit
-    input: []
+    input:
+      - test_branch_name
     input_mapping:
       path:
         type: fixed
-        value: "test.txt"
+        value: ""
       recursive:
         type: fixed
-        value: false
+        value: true
       branch:
         type: variable
         value: test_branch_name
     output:
-      - files_in_active_branch
+      - files_after_switch
     structured_output: true
     tool: list_files
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
@@ -72,8 +102,10 @@ nodes:
   - id: validate_results
     type: llm
     input:
+      - files_on_base_branch
       - switch_result
-      - files_in_active_branch
+      - files_after_switch
+      - test_file_path
       - test_branch_name
       - expected_switch_indicators
       - error_indicators
@@ -89,24 +121,28 @@ nodes:
         value: |
           Analyze the output from 'set_active_branch' tool execution.
 
+          Test File Path (marker): {test_file_path}
+          Files on Base Branch: {files_on_base_branch}
           Switch to Test Branch ({test_branch_name}): {switch_result}
-          Files Listed (verify branch context): {files_in_active_branch}
+          Files After Switch: {files_after_switch}
           Expected Switch Indicators: {expected_switch_indicators}
           Error Indicators: {error_indicators}
 
           This is a POSITIVE test - we expect successful branch switching.
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. switch_success: Switch to test branch contains success indicator
-          2. no_errors: No error indicators in output
-          3. files_listed: File listing succeeded (confirms active branch is valid)
+          1. file_not_on_base: Marker file '{test_file_path}' does NOT appear in base branch file list
+          2. switch_success: Switch to test branch contains success indicator
+          3. file_visible_after_switch: Marker file '{test_file_path}' IS visible in file list after switch
+          4. no_errors: No error indicators in any output
 
           Return JSON test_results:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
+            "file_not_on_base": boolean,
             "switch_success": boolean,
+            "file_visible_after_switch": boolean,
             "no_errors": boolean,
-            "files_listed": boolean,
             "switch_indicator_found": "which indicator was found or 'none'",
             "error_indicator_found": "which error indicator was found or 'none'",
             "error": string | null
