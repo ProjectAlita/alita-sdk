@@ -333,18 +333,39 @@ jobs:
           BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
           TOTAL_ANALYZED=$(jq -r '(.summary.total_analyzed // ((.summary.fixed // 0) + (.summary.flaky // 0) + (.summary.blocked // 0)))' ./fix_output.json)
           
+          # Count SDK bugs from intent analysis in milestone
+          SDK_BUG_COUNT=0
+          TEST_CODE_ISSUE_COUNT=0
+          INTENT_ANALYSIS_COUNT=0
+          if [ -f ./fix_milestone.json ] && jq empty ./fix_milestone.json 2>/dev/null; then
+            SDK_BUG_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "sdk_bug")] | length' ./fix_milestone.json)
+            TEST_CODE_ISSUE_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "test_code_issue")] | length' ./fix_milestone.json)
+            INTENT_ANALYSIS_COUNT=$(jq -r '.intent_analysis // [] | length' ./fix_milestone.json)
+          fi
+          
           # Write AI Analysis Summary to GitHub Step Summary
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
             {
               echo ""
               echo "## 🤖 AI Analysis Summary"
               echo ""
+              # Show SDK bug warning banner if any SDK bugs detected
+              if [ "$SDK_BUG_COUNT" -gt 0 ]; then
+                echo "> [!CAUTION]"
+                echo "> **${SDK_BUG_COUNT} SDK bug(s) detected** — these are real product defects, not test issues. Tests were correctly blocked (not patched to hide bugs)."
+                echo ""
+              fi
+              
               echo "| Metric | Count |"
               echo "|--------|-------|"
               echo "| Total Analyzed | **${TOTAL_ANALYZED}** |"
-              echo "| ✅ Fixed | ${FIXED_COUNT} |"
+              echo "| ✅ Fixed (test code issues) | ${FIXED_COUNT} |"
               echo "| ⚠️ Flaky | ${FLAKY_COUNT} |"
-              echo "| ❌ Blocked | ${BLOCKED_COUNT} |"
+              echo "| ❌ Blocked (SDK bugs) | ${BLOCKED_COUNT} |"
+              if [ "$INTENT_ANALYSIS_COUNT" -gt 0 ]; then
+                echo "| 🔍 SDK Bugs Identified | ${SDK_BUG_COUNT} |"
+                echo "| 🔧 Test Code Issues | ${TEST_CODE_ISSUE_COUNT} |"
+              fi
               echo ""
               
               # Show fixed tests details
@@ -372,10 +393,31 @@ jobs:
               
               # Show blocked tests details
               if [ "$BLOCKED_COUNT" -gt 0 ]; then
-                echo "### ❌ Blocked Tests"
+                echo "### ❌ Blocked Tests (SDK Bugs)"
+                echo ""
+                echo "> [!IMPORTANT]"
+                echo "> These tests were **not patched** because the failures are caused by SDK code defects, not test logic errors. Weakening assertions would hide real bugs."
                 echo ""
                 jq -r '.blocked[]? | "<details>\n<summary><b>\((.test_ids // []) | join(", "))</b> — \(.bug_description // "N/A")</summary>\n\n| Field | Detail |\n|-------|--------|\n| Bug Description | \(.bug_description // "N/A") |\n| Expected Behavior | \(.expected_behavior // "N/A") |\n| Actual Behavior | \(.actual_behavior // "N/A") |\n| SDK Component | \(.sdk_component // "N/A") |\n| Affected Methods | \((.affected_methods // []) | join(", ")) |\n| Error Location | \(.error_location // "N/A") |\n| Bug Report Needed | \(.bug_report_needed // false) |\n\n</details>\n"' ./fix_output.json
                 echo ""
+              fi
+              
+              # Show Intent Analysis from milestone (how each test was classified)
+              if [ -f ./fix_milestone.json ] && jq empty ./fix_milestone.json 2>/dev/null; then
+                INTENT_COUNT=$(jq -r '.intent_analysis // [] | length' ./fix_milestone.json)
+                if [ "$INTENT_COUNT" -gt 0 ]; then
+                  echo "<details>"
+                  echo "<summary>🔍 <b>Test Intent Analysis</b> — ${INTENT_COUNT} tests classified</summary>"
+                  echo ""
+                  echo "> How the AI determined whether each failure is an SDK bug or a test code issue"
+                  echo ""
+                  echo "| Test | Type | Classification | Primary Feature | SDK Correct? | Reasoning |"
+                  echo "|------|------|----------------|-----------------|--------------|-----------|" 
+                  jq -r '.intent_analysis[]? | "| \(.test_id // "N/A") | \(.positive_or_negative // "N/A") | \(if .classification == "sdk_bug" then "🐛 SDK Bug" else "🔧 Test Issue" end) | \(.primary_feature // "N/A") | \(if .sdk_behaves_correctly then "✅" else "❌" end) | \(.reasoning // "N/A") |"' ./fix_milestone.json
+                  echo ""
+                  echo "</details>"
+                  echo ""
+                fi
               fi
               
               # Add milestone summary if available (collapsible)
@@ -400,25 +442,33 @@ jobs:
                   echo "| Failed Tests | ${MS_FAILED_COUNT} |"
                   echo ""
                   
-                  # Show error patterns as table
+                  # Show error patterns as table with classification
                   ERROR_PATTERNS_COUNT=$(jq -r '.error_patterns // [] | length' ./fix_milestone.json)
                   if [ "$ERROR_PATTERNS_COUNT" -gt 0 ]; then
                     echo "**Error Patterns:**"
                     echo ""
-                    echo "| Pattern | Tests |"
-                    echo "|---------|-------|"
-                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) |"' ./fix_milestone.json
+                    echo "| Pattern | Tests | Category |"
+                    echo "|---------|-------|----------|"
+                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) | \(if .category == "sdk_bug" then "🐛 SDK Bug" else "🔧 Test Issue" end) |"' ./fix_milestone.json
                     echo ""
                   fi
                   
-                  # Show fix attempts as table
+                  # Show fix attempts as table with intent preservation
                   if [ "$FIX_ATTEMPTS_COUNT" -gt 0 ]; then
                     echo "**Fix Attempts:**"
                     echo ""
-                    echo "| # | Result |"
-                    echo "|---|--------|"
-                    jq -r '.fix_attempts[]? | "| \(.attempt) | \(.fix_rationale // "N/A") |"' ./fix_milestone.json
+                    echo "| # | Rationale | Intent Preserved |"
+                    echo "|---|-----------|------------------|"
+                    jq -r '.fix_attempts[]? | "| \(.attempt) | \(.fix_rationale // "N/A") | \(if .intent_preserved == false then "❌ No" elif .intent_preserved == true then "✅ Yes" else "N/A" end) |"' ./fix_milestone.json
                     echo ""
+                    
+                    # Warn if any fix did not preserve intent
+                    INTENT_BROKEN=$(jq -r '[.fix_attempts[]? | select(.intent_preserved == false)] | length' ./fix_milestone.json)
+                    if [ "$INTENT_BROKEN" -gt 0 ]; then
+                      echo "> [!WARNING]"
+                      echo "> **${INTENT_BROKEN} fix attempt(s) did not preserve test intent** — these fixes were reverted and tests classified as blockers to avoid hiding SDK bugs."
+                      echo ""
+                    fi
                   fi
                   
                   # Show rerun attempts
