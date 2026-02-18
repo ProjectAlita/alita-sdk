@@ -154,7 +154,7 @@ execution:
   # Execution settings
   settings:
     timeout: 300
-    parallel: 1  # Sequential for dependent tests
+    parallel: 4  # Sequential for dependent tests
     stop_on_failure: false
 
 # Cleanup steps executed after tests complete

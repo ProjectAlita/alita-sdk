@@ -120,7 +120,7 @@ execution:
 
   settings:
     timeout: 300
-    parallel: 1
+    parallel: 4
     stop_on_failure: false
 
 # Cleanup steps

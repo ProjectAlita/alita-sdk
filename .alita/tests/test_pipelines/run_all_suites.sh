@@ -39,6 +39,7 @@ SKIP_SETUP=false
 SKIP_INITIAL_CLEANUP=false
 STOP_ON_FAILURE=false
 LOCAL_MODE=false
+ENABLE_PARALLEL=true
 OUTPUT_DIR="test_results"
 
 print_usage() {
@@ -49,6 +50,8 @@ print_usage() {
     echo "Options:"
     echo "  -v, --verbose           Enable verbose output with real-time display"
     echo "  --local                 Run tests locally without backend (isolated mode)"
+    echo "  --parallel              Enable parallel test execution (uses value from pipeline.yaml)"
+    echo "  --no-parallel           Disable parallel execution (forces sequential)"
     echo "  --skip-initial-cleanup  Skip cleanup before starting (not recommended)"
     echo "  --skip-cleanup          Skip cleanup after tests"
     echo "  --skip-setup            Skip setup (use existing environment)"
@@ -95,6 +98,14 @@ while [[ $# -gt 0 ]]; do
         --local=*)
             LOCAL_MODE=true
             LOCAL_LOG_LEVEL="=${1#*=}"
+            shift
+            ;;
+        --parallel)
+            ENABLE_PARALLEL=true
+            shift
+            ;;
+        --no-parallel)
+            ENABLE_PARALLEL=false
             shift
             ;;
         --skip-initial-cleanup)
@@ -264,12 +275,20 @@ run_suite() {
     # Note: run_suite.py will use config value automatically, no need to pass --timeout
     # unless we want to override it
 
+    # Build parallel flag based on ENABLE_PARALLEL setting
+    # If parallel is disabled, force sequential execution with --parallel 1
+    # If parallel is enabled, don't pass flag (let run_suite.py read from config)
+    PARALLEL_FLAG=""
+    if [ "$ENABLE_PARALLEL" = false ]; then
+        PARALLEL_FLAG="--parallel 1"
+    fi
+
     # Run tests with JSON output to file via --output-json, verbose to stderr (run.log)
     # Verbose output controlled by $VERBOSE flag (-v)
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE $PARALLEL_FLAG --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -279,7 +298,7 @@ run_suite() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" $VERBOSE --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" $VERBOSE $PARALLEL_FLAG --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -391,13 +410,21 @@ run_suite_local() {
     print_step "Step 1/2: Running tests for $suite_spec (local)"
     local results_file="$suite_output_dir/results.json"
 
+    # Build parallel flag based on ENABLE_PARALLEL setting
+    # If parallel is disabled, force sequential execution with --parallel 1
+    # If parallel is enabled, don't pass flag (let run_suite.py read from config)
+    PARALLEL_FLAG=""
+    if [ "$ENABLE_PARALLEL" = false ]; then
+        PARALLEL_FLAG="--parallel 1"
+    fi
+
     # Save JSON results to file with --output-json, stderr goes to run.log
     # run_suite.py --local executes setup internally and then runs tests
     # Verbose output controlled by $VERBOSE flag (-v)
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --local --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --local $PARALLEL_FLAG --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -407,7 +434,7 @@ run_suite_local() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" $VERBOSE --local --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" $VERBOSE --local $PARALLEL_FLAG --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"

@@ -1,5 +1,5 @@
 name: Execute Toolkit Tests on Demand
-run-name: "Toolkit Tests on Demand: ${{ inputs.environment }} - ${{ inputs.test_cases_dir == 'custom' && inputs.custom_suites || inputs.test_cases_dir }}"
+run-name: "Toolkit Tests on Demand: ${{ inputs.environment }} - ${{ inputs.test_cases_dir == 'custom' && inputs.custom_suites || inputs.test_cases_dir }}${{ inputs.enable_parallel && ' (parallel)' || '' }}"
 
 on:
   workflow_dispatch:
@@ -40,6 +40,11 @@ on:
         required: false
         type: string
         default: ''
+      enable_parallel:
+        description: 'Enable parallel test execution (uses value from pipeline.yaml when enabled)'
+        required: false
+        type: boolean
+        default: false
       
 jobs:
   configure-matrix:
@@ -95,4 +100,5 @@ jobs:
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
       environment: ${{ github.event.inputs.environment }}
+      enable_parallel: ${{ inputs.enable_parallel == true && 'true' || 'false' }}
     secrets: inherit

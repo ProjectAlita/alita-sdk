@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: 'local'
+      enable_parallel:
+        description: 'Enable parallel test execution (uses value from pipeline.yaml when enabled)'
+        required: false
+        type: string
+        default: 'false'
 
 env:
   REGISTRY: ghcr.io
@@ -51,7 +56,8 @@ jobs:
       - name: Calculate and run test command
         run: |
           ENV_FLAG=$([ "${{ inputs.environment }}" = "local" ] && echo "--local" || echo "")
-          TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG -v suites/${{ inputs.test_cases_dir }}"
+          PARALLEL_FLAG=$([ "${{ inputs.enable_parallel }}" = "true" ] && echo "--parallel" || echo "--no-parallel")
+          TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
           
           echo "DOCKER_COMMAND_COMPOSED=$TEST_COMMAND" >> $GITHUB_ENV  
           echo "Running test command: $TEST_COMMAND"         
