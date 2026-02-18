@@ -735,7 +735,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
     def _base_loader(self, **kwargs) -> Generator[Document, None, None]:
         self._log_tool_event(message=f"Loading the files from artifact's bucket. {kwargs=}", tool_name="loader")
         try:
-            all_files = self.list_files(self.bucket, False)['rows']
+            all_files = self.list_files(self.bucket, return_as_string=False)['rows']
         except Exception as e:
             raise ToolException(f"Unable to extract files: {e}")
 
