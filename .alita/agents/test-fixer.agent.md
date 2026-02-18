@@ -106,6 +106,7 @@ Record answers in milestone `intent_analysis[]` for each test.
 - State variables: undeclared, missing from `output`/`input` lists, wrong type
 - Input mapping: missing params, wrong type (variable/fixed/fstring), undefined references
 - Transitions: pointing to non-existent node or wrong target
+- Node sequence ordering: cleanup/teardown runs AFTER validation but BEFORE END, causing test outcome to reflect cleanup status instead of validation result
 - Wrong assertion type (`equals` vs `contains`) when SDK output format is correct but varies
 
 **SDK bugs** → document as blocker (DO NOT fix). Search `alita_sdk/tools/<toolkit>/` for code locations.
@@ -175,6 +176,13 @@ Missing tool params, wrong mapping type, undefined variable references.
 Python errors, missing imports, wrong return format.
 - **Fix:** Ensure code returns dict; add `structured_output: true`; add vars to `output:`
 - **Detect:** Code execution errors, variable not generated
+
+**7. Node Sequence Ordering (Validation must be last before END)**
+Cleanup/teardown node runs AFTER the LLM validation node but BEFORE `END`. The framework uses the last node's outcome to determine test pass/fail, so if cleanup is last and it fails (or returns non-validation output), the test fails regardless of whether validation passed.
+- **Diagnosis:** Trace the full node sequence from `entry_point` through all `transition:` fields to `END`. Build the ordered chain. Identify which node produces `test_results` (the validation node) and which nodes are cleanup/teardown. If ANY cleanup node appears AFTER the validation node in the chain, the sequence is wrong.
+- **Fix:** Reorder transitions so cleanup runs BEFORE validation. The validation/LLM node that produces `test_results` with `test_passed` MUST be the LAST node before `END`. Cleanup nodes should transition to the validation node, not to `END`. Since cleanup may need data collected earlier (e.g., file content), ensure all data-gathering nodes still run before cleanup. Typical reorder: `... → gather_data → cleanup (continue_on_error: true) → validate_results → END`
+- **Constraint:** Only reorder — never remove cleanup or validation nodes. Ensure `continue_on_error: true` on cleanup so it doesn't block validation if cleanup fails.
+- **Detect:** Last node before `END` is a delete/cleanup operation (delete_branch, remove_file, etc.) rather than the LLM validation node; test fails with cleanup errors even though feature validation would pass; `test_results` is produced by a non-terminal node
 
 #### Framework Fixes (rare — only when YAML can't fix)
 
