@@ -42,6 +42,9 @@ nodes:
       recursive:
         type: fixed
         value: true
+      branch:
+        type: fixed
+        value: main
     output:
       - subdir_files
     structured_output: true
@@ -60,6 +63,9 @@ nodes:
       recursive:
         type: fixed
         value: false
+      branch:
+        type: fixed
+        value: main
     output:
       - non_recursive_files
     structured_output: true
