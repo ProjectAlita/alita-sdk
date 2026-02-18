@@ -236,7 +236,7 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: bitbucket-testing
-    transition: cleanup_branch
+    transition: validate_results
 
   - id: validate_results
     type: llm
