@@ -47,6 +47,7 @@ from .strategies import (
     CircuitBreakerStrategy,
     LoggingStrategy
 )
+from ..tools.application import Application
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +202,12 @@ When a tool fails with an error:
         Returns:
             Wrapped tool with error handling, or original if excluded/already wrapped
         """
+        # Don't wrap Application tools - they have their own invocation logic
+        # and wrapping causes state variables to be lost due to args_schema filtering
+        if isinstance(tool, Application):
+            logger.debug(f"Tool '{tool.name}' is an Application, skipping error handling wrapper")
+            return tool
+
         # Don't wrap if tool is in exclusion list
         if tool.name in self.excluded_tools:
             logger.debug(f"Tool '{tool.name}' is excluded from error handling")
