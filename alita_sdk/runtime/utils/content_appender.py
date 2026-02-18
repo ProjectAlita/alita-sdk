@@ -70,10 +70,23 @@ def _append_docx(raw_bytes: bytes, text: str) -> bytes:
     return output.getvalue()
 
 
+_OLE2_MAGIC = b'\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
+
+
 def _append_doc(raw_bytes: bytes, text: str) -> bytes:
-    """Append text inside HTML body tags for .doc files (HTML format)."""
+    """Append text inside HTML body tags for .doc files (HTML format only).
+
+    Raises ValueError for binary OLE2 .doc files — convert to .docx first.
+    """
+    if raw_bytes[:8] == _OLE2_MAGIC:
+        raise ValueError(
+            "Cannot append to a binary OLE2 .doc file. "
+            "Only HTML-based .doc files are supported. "
+            "Convert the file to .docx first."
+        )
+
     from bs4 import BeautifulSoup
-    
+
     # Parse existing HTML
     soup = BeautifulSoup(raw_bytes.decode('utf-8', errors='ignore'), 'html.parser')
     
