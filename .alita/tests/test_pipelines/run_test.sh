@@ -31,13 +31,13 @@ TIMEOUT=""
 TIMEOUT_SET=false
 
 print_usage() {
-    echo "Usage: $0 [OPTIONS] <suite> [pattern]"
+    echo "Usage: $0 [OPTIONS] <suite> [pattern1] [pattern2] ..."
     echo ""
     echo "Run individual test(s) within a suite by pattern matching."
     echo ""
     echo "Arguments:"
     echo "  suite              Suite folder name (e.g., github_toolkit)"
-    echo "  pattern            Test name pattern to match (optional if using --pattern flags)"
+    echo "  pattern1 ...       Test name pattern(s) to match (optional if using --pattern flags)"
     echo ""
     echo "Options:"
     echo "  --setup            Run setup before testing (creates toolkit, etc.)"
@@ -55,6 +55,10 @@ print_usage() {
     echo "Examples:"
     echo "  # First time: setup + seed + run"
     echo "  $0 --setup --seed github_toolkit update_file"
+    echo ""
+    echo "  # Run multiple tests by ID"
+    echo "  $0 --all suites/xray XR08 XR09 XR10"
+    echo "  $0 -v github_toolkit GH14 GH15 GH16"
     echo ""
     echo "  # Iterative development: just run (after setup/seed done)"
     echo "  $0 github_toolkit update_file"
@@ -180,7 +184,7 @@ set -- "${POSITIONAL[@]}"
 #            → Same as positional: runs both pst01 and pst02
 # ============================================================================
 
-# Parse suite and optional pattern(s) from positional args
+# Parse suite and optional pattern(s)(s) from positional args
 if [ $# -lt 1 ]; then
     echo -e "${RED}Error: Suite argument required${NC}"
     print_usage
@@ -190,13 +194,14 @@ fi
 SUITE="$1"
 shift  # Remove suite from positional args
 
-# Collect remaining args as patterns (if no --pattern flags were used)
-if [ $# -gt 0 ]; then
-    # If positional patterns provided but no --pattern flags, use all positional patterns
-    if [ ${#PATTERNS[@]} -eq 0 ]; then
-        PATTERNS=("$@")  # Collect ALL remaining args
-    fi
-elif [ ${#PATTERNS[@]} -eq 0 ]; then
+# If positional patterns provided and no --pattern flags, use all positional args as patterns
+if [ $# -gt 0 ] && [ ${#PATTERNS[@]} -eq 0 ]; then
+    # Add all remaining positional args as patterns
+    while [ $# -gt 0 ]; do
+        PATTERNS+=("$1")
+        shift
+    done
+elif [ $# -eq 0 ] && [ ${#PATTERNS[@]} -eq 0 ]; then
     echo -e "${RED}Error: Pattern required (either as argument or via --pattern flag)${NC}\n"
     print_usage
     exit 1
@@ -303,11 +308,12 @@ for p in "${PATTERNS[@]}"; do
 done
 
 # Run with pattern filter
+RESULTS_FILE="test_results/$SUITE/results.json"
 if python scripts/run_suite.py "$SUITE" \
     "${PATTERN_ARGS[@]}" \
     $TIMEOUT_ARG \
     --env-file "$ENV_FILE" \
-    --output-json "test_results/$SUITE/results.json" \
+    --output-json "$RESULTS_FILE" \
     $VERBOSE \
     $LOCAL_FLAG \
     $WILDCARDS_FLAG; then
@@ -335,4 +341,42 @@ fi
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 
-exit $RUN_STATUS
+# Parse results and display summary
+if [ -f "$RESULTS_FILE" ]; then
+    PASSED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
+    FAILED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
+    ERRORS=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
+    SKIPPED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('skipped', 0))" 2>/dev/null || echo "0")
+    TOTAL=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('total', 0))" 2>/dev/null || echo "0")
+
+    echo -e "${BLUE}Test Results Summary:${NC}"
+    echo "  Passed:  $PASSED"
+    echo "  Failed:  $FAILED"
+    echo "  Errors:  $ERRORS"
+    echo "  Skipped: $SKIPPED"
+    echo "  Total:   $TOTAL"
+    echo ""
+
+    # Determine overall success
+    if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
+        echo -e "${RED}✗ Some tests failed or had errors${NC}"
+        echo "Results saved to: $RESULTS_FILE"
+        exit 1
+    elif [ "$RUN_STATUS" -ne 0 ]; then
+        echo -e "${RED}✗ Test execution failed${NC}"
+        exit $RUN_STATUS
+    else
+        echo -e "${GREEN}✓ All tests passed!${NC}"
+        echo "Results saved to: $RESULTS_FILE"
+        exit 0
+    fi
+else
+    # No results file - use RUN_STATUS from execution
+    if [ "$RUN_STATUS" -eq 0 ]; then
+        echo -e "${GREEN}✓ Test execution completed${NC}"
+        exit 0
+    else
+        echo -e "${RED}✗ Test execution failed${NC}"
+        exit $RUN_STATUS
+    fi
+fi

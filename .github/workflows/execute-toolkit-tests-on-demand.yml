@@ -31,7 +31,7 @@ on:
           - gitlab
           - jira
           - qtest
-          - zephyr-essentials
+          - zephyr_essential
           - xray
           - state_retrieval
           - structured_output

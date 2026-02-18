@@ -180,3 +180,6 @@ node_modules/
 .alita/**/.env.*
 .alita/**/test_results
 alita_sdk/docs/
+.alita/sessions
+.playwright-mcp/*
+.claude/*

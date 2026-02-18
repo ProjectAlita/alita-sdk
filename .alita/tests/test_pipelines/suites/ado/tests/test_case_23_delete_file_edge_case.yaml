@@ -52,6 +52,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true
     tool: delete_file
     toolkit_name: ${ADO_REPOS_TOOLKIT_NAME}
     transition: validate_results

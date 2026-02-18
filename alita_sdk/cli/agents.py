@@ -385,7 +385,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             access_msg += f" [exclude: {', '.join(exclude_tools)}]"
         console.print(f"[dim]{access_msg}[/dim]")
     
-    # Add planning tools (always available)
+    # Add planning tools (if enabled via agent config)
     planning_tools = None
     plan_state_obj = None
     if plan_state is not None:
@@ -394,7 +394,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
         def plan_callback(state: PlanState):
             plan_state['title'] = state.title
             plan_state['steps'] = state.to_dict()['steps']
-            plan_state['session_id'] = state.session_id
+            plan_state['session_id'] = state.conversation_id  # Fixed: PlanState uses conversation_id, not session_id
         
         # Get session_id from plan_state dict if provided
         session_id = plan_state.get('session_id')
@@ -403,7 +403,7 @@ def _setup_local_agent_executor(client, agent_def: Dict[str, Any], toolkit_confi
             plan_callback=plan_callback,
             session_id=session_id
         )
-        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {plan_state_obj.session_id}][/dim]")
+        console.print(f"[dim]✓ Planning tools enabled ({len(planning_tools)} tools) [session: {session_id or plan_state_obj.conversation_id or 'new'}][/dim]")
     
     # Check if we have tools
     has_tools = bool(agent_def.get('tools') or toolkit_configs or filesystem_tools or terminal_tools or planning_tools)
@@ -1192,6 +1192,12 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         llm_model_display = current_model or agent_def.get('model', default_model)
         llm_temperature_display = current_temperature if current_temperature is not None else agent_def.get('temperature', default_temperature)
         
+        # Honor agent definition's step_limit if recursion_limit not explicitly set via CLI
+        # CLI default is 50, but agent can override (e.g., test-fixer uses 50, others may use 25)
+        if recursion_limit == 50 and 'step_limit' in agent_def:
+            # User didn't explicitly set --recursion-limit, use agent's preference
+            recursion_limit = agent_def.get('step_limit', 50)
+        
         # Print nice welcome banner
         print_welcome(agent_name, llm_model_display, llm_temperature_display, approval_mode)
         
@@ -1201,7 +1207,11 @@ def agent_chat(ctx, agent_source: Optional[str], version: Optional[str],
         # Initialize session for persistence (memory + plan)
         from .tools import generate_session_id, create_session_memory, save_session_metadata, to_portable_path
         current_session_id = generate_session_id()
-        plan_state = {'session_id': current_session_id}
+        
+        # Only enable planning if explicitly requested via agent config
+        # Check agent_def for 'enable_planning' flag (default: False to reduce overhead)
+        enable_planning = agent_def.get('enable_planning', False)
+        plan_state = {'session_id': current_session_id} if enable_planning else None
         
         # Create persistent memory for agent (stored in session directory)
         memory = create_session_memory(current_session_id)
@@ -2653,10 +2663,14 @@ def agent_run(ctx, agent_source: str, message: str, version: Optional[str],
             from langgraph.checkpoint.sqlite import SqliteSaver
             memory = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
             
+            # Check if planning is enabled for this agent (default: False)
+            enable_planning = agent_def.get('enable_planning', False)
+            plan_state = {} if enable_planning else None
+            
             # Setup local agent executor (reuses same logic as agent_chat)
             try:
                 agent_executor, mcp_session_manager, llm, llm_model, filesystem_tools, terminal_tools, planning_tools = _setup_local_agent_executor(
-                    client, agent_def, toolkit_config, ctx.obj['config'], model, temperature, max_tokens, memory, work_dir, {}
+                    client, agent_def, toolkit_config, ctx.obj['config'], model, temperature, max_tokens, memory, work_dir, plan_state
                 )
             except Exception as e:
                 error_panel = Panel(

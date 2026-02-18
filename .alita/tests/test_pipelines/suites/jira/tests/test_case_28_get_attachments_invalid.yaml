@@ -15,7 +15,7 @@ toolkits:
 state:
   issue_key:
     type: str
-    value: ${JIRA_TEST_ISSUE}
+    value: "INVALID-99999"
   tool_result:
     type: str
   test_results:
@@ -37,6 +37,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true
     transition: process_results
 
   - id: process_results
@@ -71,9 +72,11 @@ nodes:
           {{
             "test_passed": boolean,
             "summary": "Brief description of what the tool returned",
-            "error": "Error message if any, null otherwise",
+            "error": null,
             "explanation": "Why the test passed or failed based on the error meaning"
           }}
+
+          IMPORTANT: For negative tests that correctly handle invalid input, set "error" to null and "test_passed" to true.
 
           Return **ONLY** the JSON object. No markdown, no additional text.
       chat_history:

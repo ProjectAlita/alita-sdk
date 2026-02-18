@@ -50,6 +50,14 @@ from pattern_matcher import matches_any_pattern
 import requests
 import yaml
 
+# Force UTF-8 encoding for Windows compatibility
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 # Import from run_pipeline module
 from run_pipeline import (
     get_auth_headers,
@@ -813,6 +821,14 @@ def run_suite_local(
         logger=logger,  # Pass logger for proper output routing
     )
 
+    # Load env_mapping values before setup
+    if config:
+        for key, value in config.get("env_mapping", {}).items():
+            resolved_value = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
+            ctx.env_vars[key] = resolved_value
+            if logger:
+                logger.debug(f"Loaded env_mapping: {key}={resolved_value}")
+
     # Execute setup steps using local strategy
     # Logger will route output based on verbose flag (verbose=True shows progress)
     if logger:
@@ -965,6 +981,7 @@ def main():
     suite_name = "Custom"
     pipelines = []  # For remote mode
     test_files = []  # For local mode
+    patterns = args.pattern if args.pattern else ["*"]
 
     # Remote mode variables (initialized here to avoid warnings)
     base_url = None
@@ -999,31 +1016,7 @@ def main():
         if not args.folder:
             parser.error("--local mode requires a folder argument")
 
-        # Get all test files, then filter by pattern if specified
-        all_test_files = find_tests_in_suite(folder_path, "*", config)
-        
-        if args.pattern:
-            # Filter by patterns (same logic as remote mode)
-            filtered_files = []
-            for test_file in all_test_files:
-                # Load test name from YAML
-                try:
-                    with open(test_file) as f:
-                        import yaml
-                        data = yaml.safe_load(f)
-                        test_name = data.get('name', '')
-                        # Match against filename or test name
-                        if matches_any_pattern(test_file.name, args.pattern, args.wildcards) or \
-                           matches_any_pattern(test_name, args.pattern, args.wildcards):
-                            filtered_files.append(test_file)
-                except Exception:
-                    # If can't load, match by filename only
-                    if matches_any_pattern(test_file.name, args.pattern, args.wildcards):
-                        filtered_files.append(test_file)
-            pipelines = filtered_files
-            suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
-        else:
-            pipelines = all_test_files
+        pipelines = find_tests_in_suite(folder_path, patterns, config, args.wildcards)
     else:
         # REMOTE: Get pipelines from folder and match with backend
         base_url = args.base_url or load_from_env("BASE_URL") or load_from_env(
@@ -1122,7 +1115,8 @@ def main():
     # VALIDATE: Common for both modes
     # ========================================
     if not pipelines:
-        error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
+        pattern_display = ', '.join(patterns) if patterns != ['*'] else '*'
+        error_msg = f"No pipelines found matching pattern(s) '{pattern_display}'" if args.local else "No pipelines found matching criteria"
         print(f"Error: {error_msg}", file=sys.stderr)
         sys.exit(1)
 

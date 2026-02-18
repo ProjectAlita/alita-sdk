@@ -36,6 +36,14 @@ from typing import Optional, Any
 
 import requests
 
+# Force UTF-8 encoding for Windows compatibility
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 # Import shared pattern matching utilities
 from pattern_matcher import matches_pattern
 

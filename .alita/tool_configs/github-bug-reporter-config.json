@@ -1,0 +1,25 @@
+{
+  "type": "github",
+  "toolkit_name": "github-bug-reporter",
+  "id": 1,
+  "github_configuration": {
+    "access_token": "${GIT_TOOL_ACCESS_TOKEN}"
+  },
+  "repository": "ProjectAlita/alita-sdk",
+  "active_branch": "main",
+  "base_branch": "main",
+  "selected_tools": [
+    "search_issues",
+    "get_issue",
+    "get_issues",
+    "create_issue",
+    "update_issue",
+    "comment_on_issue",
+    "list_open_pull_requests",
+    "generic_github_api_call",
+    "create_issue_on_project",
+    "update_issue_on_project",
+    "list_project_issues",
+    "search_project_issues"
+  ]
+}
