@@ -4,6 +4,8 @@ import chardet
 import logging
 
 from ...tools.utils.content_parser import parse_file_content
+from ...tools.utils.text_operations import is_text_editable
+from ..utils.content_appender import append_to_binary
 
 logger = logging.getLogger(__name__)
 
@@ -166,13 +168,32 @@ class Artifact:
             else:
                 return {"error": f"Cannot append to file '{artifact_name}'. {raw_data['error']}"}
 
-        # Get the parsed content
-        data = self.get(artifact_name, bucket_name)
-        if data == "Could not detect encoding":
-            return {"error": data}
+        # Try format-aware binary append (e.g. DOCX)
+        try:
+            modified = append_to_binary(artifact_name, raw_data, additional_data)
+        except Exception as e:
+            return {"error": f"Failed to append to '{artifact_name}': {e}"}
 
-        # Append the new data
-        data += f"\n{additional_data}" if len(data) > 0 else additional_data
+        if modified is None:
+            # No binary handler - check if file is safe to text-append
+            if not is_text_editable(artifact_name):
+                return {
+                    "error": f"Cannot append to '{artifact_name}': File type is not text-editable and no binary append handler is available. "
+                            f"Binary files (PDF, images, etc.) cannot be safely appended to as text. "
+                            f"Consider creating a new file instead using createFile tool."
+                }
+            
+            # Safe to text-append - file is a text format
+            data = self.get(artifact_name, bucket_name)
+            if data == "Could not detect encoding":
+                return {"error": data}
+
+            # Append the new data
+            data += f"\n{additional_data}" if len(data) > 0 else additional_data
+        else:
+            data = modified
+
+        # Single upload block
         result = self.client.upload_artifact_s3(bucket_name, artifact_name, data)
         if 'error' in result:
             return {"error": result['error']}
