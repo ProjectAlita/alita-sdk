@@ -513,6 +513,8 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
                     return [str(files_list)]
             except:
                 return [files_str] if files_str else []
+        except ToolException:
+            raise
         except Exception as e:
             raise ToolException(f"Failed to list files: {str(e)}")
 
@@ -520,6 +522,8 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         """Read the contents of a file in the repository."""
         try:
             return self._read_file(file_path, branch)
+        except ToolException:
+            raise
         except Exception as e:
             raise ToolException(f"Failed to read file {file_path}: {str(e)}")
     
