@@ -124,11 +124,12 @@ def load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dict
         final_excluded_tools = agent_excluded_tools if agent_excluded_tools is not None else server_excluded_tools
         
         # Get connection details
-        server_type = server_config.get('type')  # VSCode format: "stdio" or "streamable_http"
+        server_type = server_config.get('type')  # VSCode format: "stdio", "http", or "streamable_http"
         server_url = server_config.get('url')
         server_command = server_config.get('command')
         server_args = server_config.get('args', [])
         server_env = server_config.get('env', {})
+        server_headers = server_config.get('headers', {})
         stateful = server_config.get('stateful', False)
         
         # Build MCP server config for langchain-mcp-adapters
@@ -145,16 +146,18 @@ def load_mcp_tools(agent_def: Dict[str, Any], mcp_config_path: str) -> List[Dict
                 'command': server_command,
                 'args': server_args or []
             }
-        elif server_type == 'streamable_http' or server_url:
-            # HTTP-based transport
+        elif server_type in ('streamable_http', 'http') or server_url:
+            # HTTP-based transport (supports VSCode "http" type alias)
             if not server_url:
-                console.print(f"[red]Error: MCP server '{server_name}' has type 'streamable_http' but no 'url'[/red]")
+                console.print(f"[red]Error: MCP server '{server_name}' has type '{server_type}' but no 'url'[/red]")
                 continue
             
             mcp_server_config = {
                 'transport': 'streamable_http',
                 'url': server_url
             }
+            if server_headers:
+                mcp_server_config['headers'] = server_headers
         else:
             console.print(f"[red]Error: MCP server '{server_name}' has neither 'type'/'url' nor 'command'[/red]")
             continue
