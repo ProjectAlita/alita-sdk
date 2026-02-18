@@ -1,5 +1,4 @@
 import hashlib
-import io
 import json
 import logging
 import re
@@ -8,7 +7,6 @@ from typing import Any, Optional, Generator, List
 from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.documents import Document
 from langchain_core.tools import ToolException
-from openpyxl.workbook.workbook import Workbook
 from pydantic import create_model, Field, model_validator
 
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
@@ -22,9 +20,33 @@ from ...tools.utils.text_operations import (
     search_in_content,
     try_apply_edit,
 )
+from ...runtime.utils.content_appender import (
+    create_from_content,
+    get_tool_description_lines,
+    get_param_description_blocks,
+)
 from ...runtime.utils.utils import IndexerKeywords
 
 DEFAULT_MAX_SINGLE_READ_SIZE = 60000
+
+BASIC_CREATE_FILE_DESCRIPTION = """Create a file in the artifact bucket. Supports two modes:
+1. Create from content: Use 'filedata' parameter to create new files with text or rich formats
+2. Copy existing file: Use 'filepath' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+
+IMPORTANT: Provide EITHER 'filedata' OR 'filepath', never both or neither.
+Use filepath when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
+The filepath can be found in previous file_modified events in the conversation history (format: /{bucket}/{filename})."""
+
+BASIC_APPEND_DESCRIPTION = """Append content to the END of an existing file, preserving all existing content.
+Use this when user wants to add, append, or extend a file \u2014 NOT replace it."""
+
+BASIC_CREATE_FILEDATA_DESCRIPTION = (
+    "Content for creating new files. "
+    "Use this for text, JSON, CSV, or structured data."
+    "\n\nLeave empty if using filepath to copy existing file."
+)
+
+BASIC_APPEND_FILEDATA_DESCRIPTION = "Stringified content to append"
 
 
 class ArtifactWrapper(NonCodeIndexerToolkit):
@@ -337,9 +359,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
         else:
             # Create mode: use provided content
             operation_type = "create"
-            if filename.endswith(".xlsx"):
-                data = json.loads(filedata)
-                filedata = self.create_xlsx_filedata(data)
+            created = create_from_content(filename, filedata)
+            if created is not None:
+                filedata = created
             source_filepath = None
 
         target_bucket = bucket_name or self.bucket
@@ -379,34 +401,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             "bucket": target_bucket,
             "message": f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully"
         })
-
-    def create_xlsx_filedata(self, data: dict[str, list[list]]) -> bytes:
-        try:
-            workbook = Workbook()
-
-            first_sheet = True
-            for sheet_name, sheet_data in data.items():
-                if first_sheet:
-                    sheet = workbook.active
-                    sheet.title = sheet_name
-                    first_sheet = False
-                else:
-                    sheet = workbook.create_sheet(title=sheet_name)
-
-                for row in sheet_data:
-                    sheet.append(row)
-
-            file_buffer = io.BytesIO()
-            workbook.save(file_buffer)
-            file_buffer.seek(0)
-
-            return file_buffer.read()
-
-        except json.JSONDecodeError:
-            raise ValueError("Invalid JSON format for .xlsx file data.")
-        except Exception as e:
-            raise ValueError(f"Error processing .xlsx file data: {e}")
-
 
     def read_file(self,
                   filename: str = None,
@@ -809,6 +803,22 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 logging.error(f"Failed while parsing the file '{document.metadata['name']}': {e}")
                 yield document
 
+    @staticmethod
+    def _build_tool_description(base_desc, format_lines):
+        """Build tool description by appending format lines from registry."""
+        if not format_lines:
+            return base_desc
+        return (base_desc
+                + "\n\nSupported rich document formats:\n"
+                + "\n".join(format_lines))
+
+    @staticmethod
+    def _build_filedata_description(base_desc, format_blocks):
+        """Build filedata parameter description by appending format blocks."""
+        if not format_blocks:
+            return base_desc
+        return base_desc + "".join(format_blocks)
+
     @extend_with_file_operations
     def get_available_tools(self):
         """Get available tools. Returns all tools for schema; filtering happens at toolkit level."""
@@ -840,29 +850,19 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.create_file,
                 "name": "createFile",
-                "description": """Create a file in the artifact bucket. Supports two modes:
-                1. Create from content: Use 'filedata' parameter to create new files with text, JSON, CSV, or Excel data
-                2. Copy existing file: Use 'filepath' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
-                
-                IMPORTANT: Provide EITHER 'filedata' OR 'filepath', never both or neither.
-                Use filepath when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
-                The filepath can be found in previous file_modified events in the conversation history (format: /{bucket}/{filename}).""",
+                "description": self._build_tool_description(
+                    BASIC_CREATE_FILE_DESCRIPTION,
+                    get_tool_description_lines('create'),
+                ),
                 "args_schema": create_model(
                     "createFile", 
                     filename=(str, Field(description="Target filename in destination bucket")),
                     bucket_name=bucket_name,
                     filedata=(Optional[str], Field(
-                        description="""Content for creating new files. Use this for text, JSON, CSV, or structured data.
-                        Example for .xlsx filedata format:
-                        {
-                            "Sheet1":[
-                                ["Name", "Age", "City"],
-                                ["Alice", 25, "New York"],
-                                ["Bob", 30, "San Francisco"],
-                                ["Charlie", 35, "Los Angeles"]
-                            ]
-                        }
-                        Leave empty if using filepath to copy existing file.""",
+                        description=self._build_filedata_description(
+                            BASIC_CREATE_FILEDATA_DESCRIPTION,
+                            get_param_description_blocks('create'),
+                        ),
                         default=None
                     )),
                     filepath=(Optional[str], Field(
@@ -927,11 +927,17 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             {
                 "ref": self.append_data,
                 "name": "appendData",
-                "description": "Append data to a file in the artifact",
+                "description": self._build_tool_description(
+                    BASIC_APPEND_DESCRIPTION,
+                    get_tool_description_lines('append'),
+                ),
                 "args_schema": create_model(
                     "appendData", 
-                    filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="Stringified content to append")),
+                    filename=(str, Field(description="Filename of the file to append to")),
+                    filedata=(str, Field(description=self._build_filedata_description(
+                        BASIC_APPEND_FILEDATA_DESCRIPTION,
+                        get_param_description_blocks('append'),
+                    ))),
                     bucket_name=bucket_name,
                     create_if_missing=(Optional[bool], Field(
                         description="If True (default), creates an empty file if it doesn't exist before appending. If False, returns an error when file is not found.",
