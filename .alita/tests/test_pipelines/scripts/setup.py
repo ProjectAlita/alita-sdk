@@ -62,6 +62,7 @@ from utils_common import (
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
+    apply_session_to_toolkit_name,
 )
 
 from logger import TestLogger
@@ -78,6 +79,7 @@ class SetupContext:
         verbose: bool = False,
         dry_run: bool = False,
         logger: TestLogger = None,
+        session_id: str = None,
     ):
         self.base_url = base_url
         self.project_id = project_id
@@ -87,9 +89,14 @@ class SetupContext:
         self.env_vars: dict[str, Any] = {}
         self.created_resources: list[dict] = []
         self.logger = logger
+        self.session_id = session_id
 
         # Add timestamp for unique naming
         self.env_vars["TIMESTAMP"] = datetime.now().strftime("%Y%m%d-%H%M%S")
+        
+        # Store session ID in env vars for propagation
+        if session_id:
+            self.env_vars["SESSION_ID"] = session_id
 
     def get_headers(self, content_type: bool = False) -> dict:
         """Get HTTP headers with authentication."""
@@ -269,6 +276,9 @@ def handle_toolkit_create(step: dict, ctx: SetupContext, base_path: Path) -> dic
     # Extract top-level fields
     toolkit_name = config.get("toolkit_name", file_config.get("toolkit_name", file_config.get("name", "test-toolkit")))
     toolkit_type = config.get("toolkit_type", file_config.get("type"))
+    
+    # Apply session ID to toolkit name for parallel execution isolation
+    toolkit_name = apply_session_to_toolkit_name(toolkit_name, ctx.session_id)
     
     # Validate required fields
     if not toolkit_type:
@@ -829,6 +839,7 @@ def run(
     quiet: bool = False,
     local: bool = False,
     logger: TestLogger = None,
+    session_id: str = None,
 ) -> dict:
     """Run set up programmatically.
     
@@ -844,6 +855,7 @@ def run(
         quiet: Suppress non-error output
         local: Local mode - prepare environment without backend calls
         logger: TestLogger instance for unified logging
+        session_id: Session ID for parallel execution isolation (scopes toolkit names)
     """
     # Create logger if not provided
     if logger is None:
@@ -890,6 +902,7 @@ def run(
         verbose=verbose,
         dry_run=dry_run,
         logger=logger,
+        session_id=session_id,
     )
     
     # Load env_mapping values before setup
@@ -937,6 +950,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--output-env", "-o", help="Write generated env vars to file")
     parser.add_argument("--json", "-j", action="store_true", help="Output results as JSON")
+    parser.add_argument("--session-id", "--sid", help="Session ID for parallel execution isolation (auto-generated if not provided)")
 
     args = parser.parse_args()
 
@@ -956,6 +970,7 @@ def main():
             quiet=args.json,
             local=args.local,
             logger=logger,
+            session_id=args.session_id,
         )
     except Exception as e:
         if args.json:

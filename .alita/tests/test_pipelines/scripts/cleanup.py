@@ -59,6 +59,7 @@ from utils_common import (
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
+    apply_session_to_cleanup_pattern,
 )
 
 from delete_pipelines import delete_pipeline, list_pipelines
@@ -81,6 +82,7 @@ class CleanupContext:
         dry_run: bool = False,
         quiet: bool = False,
         logger: TestLogger = None,
+        session_id: str = None,
     ):
         self.base_url = base_url
         self.project_id = project_id
@@ -89,6 +91,7 @@ class CleanupContext:
         self.dry_run = dry_run
         self.quiet = quiet
         self.logger = logger
+        self.session_id = session_id
         self.env_vars: dict[str, Any] = {}
         self.cleanup_stats = {"deleted": 0, "failed": 0, "skipped": 0}
 
@@ -213,6 +216,9 @@ def handle_pipeline_cleanup(step: dict, ctx: CleanupContext) -> dict:
     """Handle pipeline deletion cleanup."""
     config = resolve_env_value(step.get("config", {}), ctx.env_vars, env_loader=load_from_env)
     pattern = config.get("pattern")
+    
+    # Apply session ID prefix to cleanup pattern for scoped deletion
+    pattern = apply_session_to_cleanup_pattern(pattern, ctx.session_id)
 
     ctx.log(f"Pipeline cleanup with pattern: {pattern}")
 
@@ -342,6 +348,9 @@ def handle_composable_cleanup(config: dict, ctx: CleanupContext) -> dict:
         for var, val in cp_env.items():
             resolved_name = resolved_name.replace(f"${{{var}}}", str(val))
             resolved_name = resolved_name.replace(f"${var}", str(val))
+
+        # Apply session prefix for scoped cleanup
+        resolved_name = apply_session_to_cleanup_pattern(resolved_name, ctx.session_id)
 
         pipeline_names.append(resolved_name)
 
@@ -504,6 +513,7 @@ def run(
     quiet: bool = False,
     yes: bool = True,
     logger: TestLogger = None,
+    session_id: str = None,
 ) -> dict:
     """Run cleanup programmatically."""
     # Create logger if not provided
@@ -558,6 +568,7 @@ def run(
         dry_run=dry_run,
         quiet=quiet,
         logger=logger,
+        session_id=session_id,
     )
 
     # Pre-populate env vars from config's env section if present
@@ -621,6 +632,8 @@ def main():
                         help="Local mode: skip cleanup (no resources to clean in local mode)")
     parser.add_argument("--json", "-j", action="store_true", help="Output results as JSON")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
+    parser.add_argument("--session-id", "--sid",
+                        help="Session ID for parallel execution isolation (scopes cleanup to session resources)")
 
     args = parser.parse_args()
 
@@ -651,6 +664,7 @@ def main():
             yes=args.yes,
             quiet=False,
             logger=logger,
+            session_id=args.session_id,
         )
     except Exception as e:
         logger.error(f"Error: {e}")
