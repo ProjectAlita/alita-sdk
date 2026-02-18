@@ -260,7 +260,7 @@ jobs:
 
           # Run without --rm to keep container for file extraction
           docker-compose run --name alita-sdk-fixer alita-sdk \
-          sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/test-fixer.agent.md --dir . --message 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${formated_branch}'" || echo "AI analysis completed with warnings"
+          sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/test-fixer.agent.md --dir . 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${formated_branch}'" || echo "AI analysis completed with warnings"
 
       - name: Copy AI analysis outputs
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
@@ -492,7 +492,7 @@ jobs:
           
           # Run bug reporter agent (files are accessible via volume mount)
           docker-compose run --name alita-sdk-bug-reporter alita-sdk \
-          sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . --message 'Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
+          sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . 'Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
       
       - name: Copy bug reporter outputs
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
