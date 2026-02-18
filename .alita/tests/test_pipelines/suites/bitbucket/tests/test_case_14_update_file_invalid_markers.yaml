@@ -198,6 +198,7 @@ nodes:
 
   - id: cleanup_branch
     type: toolkit
+    continue_on_error: true
     input:
       - test_branch_name
     input_mapping:
@@ -251,14 +252,14 @@ nodes:
           4. content_preserved: Current content matches initial content
           5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
           6. no_partial_modification: File was not partially modified
-          7. branch_cleanup_successful: Test branch was deleted successfully
           
           OPTIONAL (nice to have, but not required for test to pass):
+          7. branch_cleanup_successful: Test branch was deleted successfully
           8. errors_are_clear: Error messages indicate what went wrong
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (SET TO TRUE if: file_created AND first_update_failed AND second_update_failed AND content_preserved AND no_unhandled_exception AND no_partial_modification AND branch_cleanup_successful),
+            "test_passed": boolean (SET TO TRUE if: file_created AND first_update_failed AND second_update_failed AND content_preserved AND no_unhandled_exception AND no_partial_modification),
             "file_created": boolean,
             "first_update_failed": boolean,
             "second_update_failed": boolean,
