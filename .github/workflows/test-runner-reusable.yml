@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: 'false'
+      enable_bug_reporting:
+        description: 'Enable automatic bug report creation on GitHub (disable for testing)'
+        required: false
+        type: string
+        default: 'true'
 
 env:
   REGISTRY: ghcr.io
@@ -551,7 +556,7 @@ jobs:
           fi
 
       - name: Create bug reports for blocked tests
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting == 'true' }}
         run: |
           echo "::notice::Creating bug reports for blocked tests"
           
@@ -569,7 +574,7 @@ jobs:
           sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . 'Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
       
       - name: Copy bug reporter outputs
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting == 'true' }}
         run: |
           echo "Copying bug report files from container..."
           docker cp alita-sdk-bug-reporter:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/bug_report_output.json ./bug_report_output.json || echo "{}" > ./bug_report_output.json
@@ -581,7 +586,7 @@ jobs:
           docker rm alita-sdk-bug-reporter || true
       
       - name: Post Bug Report Summary to GitHub
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting == 'true' }}
         run: |
           if [ ! -f ./bug_report_output.json ]; then
             echo "::warning::No bug report output found"

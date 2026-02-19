@@ -57,7 +57,8 @@ nodes:
         sum_correct = results.get('sum') == 30
         message_correct = "sum of 10 and 20 is 30" in results.get('message', '')
         html_has_tags = "<ul>" in html and "<li>" in html
-        html_has_newlines = "\n" in html
+        nl = chr(10)
+        html_has_newlines = nl in html
 
         all_passed = code_executed and sum_correct and message_correct and html_has_tags
 

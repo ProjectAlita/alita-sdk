@@ -18,6 +18,8 @@ state:
     type: str
   file_path:
     type: str
+  file_create_result:
+    type: str
   input:
     type: str
   messages:
@@ -57,11 +59,18 @@ nodes:
 
         # File to create (PR needs changes)
         file_path = f"test-data/pr-test-{timestamp}-{random_suffix}.txt"
-        file_contents = f"PR test file created at {timestamp}\nRandom ID: {random_suffix}\nThis file is created to have changes for PR."
+        file_contents = f"""PR test file created at {timestamp}
+        Random ID: {random_suffix}
+        This file is created to have changes for PR."""
 
         # PR details
         pr_title = f"[Test] GH10 PR Workflow - {timestamp}-{random_suffix}"
-        pr_body = f"Automated test PR created by GH10 pipeline.\n\nTimestamp: {timestamp}\nRandom ID: {random_suffix}\n\nThis PR will be closed automatically after validation."
+        pr_body = f"""Automated test PR created by GH10 pipeline.
+
+        Timestamp: {timestamp}
+        Random ID: {random_suffix}
+
+        This PR will be closed automatically after validation."""
 
         {"branch_name": branch_name, "file_path": file_path, "file_contents": file_contents, "pr_title": pr_title, "pr_body": pr_body}
     input:
@@ -115,7 +124,7 @@ nodes:
         type: variable
         value: file_path
     output:
-      - tool_result
+      - file_create_result
     structured_output: true
     tool: create_file
     toolkit_name: testing
@@ -219,6 +228,7 @@ nodes:
       - pr_diffs
       - pr_title
       - file_path
+      - file_create_result
     input_mapping:
       chat_history:
         type: fixed
@@ -234,21 +244,26 @@ nodes:
           PR Number: {pr_number}
           Expected PR Title: {pr_title}
           Expected File Path: {file_path}
+          File Create Result: {file_create_result}
           PR Details Response: {pr_details}
           PR Diffs Response: {pr_diffs}
 
           Perform the following checks:
 
-          1. Verify PR was created successfully (pr_number is not null/empty)
-          2. Confirm the PR exists by checking if pr_details contains the PR number or title information
-          3. Validate PR diffs contain file changes (diffs_count > 0)
-          4. Check if the expected file "{file_path}" appears in the PR diffs
-          5. Verify the diffs response is valid and not empty
+          1. Verify file was created successfully (file_create_result does not contain "Unable to create file", "error", or "409")
+          2. Verify PR was created successfully (pr_number is not null/empty)
+          3. Confirm the PR exists by checking if pr_details contains the PR number or title information
+          4. Validate PR diffs contain file changes (diffs_count > 0)
+          5. Check if the expected file "{file_path}" appears in the PR diffs
+          6. Verify the diffs response is valid and not empty
+
+          IMPORTANT: If file creation failed (check 1 fails), the test should fail with a clear error message explaining that the file creation failed, which caused the PR to have no changes.
 
           Return a JSON object named test_results with the following structure:
 
           {{
             "test_passed": boolean (true if all operations succeeded),
+            "file_created": boolean (file was created without errors),
             "pr_number": integer or null,
             "pr_exists": boolean (PR details were retrieved successfully),
             "diffs_valid": boolean (diffs response is valid and not empty),
@@ -256,7 +271,7 @@ nodes:
             "file_in_diffs": boolean (expected file found in diffs),
             "pr_details_preview": string (first 300 chars of pr_details),
             "pr_diffs_preview": string (first 300 chars of pr_diffs),
-            "error": string or null (error message if any),
+            "error": string or null (error message if any - include file creation error if applicable),
             "failed_checks": list of strings (failed checks if any)
           }}
 
@@ -283,6 +298,7 @@ nodes:
     structured_output: true
     tool: update_issue
     toolkit_name: testing
+    continue_on_error: true
     transition: delete_branch
   - id: delete_branch
     type: toolkit
@@ -300,4 +316,5 @@ nodes:
     structured_output: true
     tool: delete_branch
     toolkit_name: testing
+    continue_on_error: true
     transition: END

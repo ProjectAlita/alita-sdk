@@ -94,7 +94,8 @@ nodes:
         html_length = len(html_str) if html_is_string else 0
         html_has_doctype = "<!DOCTYPE" in html_str if html_is_string else False
         html_has_tags = "<html" in html_str and "</html>" in html_str if html_is_string else False
-        html_newline_count = html_str.count('\n') if html_is_string else 0
+        nl = chr(10)
+        html_newline_count = html_str.count(nl) if html_is_string else 0
 
         # Verify pattern string
         pattern_is_string = isinstance(pattern_str, str)

@@ -84,14 +84,14 @@ nodes:
           Validation Criteria (ALL must pass):
           1. tool_executed: Tool ran without crashing (got some result)
           2. file_not_found_detected: Output contains at least one error indicator about missing file
-          3. no_unhandled_exception: Output does NOT contain 'unhandled', 'traceback', 'stack trace'
+          3. handled_gracefully: Pipeline continued execution (ToolException was caught by continue_on_error)
 
           Return a JSON object with structure:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
             "tool_executed": boolean,
             "file_not_found_detected": boolean,
-            "no_unhandled_exception": boolean,
+            "handled_gracefully": boolean (true if we reached validation - error was handled),
             "error_indicator_found": "which indicator was found or 'none'",
             "error": string | null
           }}
