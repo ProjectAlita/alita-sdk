@@ -1115,7 +1115,7 @@ nodes:
         # OLD with slightly different whitespace (should still match with tolerance)
         old_content = (
             "    indented line with spaces" + nl +
-            "another   line   with   multiple   spaces"
+            "another   line   with   multiple   spaces" + nl
         )
 
         new_content = (
