@@ -1,0 +1,106 @@
+name: "SP05 - get_list_columns: Get metadata"
+priority: Critical
+description: |
+  Verify the SharePoint 'get_list_columns' tool retrieves column metadata for a list.
+  
+  Objective: Test column metadata retrieval functionality
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns array of column objects
+  - Each column contains name, displayName, columnType, required fields
+  - Choice columns include valid choice values
+  - System/hidden columns are excluded
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: ${TEST_LIST_NAME}
+  columns_result:
+    type: dict
+  expected_fields:
+    type: list
+    value: ["name", "displayName", "columnType", "required"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception"]
+  test_results:
+    type: dict
+
+entry_point: invoke_get_list_columns
+
+nodes:
+  - id: invoke_get_list_columns
+    type: toolkit
+    tool: get_list_columns
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+    output:
+      - columns_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - columns_result
+      - list_title
+      - expected_fields
+      - error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'get_list_columns' tool execution.
+
+          tool executed: get_list_columns
+          list title: {list_title}
+          results: {columns_result}
+          expected fields: {expected_fields}
+          error indicators: {error_indicators}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns array of column objects
+          - each column contains name, displayname, columntype, and required fields
+          - columntypes include text, number, boolean, datetime, or choice
+          - choice columns include choice field with array of valid values
+          - no system or hidden columns in results
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any error indicators in the output?
+          3. is the result an array of column objects?
+          4. do columns contain all expected fields?
+          5. are columntypes valid (text, number, boolean, datetime, choice)?
+          6. for choice fields, is the choice array present?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,94 @@
+name: "SP01 - get_lists: Retrieve all lists"
+priority: Critical
+description: |
+  Verify the SharePoint 'get_lists' tool retrieves all available lists from the site.
+  
+  Objective: Test basic list enumeration functionality
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns array of list objects
+  - Each list contains Title, Id, Description fields
+  - System/hidden lists are excluded from results
+  - ItemCount and BaseTemplate fields are present
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  lists_result:
+    type: dict
+  expected_fields:
+    type: list
+    value: ["Title", "Id", "Description", "ItemCount", "BaseTemplate"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "permission denied"]
+  test_results:
+    type: dict
+
+entry_point: invoke_get_lists
+
+nodes:
+  - id: invoke_get_lists
+    type: toolkit
+    tool: get_lists
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - lists_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - lists_result
+      - expected_fields
+      - error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'get_lists' tool execution.
+
+          tool executed: get_lists
+          results: {lists_result}
+          expected fields: {expected_fields}
+          error indicators: {error_indicators}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns array of list objects
+          - each list contains title, id, description, itemcount, and basetemplate fields
+          - no error messages or exceptions in output
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any error indicators in the output?
+          3. is the result an array or list structure?
+          4. do the list objects contain the expected fields?
+          5. are there at least some lists returned (non-empty result)?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -33,6 +33,7 @@ on:
           # - qtest
           - zephyr_essential
           - xray
+          - sharepoint
           - state_retrieval
           - structured_output
       custom_suites:

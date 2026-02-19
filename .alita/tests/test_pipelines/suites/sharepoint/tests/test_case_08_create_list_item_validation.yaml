@@ -1,0 +1,100 @@
+name: "SP08 - create_list_item: Missing fields"
+priority: High
+description: |
+  Verify the SharePoint 'create_list_item' tool validates required fields.
+  
+  Objective: Test validation for missing required fields
+  
+  Expected Behavior:
+  - Tool executes and returns validation error
+  - Error message indicates missing required field
+  - Error specifies which field is missing (typically Title)
+  - No system crashes or unhandled exceptions
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: ${TEST_LIST_NAME}
+  item_fields:
+    type: dict
+    value: {}
+  created_item:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_create_list_item
+
+nodes:
+  - id: invoke_create_list_item
+    type: toolkit
+    tool: create_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_fields
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      fields:
+        type: variable
+        value: item_fields
+    output:
+      - created_item
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - created_item
+      - list_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'create_list_item' tool for validation.
+
+          tool executed: create_list_item
+          list title: {list_title}
+          provided fields: empty dictionary (no fields provided)
+          results: {created_item}
+
+          this test validates error handling for missing required fields.
+
+          perform the following checks:
+          1. confirm the tool executed (result is not empty or null).
+          2. examine any error message for specific meaning. valid error patterns for missing fields include:
+             - required field is missing or must be provided
+             - title field is required or title cannot be empty
+             - validation failed or field validation error
+             - fields must be a non-empty dictionary
+          3. determine if the error is about missing required fields.
+             errors like "fields must be a non-empty dictionary" or "title is required" are expected and correct.
+             system errors unrelated to field validation are failures.
+
+          return a json object with:
+          {{
+            "test_passed": true/false (true if validation error occurred as expected),
+            "summary": "brief description of outcome",
+            "error": "error details if test failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

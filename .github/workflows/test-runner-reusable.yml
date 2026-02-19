@@ -102,6 +102,7 @@ jobs:
           export ZEPHYR_ESENTIALS_KEY="${{ secrets.ZEPHYR_ESENTIALS_KEY }}"
           export GITLAB_PRIVATE_TOKEN="${{ secrets.GITLAB_PRIVATE_TOKEN }}"
           export POSTMAN_API_KEY="${{ secrets.POSTMAN_API_KEY }}"
+          export SHAREPOINT_CLIENT_SECRET="${{ secrets.SHAREPOINT_CLIENT_SECRET }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
