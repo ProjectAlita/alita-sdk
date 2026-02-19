@@ -458,13 +458,42 @@ class BitbucketCloudApi(BitbucketApiAbstract):
             if page:
                 path = page
 
-            response = self.repository.get(path=path)
+            response = self.repository.get(path=path, advanced_mode=True)
 
-            for item in response.get('values', []):
+            # Check status code
+            status = getattr(response, "status_code", None)
+            if status is not None and status != 200:
+                raise ToolException(
+                    f"Failed to list files from path '{file_path}' on branch '{branch}': HTTP {status}"
+                )
+
+            # Parse JSON response - handle empty responses
+            response_text = getattr(response, "text", "")
+            if not response_text or not response_text.strip():
+                # Empty response - path doesn't exist or is not a directory
+                break
+
+            try:
+                response_data = response.json() if hasattr(response, 'json') else {}
+            except (ValueError, json.JSONDecodeError) as e:
+                # JSON parsing failed - likely malformed response or empty body
+                logger.warning(
+                    f"Failed to parse JSON response for path '{file_path}' on branch '{branch}': {e}. "
+                    f"Response text (first 200 chars): {response_text[:200]}"
+                )
+                break
+            except Exception as e:
+                # Unexpected error - don't silently ignore
+                logger.error(f"Unexpected error parsing response for path '{file_path}' on branch '{branch}': {e}")
+                raise ToolException(
+                    f"Unexpected error listing files from path '{file_path}' on branch '{branch}': {e}"
+                )
+
+            for item in response_data.get('values', []):
                 files_list.append(item['path'])
 
             # Check for next page
-            page = response.get('next')
+            page = response_data.get('next')
             if not page:
                 break
 
