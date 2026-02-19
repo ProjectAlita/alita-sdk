@@ -27,7 +27,6 @@ on:
           - bitbucket
           - confluence
           - figma
-          - github
           - gitlab
           - jira
           - qtest
