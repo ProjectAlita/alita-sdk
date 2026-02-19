@@ -10,8 +10,7 @@ from langchain_core.tools import ToolException
 from pydantic import create_model, Field, model_validator
 
 from ...tools.non_code_indexer_toolkit import NonCodeIndexerToolkit
-from ...tools.utils.available_tools_decorator import extend_with_parent_available_tools
-from ...tools.elitea_base import extend_with_file_operations, BaseCodeToolApiWrapper
+from ...tools.elitea_base import extend_with_file_operations
 from ...tools.utils.text_operations import (
     apply_line_slice,
     is_text_editable,
@@ -377,8 +376,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 filedata = created
             source_filepath = None
 
-        target_bucket = bucket_name or self.bucket
-
         result = self.artifact.create(full_key, filedata, target_bucket)
         if 'error' in result:
             raise ToolException(f"Failed to create file '{filename}': {result['error']}")
@@ -463,9 +460,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                 raise ToolException("Must provide either 'filename' or 'filepath' parameter")
             # Normalize filename path
             full_key = filename.lstrip('/')
-        
-        if not filename:
-            raise ToolException("Must provide either 'filename' or 'filepath' parameter")
         
         # Determine bucket to use
         target_bucket = bucket_name or self.bucket
