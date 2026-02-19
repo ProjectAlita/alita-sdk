@@ -133,6 +133,7 @@ nodes:
 
   - id: attempt_invalid_update_1
     type: toolkit
+    continue_on_error: true
     input:
       - test_file_path
       - invalid_update_non_matching
@@ -149,7 +150,7 @@ nodes:
         value: test_branch_name
     output:
       - invalid_result_1
-    structured_output: true
+    structured_output: false
     tool: update_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: attempt_invalid_update_2
