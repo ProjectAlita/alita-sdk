@@ -6,9 +6,12 @@ Middleware provides modular extensions for agents, including:
 - System prompt modifications
 - State restoration on conversation resume
 - Callbacks for UI/CLI integration
+- Context management (summarization, context editing)
 
 Available middleware:
 - PlanningMiddleware: Task planning and progress tracking
+- SummarizationMiddleware: Automatic context compression when token limits approached
+- ContextEditingMiddleware: Automatic clearing of old tool outputs
 - ToolExceptionHandlerMiddleware: Smart tool error handling with strategies
 
 Available strategies (for ToolExceptionHandlerMiddleware):
@@ -23,10 +26,9 @@ Available strategies (for ToolExceptionHandlerMiddleware):
 Usage:
     from alita_sdk.runtime.middleware import (
         PlanningMiddleware,
+        SummarizationMiddleware,
+        ContextEditingMiddleware,
         ToolExceptionHandlerMiddleware,
-        TransformErrorStrategy,
-        CircuitBreakerStrategy,
-        LoggingStrategy,
         MiddlewareManager
     )
 
@@ -36,24 +38,30 @@ Usage:
         connection_string="postgresql://...",
     )
 
+    # Create summarization middleware (compresses old messages)
+    summarization = SummarizationMiddleware(
+        model="openai:gpt-4o-mini",
+        trigger_tokens=50000,
+        keep_messages=10,
+    )
+
+    # Create context editing middleware (clears old tool outputs)
+    context_editing = ContextEditingMiddleware(
+        trigger_tokens=100000,
+        keep_tool_results=3,
+    )
+
     # Create error handler with default strategies (recommended)
     error_handler = ToolExceptionHandlerMiddleware.create_default(
         llm=llm,
         threshold=3
     )
 
-    # Or create with explicit strategies
-    error_handler = ToolExceptionHandlerMiddleware(
-        strategies=[
-            LoggingStrategy(),
-            CircuitBreakerStrategy(threshold=3),
-            TransformErrorStrategy(llm=llm, use_llm=True)
-        ]
-    )
-
     # Use with MiddlewareManager for multiple middleware
     manager = MiddlewareManager()
     manager.add(planning)
+    manager.add(summarization)
+    manager.add(context_editing)
     manager.add(error_handler)
 
     # Get tools and prompts
@@ -63,6 +71,8 @@ Usage:
 
 from .base import Middleware, MiddlewareManager
 from .planning import PlanningMiddleware
+from .summarization import SummarizationMiddleware
+from .context_editing import ContextEditingMiddleware
 from .tool_exception_handler import ToolExceptionHandlerMiddleware
 from .strategies import (
     ExceptionHandlerStrategy,
@@ -77,6 +87,8 @@ __all__ = [
     "Middleware",
     "MiddlewareManager",
     "PlanningMiddleware",
+    "SummarizationMiddleware",
+    "ContextEditingMiddleware",
     "ToolExceptionHandlerMiddleware",
     # Strategies
     "ExceptionHandlerStrategy",

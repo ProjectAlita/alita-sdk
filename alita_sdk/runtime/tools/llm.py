@@ -99,6 +99,12 @@ class LLMNode(BaseTool):
                     'Used for middleware tools like planning that need immediate access. '
                     'These are bound alongside meta-tools, not through the registry.'
     )
+    middleware_manager: Optional[Any] = Field(
+        default=None,
+        exclude=True,
+        description='MiddlewareManager instance for before_model/after_model hooks. '
+                    'Used for context management like summarization and context editing.'
+    )
     _meta_tools: Optional[List[BaseTool]] = None  # Cached meta-tools
 
     def _prepare_structured_output_params(self) -> dict:
@@ -538,16 +544,29 @@ class LLMNode(BaseTool):
     ) -> dict:
         """
         Invoke the LLM node with proper message handling and tool binding.
-        
+
         Args:
             state: The current state containing messages and other variables
             config: Optional runnable config
             **kwargs: Additional keyword arguments
-            
+
         Returns:
             Updated state with LLM response
         """
-        # Extract messages from state
+        # Run middleware before_model hooks (e.g., summarization, context editing)
+        # This may modify state by compressing old messages when token limits are approached
+        # Returns both processed state (for LLM) and RemoveMessage ops (for checkpoint)
+        middleware_updates = []
+        if self.middleware_manager is not None and isinstance(state, dict):
+            original_msg_count = len(state.get('messages', []))
+            state, middleware_updates = self.middleware_manager.run_before_model(state, config or {})
+            # Only log if summarization actually triggered (RemoveMessage ops returned)
+            if middleware_updates:
+                new_msg_count = len(state.get('messages', []))
+                logger.info(
+                    f"[LLMNode] Summarization triggered: {original_msg_count} -> {new_msg_count} messages, "
+                    f"RemoveMessage ops: {len(middleware_updates)}"
+                )
 
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
@@ -654,6 +673,10 @@ class LLMNode(BaseTool):
                 result = completion.model_dump()
                 result = self._format_structured_output_result(result, final_messages, initial_completion or completion)
 
+                # Prepend middleware updates to messages for checkpoint
+                if middleware_updates and 'messages' in result:
+                    result['messages'] = list(middleware_updates) + result['messages']
+
                 return result
             else:
                 # Handle regular completion
@@ -666,7 +689,7 @@ class LLMNode(BaseTool):
                         self.__perform_tool_calling(completion, messages, llm_client, config)
                     )
 
-                    output_msgs = {"messages": self._strip_system_messages(new_messages)}
+                    output_msgs = {"messages": self._strip_system_messages(new_messages, middleware_updates)}
                     if self.output_variables:
                         if self.output_variables[0] == 'messages':
                             return output_msgs
@@ -748,12 +771,12 @@ class LLMNode(BaseTool):
                         # set response to be the first output variable for non-structured output
                         response_data = {json_output_vars[0]: text_content}
                         new_messages = messages + [ai_message]
-                        response_data['messages'] = self._strip_system_messages(new_messages)
+                        response_data['messages'] = self._strip_system_messages(new_messages, middleware_updates)
                         return response_data
 
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [ai_message]
-                    return {"messages": self._strip_system_messages(new_messages)}
+                    return {"messages": self._strip_system_messages(new_messages, middleware_updates)}
 
         except Exception as e:
             # Enhanced error logging with model diagnostics
@@ -764,18 +787,32 @@ class LLMNode(BaseTool):
             
             error_msg = f"Error: {e}"
             new_messages = messages + [AIMessage(content=error_msg)]
-            return {"messages": self._strip_system_messages(new_messages)}
+            return {"messages": self._strip_system_messages(new_messages, middleware_updates)}
 
     @staticmethod
-    def _strip_system_messages(messages: list) -> list:
+    def _strip_system_messages(messages: list, middleware_updates: list = None) -> list:
         """Strip SystemMessage objects from a message list before returning to graph state.
 
         The LLMNode constructs SystemMessage on-the-fly from its input_mapping['system']
         for each invocation. Storing SystemMessages in the graph state would cause them
         to accumulate in checkpoints, leading to "multiple non-consecutive system messages"
         errors on subsequent turns (especially with Anthropic models).
+
+        Args:
+            messages: List of messages to process
+            middleware_updates: Optional list of RemoveMessage operations from middleware.
+                               These are prepended so LangGraph's reducer processes deletions
+                               before adding new messages (e.g., for summarization).
+
+        Returns:
+            Filtered message list with RemoveMessage ops prepended
         """
-        return [m for m in messages if not isinstance(m, SystemMessage)]
+        filtered = [m for m in messages if not isinstance(m, SystemMessage)]
+        if middleware_updates:
+            # Prepend RemoveMessage ops so LangGraph clears old messages first
+            # Then the new messages (summary + preserved + LLM response) are added
+            return list(middleware_updates) + filtered
+        return filtered
 
     def _run(self, *args, **kwargs):
         # Legacy support for old interface
