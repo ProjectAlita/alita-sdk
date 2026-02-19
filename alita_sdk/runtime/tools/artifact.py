@@ -29,9 +29,12 @@ from ...runtime.utils.utils import IndexerKeywords
 
 DEFAULT_MAX_SINGLE_READ_SIZE = 60000
 
-BASIC_CREATE_FILE_DESCRIPTION = """Create a file in the artifact bucket. Supports two modes:
-1. Create from content: Use 'filedata' parameter to create new files with text or rich formats
+BASIC_CREATE_FILE_DESCRIPTION = """Create a new file OR overwrite/replace an existing file entirely in the artifact bucket. Supports two modes:
+1. Create from content: Use 'filedata' parameter to create or fully overwrite files with text or rich formats
 2. Copy existing file: Use 'filepath' parameter to copy existing files (images, PDFs, attachments) while preserving binary format
+
+Use this tool when the user wants to: create a file, overwrite a file, replace file contents entirely, or save new content to a filename.
+For partial edits (change only specific lines/sections), use edit_file instead.
 
 IMPORTANT: Provide EITHER 'filedata' OR 'filepath', never both or neither.
 Use filepath when copying previously generated images, uploaded PDFs, or any binary files to preserve data integrity.
@@ -139,7 +142,10 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         commit_message: str = None
     ) -> str:
         """
-        Edit a file in an artifact bucket using OLD/NEW markers.
+        Partially edit specific sections of an existing text file using OLD/NEW markers.
+        Use this for targeted changes — replacing, inserting, or deleting specific lines or sections
+        while preserving all other content.
+        NOT for overwriting the whole file — use createFile for that.
 
         Args:
             file_path: Path to the file to edit. Must be a text file.
@@ -527,14 +533,14 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             # Normalize filename path
             full_key = file_path.lstrip('/')
             
-            result = self.artifact.overwrite(full_key, content, target_bucket)
+            result = self.artifact.create(full_key, content, target_bucket, check_if_exists=True)
             if 'error' in result:
                 raise ToolException(f"Failed to write file '{file_path}': {result['error']}")
-            
+
             new_filepath = result['filepath']
             sanitized_filename = result.get('sanitized_name', file_path)
-            operation_type = result.get('operation_type', 'modify')
-            file_exists = result.get('file_existed', True)
+            file_exists = result['file_existed']
+            operation_type = result['operation_type']
             
             message = f"File '{sanitized_filename}' {'updated' if file_exists else 'created'} successfully"
             return_msg = f"{'Updated' if file_exists else 'Created'} file {sanitized_filename}"
@@ -602,41 +608,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
             "filename": sanitized_filename,
             "bucket": target_bucket,
             "message": "Data appended successfully"
-        })
-
-    def overwrite_data(self, filename: str, filedata: str, bucket_name = None):
-        """Overwrite file content completely."""
-        target_bucket = bucket_name or self.bucket
-        
-        # Normalize filename path
-        full_key = filename.lstrip('/')
-        
-        result = self.artifact.overwrite(full_key, filedata, target_bucket)
-        if 'error' in result:
-            raise ToolException(f"Failed to overwrite file '{filename}': {result['error']}")
-        
-        new_filepath = result['filepath']
-        sanitized_filename = result.get('sanitized_name', filename)
-        operation_type = result.get('operation_type', 'modify')
-
-        dispatch_custom_event("file_modified", {
-            "message": f"File overwritten successfully at {new_filepath}",
-            "filepath": new_filepath,
-            "tool_name": "overwriteData",
-            "toolkit": "artifact",
-            "operation_type": operation_type,
-            "meta": {
-                "bucket": target_bucket,
-                "file_size": len(filedata) if isinstance(filedata, (str, bytes)) else 0,
-                "source": "generated"
-            }
-        })
-        
-        return json.dumps({
-            "filepath": new_filepath,
-            "filename": sanitized_filename,
-            "bucket": target_bucket,
-            "message": f"File '{sanitized_filename}' overwritten successfully"
         })
 
     def get_file_type(self, filepath: str) -> str:
@@ -950,17 +921,6 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
                         description="If True (default), creates an empty file if it doesn't exist before appending. If False, returns an error when file is not found.",
                         default=True
                     ))
-                )
-            },
-            {
-                "ref": self.overwrite_data,
-                "name": "overwriteData",
-                "description": "Overwrite data in a file in the artifact",
-                "args_schema": create_model(
-                    "overwriteData", 
-                    filename=(str, Field(description="Filename")),
-                    filedata=(str, Field(description="Stringified content to overwrite")),
-                    bucket_name=bucket_name
                 )
             },
             {
