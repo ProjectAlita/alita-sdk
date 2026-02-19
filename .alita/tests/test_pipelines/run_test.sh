@@ -231,9 +231,10 @@ if [ ! -f "$SUITE/pipeline.yaml" ]; then
     exit 1
 fi
 
-# Auto-generate session ID for parallel isolation when running full workflow
-# Session ID scopes all resources (toolkits, pipelines, env file) to this run
-if [ -z "$SESSION_ID" ] && { [ "$DO_SETUP" = true ] || [ "$DO_SEED" = true ] && [ "$DO_CLEANUP" = true ]; }; then
+# Auto-generate session ID for parallel isolation whenever any workflow step is active
+# (setup, seed, or cleanup). Mirrors the unconditional generation in run_all_suites.sh.
+# Session ID scopes all resources (toolkits, pipelines, env file) to this run.
+if [ -z "$SESSION_ID" ] && { [ "$DO_SETUP" = true ] || [ "$DO_SEED" = true ] || [ "$DO_CLEANUP" = true ]; }; then
     SESSION_ID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
 fi
 

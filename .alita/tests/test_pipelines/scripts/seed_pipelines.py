@@ -447,7 +447,12 @@ def create_application_payload(pipeline_data: dict, llm_settings: dict = None) -
                 "llm_settings": settings,
                 "instructions": pipeline_data["yaml_content"],
                 "agent_type": "pipeline",
-                "tags": [],
+                "tags": [{
+                    "name": "automation",
+                    "data": {
+                        "color": "red"
+                    }
+                }],
                 "tools": [],
                 "variables": [],
                 "meta": {

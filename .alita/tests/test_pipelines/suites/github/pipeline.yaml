@@ -46,7 +46,7 @@ setup:
         active_branch: ${GITHUB_BASE_BRANCH:main}
         base_branch: ${GITHUB_BASE_BRANCH:main}
       # Name for the toolkit on platform
-      toolkit_name: ${GITHUB_TOOLKIT_NAME:testing-github}
+      toolkit_name: ${GITHUB_TOOLKIT_NAME:github-testing}
     # Save created toolkit ID to environment for pipeline substitution
     save_to_env:
       - key: GITHUB_TOOLKIT_ID
@@ -87,44 +87,9 @@ setup:
       - key: GITHUB_TEST_ISSUE_NUMBER
         value: $.result.number
 
-  # Step 5: Create SDK analysis toolkit for RCA pipeline
-  # This toolkit points to alita-sdk repo so RCA can search/read code
-  - name: Create SDK Analysis Toolkit
-    type: toolkit
-    action: create_or_update
-    config:
-      config_file: ../../configs/git-config.json
-      toolkit_type: github
-      overrides:
-        github_configuration:
-          private: true
-          alita_title: ${GITHUB_SECRET_NAME:github}
-        repository: ${SDK_REPO:ProjectAlita/alita-sdk}
-        active_branch: ${SDK_BRANCH:main}
-        base_branch: ${SDK_BRANCH:main}
-      toolkit_name: sdk-analysis
-    save_to_env:
-      - key: SDK_TOOLKIT_ID
-        value: $.id
-      - key: SDK_TOOLKIT_NAME
-        value: $.name
-
 # Composable pipelines - seeded first, used by hooks and other pipelines
 # These are reusable pipeline components that can be invoked conditionally
-composable_pipelines:
-  # RCA (Root Cause Analysis) pipeline - invoked when tests fail
-  - file: ../../composable/rca_on_failure.yaml
-    env:
-      SUITE_NAME: github_toolkit
-      RCA_MODEL: ${RCA_MODEL:gpt-5-mini}
-      # Pass SDK toolkit ID so RCA can search/read code
-      SDK_TOOLKIT_ID: ${SDK_TOOLKIT_ID}
-      SDK_TOOLKIT_NAME: ${SDK_TOOLKIT_NAME:sdk-analysis}
-    save_to_env:
-      - key: RCA_PIPELINE_ID
-        value: $.id
-      - key: RCA_PIPELINE_VERSION_ID
-        value: $.versions.0.id
+composable_pipelines: []
 
 # Test execution configuration
 execution:
@@ -199,14 +164,6 @@ cleanup:
     enabled: true
     continue_on_error: true
 
-  # Step 5: Delete the SDK analysis toolkit (used by RCA)
-  - name: Delete SDK Analysis Toolkit
-    type: toolkit
-    config:
-      toolkit_id: ${SDK_TOOLKIT_ID}
-    enabled: true
-    continue_on_error: true
-
 # Hooks for custom actions
 hooks:
   # Run before any setup steps
@@ -216,36 +173,7 @@ hooks:
   post_setup: []
 
   # Run after each test - e.g., RCA on failure
-  post_test:
-    # Root Cause Analysis hook - invoked when a test fails
-    - name: rca_on_failure
-      pipeline_id: ${RCA_PIPELINE_ID}
-      # Condition: only run if test failed
-      condition: "result.get('test_passed') is False"
-      # Map test result to state variable
-      input_mapping:
-        failure_details: |
-          f"""**Test Name:** {result.get('pipeline_name', 'Unknown')}
-          **Toolkit:** github
-          **Status:** Test Failed
-
-          **Error Message:**
-          {result.get('error') or result.get('output', {}).get('result', {}).get('error', 'No error message')}
-
-          **Pipeline ID:** {result.get('pipeline_id', 'N/A')}
-          **Version ID:** {result.get('version_id', 'N/A')}
-          **Execution Time:** {result.get('execution_time', 'N/A')}s
-
-          **Test Output Details:**
-          - Test passed: {result.get('test_passed', False)}
-          - Tool executed: {result.get('output', {}).get('result', {}).get('tool_executed', 'N/A')}
-          - Error: {result.get('output', {}).get('result', {}).get('error', 'None')}
-          """
-      # Map pipeline output back to test result
-      output_mapping:
-        "result['rca']": "rca_result"
-        "result['rca_summary']": "rca_summary"
-
+  post_test: []
   # Run before cleanup starts
   pre_cleanup: []
 

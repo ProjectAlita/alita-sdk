@@ -1,0 +1,105 @@
+name: Cleanup Test Framework Artifacts From Alita
+run-name: "Artifacts Cleanup: ${{ inputs.environment || 'dev' }}"
+
+on:
+  # Run on a schedule (nightly safety net)
+#   schedule:
+#     - cron: "0 2 * * *"   # 02:00 UTC every day
+
+  # Run manually from the Actions UI
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        default: dev
+        options:
+          - dev
+          - stage
+          - prod
+      pipeline_tag:
+        description: "Delete pipelines with this tag"
+        required: false
+        type: string
+        default: "automation"
+      toolkit_keyword:
+        description: "Delete toolkits whose name contains this keyword"
+        required: false
+        type: string
+        default: "testing"
+      scope:
+        description: "What to clean up"
+        required: false
+        type: choice
+        default: both
+        options:
+          - both
+          - pipelines-only
+          - toolkits-only
+      dry_run:
+        description: "Dry run (list targets, do not delete)"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .alita/tests/test_pipelines/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests pyyaml
+
+      - name: Resolve environment
+        id: env
+        run: |
+          # workflow_dispatch → use the explicit input
+          # workflow_run / schedule  → default to 'dev'
+          ENV="${{ inputs.environment || 'dev' }}"
+          ENV_UPPER=$(echo "$ENV" | tr '[:lower:]' '[:upper:]')
+          echo "name=$ENV"       >> "$GITHUB_OUTPUT"
+          echo "upper=$ENV_UPPER" >> "$GITHUB_OUTPUT"
+
+      - name: Build cleanup flags
+        id: flags
+        run: |
+          FLAGS="--yes"
+
+          # scope
+          SCOPE="${{ inputs.scope || 'both' }}"
+          if   [ "$SCOPE" = "pipelines-only" ]; then FLAGS="$FLAGS --pipelines-only"
+          elif [ "$SCOPE" = "toolkits-only"  ]; then FLAGS="$FLAGS --toolkits-only"
+          fi
+
+          # filter overrides (only when running manually with non-default values)
+          TAG="${{ inputs.pipeline_tag }}"
+          KEYWORD="${{ inputs.toolkit_keyword }}"
+          [ -n "$TAG"     ] && FLAGS="$FLAGS --pipeline-tag $TAG"
+          [ -n "$KEYWORD" ] && FLAGS="$FLAGS --toolkit-keyword $KEYWORD"
+
+          # dry-run
+          if [ "${{ inputs.dry_run }}" = "true" ]; then FLAGS="$FLAGS --dry-run"; fi
+
+          echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
+          echo "Cleanup flags: $FLAGS"
+
+      - name: Run CI cleanup
+        env:
+          DEPLOYMENT_URL: ${{ secrets[format('DEPLOYMENT_URL_{0}', steps.env.outputs.upper)] }}
+          API_KEY: ${{ secrets[format('ALITA_API_KEY_{0}', steps.env.outputs.upper)] }}
+          PROJECT_ID: ${{ secrets[format('PROJECT_ID_{0}', steps.env.outputs.upper)] }}
+        run: |
+          python .alita/tests/test_pipelines/scripts/ci_cleanup.py ${{ steps.flags.outputs.flags }}

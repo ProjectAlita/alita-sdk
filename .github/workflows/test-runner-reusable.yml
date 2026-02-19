@@ -149,13 +149,9 @@ jobs:
           if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "⚠️ Timeout reached after $TIMEOUT seconds"
             echo "tests_failed=true" >> $GITHUB_OUTPUT
+            echo "timeout=true" >> $GITHUB_OUTPUT
             docker-compose logs alita-sdk
-            exit 1
-          fi
-          
-          if [ $CONTAINER_EXIT_CODE -ne 0 ]; then
-            echo "::error::Tests failed with exit code $CONTAINER_EXIT_CODE"
-            exit $CONTAINER_EXIT_CODE
+            # Don't exit here – let the final status step decide
           fi
 
       - name: Copy test results
@@ -656,6 +652,63 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
           
+      # -----------------------------------------------------------------------
+      # Final status gate – must run after all AI analysis / bug reporting steps
+      # -----------------------------------------------------------------------
+      - name: Determine final job status
+        if: always()
+        run: |
+          TESTS_FAILED="${{ steps.wait_tests.outputs.tests_failed }}"
+          TIMED_OUT="${{ steps.wait_tests.outputs.timeout }}"
+
+          # Hard timeout → always fail
+          if [ "$TIMED_OUT" = "true" ]; then
+            echo "::error::Test container timed out – job fails"
+            exit 1
+          fi
+
+          # Tests passed cleanly → nothing more to check
+          if [ "$TESTS_FAILED" != "true" ]; then
+            echo "✅ All tests passed"
+            exit 0
+          fi
+
+          # ── Tests failed – AI analysis must provide a clear verdict ──
+
+          if [ ! -f ./fix_output.json ] || ! jq empty ./fix_output.json 2>/dev/null; then
+            echo "::error::Tests failed and AI analysis output is missing or invalid – job status is unclear"
+            exit 1
+          fi
+
+          FIXED=$(jq -r '.summary.fixed // 0' ./fix_output.json)
+          FLAKY=$(jq -r '.summary.flaky // 0' ./fix_output.json)
+          BLOCKED=$(jq -r '.summary.blocked // 0' ./fix_output.json)
+          COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+
+          echo "AI verdict → fixed=$FIXED  flaky=$FLAKY  blocked=$BLOCKED  committed=$COMMITTED"
+
+          # Flaky tests → fail (intermittent = unreliable infrastructure)
+          if [ "$FLAKY" -gt 0 ]; then
+            echo "::error::$FLAKY flaky test(s) detected – job fails (intermittent failures must be investigated)"
+            exit 1
+          fi
+
+          # SDK bugs blocking tests → fail
+          if [ "$BLOCKED" -gt 0 ]; then
+            echo "::error::$BLOCKED test(s) blocked by SDK bugs – job fails (see AI analysis summary)"
+            exit 1
+          fi
+
+          # All failures were test-code issues that AI fixed and committed → pass
+          if [ "$FIXED" -gt 0 ] && [ "$COMMITTED" = "true" ]; then
+            echo "✅ All $FIXED failing test(s) were fixed by AI and committed – job passes"
+            exit 0
+          fi
+
+          # Fallback: unclear outcome
+          echo "::error::Tests failed with unclear AI analysis outcome (fixed=$FIXED flaky=$FLAKY blocked=$BLOCKED committed=$COMMITTED) – job fails"
+          exit 1
+
       - name: Stop docker-compose
         if: always()
         run: docker-compose down --remove-orphans
