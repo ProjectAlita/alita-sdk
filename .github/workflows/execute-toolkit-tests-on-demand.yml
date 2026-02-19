@@ -67,9 +67,9 @@ jobs:
       - name: Generate test matrix
         id: set-matrix
         run: |
-          TEST_CASES_DIR="${{ github.event.inputs.test_cases_dir }}"
-          CUSTOM_SUITES="${{ github.event.inputs.custom_suites }}"
-          EXCLUDE_SUITES="${{ github.event.inputs.exclude_suites }}"
+          TEST_CASES_DIR="${{ inputs.test_cases_dir }}"
+          CUSTOM_SUITES="${{ inputs.custom_suites }}"
+          EXCLUDE_SUITES="${{ inputs.exclude_suites }}"
           
           if [ "$TEST_CASES_DIR" = "all" ]; then
             # Parse workflow file to extract all test_cases_dir options (excluding 'all' and 'custom')
@@ -81,7 +81,7 @@ jobs:
             MATRIX=$(echo "$CUSTOM_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
           else
             # Create matrix with single directory
-            MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '["$dir"]')
+            MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '[$dir]')
           fi
           
           # Apply exclusions (works for all modes)
