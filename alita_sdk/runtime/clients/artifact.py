@@ -58,6 +58,21 @@ class Artifact:
             logger.error(f"Error: {e}")
             return {"error": str(e)}
 
+    @staticmethod
+    def _decode_text(data: bytes) -> str:
+        """Decode raw bytes to text using chardet detection. Raises ValueError if decoding fails."""
+        if len(data) == 0:
+            return ""
+        detected = chardet.detect(data[:_CHARDET_SAMPLE_SIZE])
+        if detected['encoding'] is not None:
+            try:
+                return data.decode(detected['encoding'])
+            except Exception as e:
+                raise ValueError(
+                    f"Could not decode bytes with detected encoding '{detected['encoding']}': {e}"
+                ) from e
+        raise ValueError("Could not detect encoding")
+
     def get(self,
             artifact_name: str,
             bucket_name: str = None,
@@ -72,23 +87,10 @@ class Artifact:
         data = self.client.download_artifact_s3(bucket_name, artifact_name)
         if isinstance(data, dict) and 'error' in data:
             return f"{data['error']}. {data.get('content', '')}"
-        if len(data) == 0:
-            # empty file might be created
-            return ""
-        detected = chardet.detect(data[:_CHARDET_SAMPLE_SIZE])
-        if detected['encoding'] is not None:
-            try:
-                return data.decode(detected['encoding'])
-            except Exception:
-                logger.error("Error while default encoding")
-                return parse_file_content(file_name=artifact_name,
-                                          file_content=data,
-                                          is_capture_image=is_capture_image,
-                                          page_number=page_number,
-                                          sheet_name=sheet_name,
-                                          excel_by_sheets=excel_by_sheets,
-                                          llm=llm)
-        else:
+        try:
+            return self._decode_text(data)
+        except ValueError:
+            logger.error("Error while default encoding")
             return parse_file_content(file_name=artifact_name,
                                       file_content=data,
                                       is_capture_image=is_capture_image,
@@ -204,10 +206,11 @@ class Artifact:
                             f"Consider creating a new file instead using createFile tool."
                 }
             
-            # Safe to text-append - file is a text format
-            data = self.get(artifact_name, bucket_name)
-            if data == "Could not detect encoding":
-                return {"error": data}
+            # Safe to text-append - decode already-downloaded bytes directly (avoids re-download)
+            try:
+                data = self._decode_text(raw_data)
+            except ValueError as e:
+                return {"error": f"Cannot read '{artifact_name}' for text append: {e}"}
 
             # Append the new data
             data += f"\n{additional_data}" if len(data) > 0 else additional_data
