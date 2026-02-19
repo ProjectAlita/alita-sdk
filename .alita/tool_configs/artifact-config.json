@@ -9,7 +9,6 @@
     "readFile",
     "deleteFile",
     "appendData",
-    "overwriteData",
     "createNewBucket",
     "read_file_chunk",
     "read_multiple_files",

@@ -126,7 +126,6 @@ These are infrastructure components that support toolkits but don't expose user-
 | `grep_file` (search_file) | ✅ | test_case_07 |
 | `edit_file` | ✅ | test_case_08, test_case_16 |
 | `appendData` | ✅ | test_case_09 |
-| `overwriteData` | ✅ | test_case_10 |
 | `deleteFile` | ✅ | test_case_11 |
 | `read_multiple_files` | ✅ | test_case_12 |
 | `get_file_type` | ✅ | test_case_13 |

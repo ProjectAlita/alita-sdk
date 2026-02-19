@@ -7,7 +7,6 @@
     "createFile",
     "edit_file",
     "appendData",
-    "overwriteData",
     "readFile",
     "read_multiple_files",
     "get_file_type",

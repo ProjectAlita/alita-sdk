@@ -14,16 +14,15 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 | AT07 | `search_file` | test_case_07_search_file_happy_path.yaml | High | Pattern matching with context lines |
 | AT08 | `edit_file` | test_case_08_edit_file_happy_path.yaml | High | Text replacement using OLD/NEW markers |
 | AT09 | `appendData` | test_case_09_append_data_happy_path.yaml | High | Appending content to files |
-| AT10 | `overwriteData` | test_case_10_overwrite_data_happy_path.yaml | High | Complete file content replacement |
 | AT11 | `deleteFile` | test_case_11_delete_file_happy_path.yaml | High | File deletion and removal verification |
 | AT12 | `read_multiple_files` | test_case_12_read_multiple_files_happy_path.yaml | High | Batch file retrieval |
 | AT13 | `get_file_type` | test_case_13_get_file_type_happy_path.yaml | High | File type detection from content |
 | AT16 | `edit_file` | test_case_16_edit_empty_file_edge_case.yaml | High | Empty file edit behavior validation |
 | AT17 | `deleteFile` | test_case_17_delete_nonexistent_file_error.yaml | High | Error handling for non-existent file deletion |
 
-**Total Test Cases: 14**
+**Total Test Cases: 13**
 - Critical: 4 tests (core functionality)
-- High: 10 tests (variations and edge cases)
+- High: 9 tests (variations and edge cases)
 
 ## Artifact Toolkit Features
 
@@ -49,9 +48,8 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 - `edit_file`: Precise text replacement using OLD/NEW marker pairs
 - Support for multiple edits per operation
 
-#### Append & Overwrite
+#### Append
 - `appendData`: Append content to file (create if missing with flag control)
-- `overwriteData`: Full file replacement, removing old content
 
 #### Management
 - `deleteFile`: Delete with existence validation
@@ -127,7 +125,7 @@ This suite is derived from legacy artifact test specifications (TC-001 through T
 | TC-006 | SearchFile | AT07 | ✅ Implemented |
 | TC-007 | EditFile | AT08 | ✅ Implemented |
 | TC-008 | ReadMultipleFiles | AT12 | ✅ Implemented |
-| TC-009 | AppendData/OverwriteData | AT09, AT10 | ✅ Implemented |
+| TC-009 | AppendData | AT09 | ✅ Implemented |
 | TC-010 | DeleteFile | AT11 | ✅ Implemented |
 | N/A | GetFileType | AT13 | ✅ Additional |
 

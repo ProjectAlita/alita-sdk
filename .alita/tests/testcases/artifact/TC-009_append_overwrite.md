@@ -1,8 +1,8 @@
-# Append and Overwrite Data
+# Append Data
 
 ## Objective
 
-Verify that the `appendData` and `overwriteData` tools correctly modify file contents in artifact buckets.
+Verify that the `appendData` tool correctly modifies file contents in artifact buckets.
 
 ## Test Data Configuration
 
@@ -10,9 +10,9 @@ Verify that the `appendData` and `overwriteData` tools correctly modify file con
 
 | Parameter | Value | Description |
 |-----------|-------|-------------|
-| **Tools** | `appendData`, `overwriteData`, `readFile` | Artifact tools for data modification |
+| **Tools** | `appendData`, `readFile` | Artifact tools for data modification |
 | **Bucket Name** | `TC-009-append-overwrite` | Target bucket for operations |
-| **Primary Input(s)** | `{{TC_009_MD_FILENAME}}={{RANDOM_STRING}}.md, {{TC_009_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_009_NON_EXISTENT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_009_CSV_FILENAME}}={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
+| **Primary Input(s)** | `{{TC_009_TXT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_009_NON_EXISTENT_FILENAME}}={{RANDOM_STRING}}.txt, {{TC_009_CSV_FILENAME}}={{RANDOM_STRING}}.csv,` | Required and optional inputs derived from args_schema |
 
 ## Config
 
@@ -44,13 +44,6 @@ Inputs:
 {
   "filename": "{{TC_009_TXT_FILENAME}}",
   "filedata": "This is a test document for TC-009.\nSecond line.",
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-```json
-{
-  "filename": "{{TC_009_MD_FILENAME}}",
-  "filedata": "# TC-009 README\n\nThis is a markdown file used for read-file verification.",
   "bucket_name": "tc-009-append-overwrite"
 }
 ```
@@ -122,65 +115,7 @@ Run readFile tool to confirm data was appended.
 
 **Expectation:** The file now contains the original 3 lines plus the 1 appended lines (total 4 lines).
 
-### Step 5: Overwrite File Content
-
-Execute the `overwriteData` tool to replace entire file content.
-
-**Input:**
-```json
-{
-  "filename": "{{TC_009_TXT_FILENAME}}",
-  "filedata": "Completely new content.\nAll previous data replaced.\nThis is the new file.",
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-
-**Expectation:** The tool successfully overwrites the file and confirms with a success message.
-
-### Step 5: Verify Overwrite Operation
-
-Read the file to confirm it was completely replaced.
-
-**Input:**
-```json
-{
-  "filename": "{{TC_009_TXT_FILENAME}}",
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-
-**Expectation:** The file contains only the new content (3 lines), all previous content is gone.
-
-### Step 6: Overwrite Markdown File
-
-Execute the `overwriteData` tool to replace markdown content.
-
-**Input:**
-```json
-{
-  "filename": "{{TC_009_MD_FILENAME}}",
-  "filedata": "# Updated README\n\nThis file has been completely rewritten.\n\n## New Structure\n- Point 1\n- Point 2",
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-
-**Expectation:** The markdown file is completely replaced with new structure.
-
-## Step 7: Verify Overwrite Operation
-
-Read the file to confirm it was completely replaced.
-
-**Input:**
-```json
-{
-  "filename": "{{TC_009_MD_FILENAME}}",
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-
-**Expectation:** The file contains only the new content (5 lines), all previous content is gone.
-
-### Step 8: Append to Non-Existent File
+### Step 5: Append to Non-Existent File
 
 Execute the `appendData` tool on a file that doesn't exist.
 
@@ -195,9 +130,9 @@ Execute the `appendData` tool on a file that doesn't exist.
 
 **Expectation:** The tool creates the file with the provided content (append on empty/new file).
 
-### Step 9: Verify Overwrite Operation
+### Step 6: Verify Append on Non-Existent File
 
-Read the file to confirm it was completely replaced.
+Read the file to confirm it was created with the appended content.
 
 **Input:**
 ```json
@@ -209,23 +144,7 @@ Read the file to confirm it was completely replaced.
 
 **Expectation:** The file contains one line `Creating new file via append`.
 
-
-### Step 10: Overwrite with Empty Content
-
-Execute the `overwriteData` tool with empty string.
-
-**Input:**
-```json
-{
-  "filename": "{{TC_009_TXT_FILENAME}}",
-  "filedata": "",
-  "bucket_name": "tc-009-append-overwrite"
-}
-```
-
-**Expectation:** The file is replaced with an empty file (0 bytes or minimal content).
-
-### Step 11: Cleanup — Delete Created Files (Bucket remains)
+### Step 7: Cleanup — Delete Created Files (Bucket remains)
 
 Delete the files created during setup from `tc-009-append-overwrite`. Buckets are intentionally left in place.
 
@@ -240,7 +159,7 @@ Inputs:
 ```
 ```json
 {
-  "filename": "{{TC_009_MD_FILENAME}}",
+  "filename": "{{TC_009_CSV_FILENAME}}",
   "bucket_name": "tc-009-append-overwrite"
 }
 ```

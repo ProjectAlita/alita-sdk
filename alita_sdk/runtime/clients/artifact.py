@@ -19,19 +19,40 @@ class Artifact:
         if not self.client.bucket_exists(bucket_name):
             self.client.create_bucket(bucket_name)
 
-    def create(self, artifact_name: str, artifact_data: Any, bucket_name: str = None, prompt: str = None) -> dict:
-        """Create a file. Returns dict with filepath or error."""
+    def create(self, artifact_name: str, artifact_data: Any, bucket_name: str = None, check_if_exists: bool = False) -> dict:
+        """Create or overwrite a file. Returns dict with filepath, file_existed (tri-state), operation_type, or error.
+
+        Args:
+            artifact_name: Target file name/key.
+            artifact_data: File content (str or bytes).
+            bucket_name: Bucket to write into (uses default if None).
+            check_if_exists: When True, performs a HEAD request before upload to determine whether
+                the file already existed. file_existed will be True or False.
+                When False (default), skips the HEAD request; file_existed will be None.
+        """
         try:
             if not bucket_name:
                 bucket_name = self.bucket_name
+
+            if check_if_exists:
+                head_result = self.client.head_artifact_s3(bucket_name, artifact_name)
+                file_existed: bool | None = head_result.get('exists', False)
+            else:
+                file_existed = None
+
+            operation_type = "modify" if file_existed else "create"
+
             result = self.client.upload_artifact_s3(bucket_name, artifact_name, artifact_data)
             if 'error' in result:
                 return {"error": result['error']}
+            sanitized_name = result['sanitized_name']
             return {
-                "message": f"File '{result['sanitized_name']}' created successfully",
+                "message": f"File '{sanitized_name}' {'updated' if file_existed else 'created'} successfully",
                 "filepath": result['filepath'],
-                "sanitized_name": result['sanitized_name'],
-                "was_sanitized": result['was_sanitized']
+                "sanitized_name": sanitized_name,
+                "was_sanitized": result['was_sanitized'],
+                "file_existed": file_existed,
+                "operation_type": operation_type,
             }
         except Exception as e:
             logger.error(f"Error: {e}")
@@ -204,36 +225,6 @@ class Artifact:
             "was_sanitized": result['was_sanitized']
         }
 
-    def overwrite(self, artifact_name: str, new_data: Any, bucket_name: str = None) -> dict:
-        """Overwrite file content. Returns dict with filepath, operation_type, or error.
-        
-        Uses HEAD check to determine if file exists (for operation_type in events).
-        """
-        try:
-            if not bucket_name:
-                bucket_name = self.bucket_name
-            
-            # Check if file exists to determine operation type
-            head_result = self.client.head_artifact_s3(bucket_name, artifact_name)
-            file_exists = head_result.get('exists', False)
-            operation_type = "modify" if file_exists else "create"
-
-            result = self.client.upload_artifact_s3(bucket_name, artifact_name, new_data)
-            if 'error' in result:
-                return {"error": result['error']}
-            sanitized_name = result['sanitized_name']
-            return {
-                "message": f"File '{sanitized_name}' {'overwritten' if file_exists else 'created'} successfully",
-                "filepath": result['filepath'],
-                "operation_type": operation_type,
-                "sanitized_name": sanitized_name,
-                "was_sanitized": result['was_sanitized'],
-                "file_existed": file_exists
-            }
-        except Exception as e:
-            logger.error(f"Error: {e}")
-            return {"error": str(e)}
-    
     def get_content_bytes(self,
             artifact_name: str,
             bucket_name: str = None):
