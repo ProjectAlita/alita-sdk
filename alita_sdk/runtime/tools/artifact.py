@@ -168,19 +168,26 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         # Apply edits
         updated_content = content
         applied_count = 0
+        failed_edits = []
         for old_text, new_text in edits:
-            updated_content, used_fallback = try_apply_edit(updated_content, old_text, new_text, file_path)
-            if updated_content != content or used_fallback:
+            updated_content, warning_message = try_apply_edit(updated_content, old_text, new_text, file_path)
+            if warning_message:
+                failed_edits.append(warning_message)
+            elif updated_content != content:
                 applied_count += 1
                 content = updated_content
 
         if applied_count == 0:
-            return f"No edits were applied to {file_path}. The OLD blocks may not match the file content."
+            details = "; ".join(failed_edits) if failed_edits else "The OLD blocks may not match the file content."
+            return f"No edits were applied to {file_path}. {details}"
 
         # Write updated content
         self._write_file(file_path, updated_content, branch=None, commit_message=commit_message, bucket_name=bucket_name)
 
-        return f"Successfully applied {applied_count} edit(s) to {file_path}"
+        result = f"Successfully applied {applied_count} edit(s) to {file_path}"
+        if failed_edits:
+            result += f". WARNING: {len(failed_edits)} edit(s) were NOT applied: {'; '.join(failed_edits)}"
+        return result
 
     def _get_file_operation_schemas(self):
         """

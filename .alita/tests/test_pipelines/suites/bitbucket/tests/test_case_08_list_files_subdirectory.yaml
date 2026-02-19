@@ -15,6 +15,9 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  branch:
+    type: str
+    value: main
   test_dir:
     type: str
     value: "test-files"
@@ -35,6 +38,7 @@ nodes:
     type: toolkit
     input:
       - test_dir
+      - branch
     input_mapping:
       path:
         type: variable
@@ -43,8 +47,8 @@ nodes:
         type: fixed
         value: true
       branch:
-        type: fixed
-        value: main
+        type: variable
+        value: branch
     output:
       - subdir_files
     structured_output: true
@@ -56,6 +60,7 @@ nodes:
     type: toolkit
     input:
       - test_dir
+      - branch
     input_mapping:
       path:
         type: variable
@@ -64,8 +69,8 @@ nodes:
         type: fixed
         value: false
       branch:
-        type: fixed
-        value: main
+        type: variable
+        value: branch
     output:
       - non_recursive_files
     structured_output: true

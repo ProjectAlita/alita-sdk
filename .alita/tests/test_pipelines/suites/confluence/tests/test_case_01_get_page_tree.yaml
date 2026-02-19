@@ -52,17 +52,18 @@ nodes:
           Perform the following checks:
 
           1. Confirm the tool executed successfully (the result is not empty or null).
-          2. Determine if the tool returned valid data (must be blank object)
+          2. Determine if the tool returned valid data (empty dictionary {{}} is VALID - means page has no children).
+          3. Parse the result to extract the page tree dictionary (after "was extracted: ").
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean (true if tool executed and returned valid data),
+            "test_passed": boolean (true if tool executed successfully - empty results are valid),
             "tool_executed": boolean (true if tool ran without errors),
-            "has_tree_data": boolean (true if result contains page tree structure),
-            "result_type": string (describe what was returned: "page_tree", "empty", "error", etc.),
-            "page_count": integer (number of pages in tree if detectable, 0 otherwise),
-            "failed_checks": [string] // list of failed assertions
+            "has_tree_data": boolean (true if result contains non-empty page tree, false if empty dict),
+            "result_type": string (describe what was returned: "page_tree_with_children", "page_tree_empty", "error", etc.),
+            "page_count": integer (number of pages in tree if detectable, 0 for empty dict),
+            "failed_checks": [string] // list of failed assertions (empty if test passed)
           }}
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
