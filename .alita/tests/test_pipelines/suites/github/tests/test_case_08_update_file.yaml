@@ -373,7 +373,7 @@ nodes:
             "def hello_world():" + nl +
             '    """Original docstring."""' + nl +
             '    print("Hello, World!")' + nl +
-            "    return True"
+            "    return True" + nl
         )
 
         new_content = (
