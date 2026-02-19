@@ -39,7 +39,8 @@ nodes:
         is_string = isinstance(response, str)
         has_code_block = "```" in response if is_string else False
         has_python_block = "```python" in response.lower() if is_string else False
-        newline_count = response.count('\n') if is_string else 0
+        nl = chr(10)
+        newline_count = response.count(nl) if is_string else 0
         has_newlines = newline_count >= 2
 
         # Check for function definition

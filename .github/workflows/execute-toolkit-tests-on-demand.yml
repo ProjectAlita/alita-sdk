@@ -26,11 +26,11 @@ on:
           - github
           - bitbucket
           - confluence
-          - figma
+          # - figma
           - github
           - gitlab
           - jira
-          - qtest
+          # - qtest
           - zephyr_essential
           - xray
           - state_retrieval
@@ -42,6 +42,11 @@ on:
         default: ''
       enable_parallel:
         description: 'Enable parallel test execution (uses value from pipeline.yaml when enabled)'
+        required: false
+        type: boolean
+        default: false
+      enable_bug_reporting:
+        description: 'Enable automatic bug report creation on GitHub (disable for testing)'
         required: false
         type: boolean
         default: false
@@ -101,4 +106,5 @@ jobs:
       test_cases_dir: ${{ matrix.test_cases_dir }}
       environment: ${{ github.event.inputs.environment }}
       enable_parallel: ${{ inputs.enable_parallel == true && 'true' || 'false' }}
+      enable_bug_reporting: ${{ inputs.enable_bug_reporting == true && 'true' || 'false' }}
     secrets: inherit

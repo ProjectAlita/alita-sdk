@@ -895,7 +895,8 @@ nodes:
         random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
         file_path = f"test-data/update-test/scenario5-not-found-{random_id}.txt"
 
-        original_content = f"This is the actual content of the file.\nCreated at {timestamp}"
+        original_content = f"""This is the actual content of the file.
+        Created at {timestamp}"""
 
         scenario_results = alita_state.get('scenario_results', {})
         scenario_results["old_not_found"]["status"] = "running"
@@ -1293,27 +1294,24 @@ nodes:
       value: |
         file_path = alita_state.get('file_path')
 
-        nl = chr(10)
-
         # Delete the entire marked section
-        old_content = (
-            "DELETE THIS SECTION START" + nl +
-            "This entire section should be removed" + nl +
-            "Including this line" + nl +
-            "DELETE THIS SECTION END"
-        )
+        old_content = """DELETE THIS SECTION START
+        This entire section should be removed
+        Including this line
+        DELETE THIS SECTION END"""
 
         # Replace with explicit newline (avoid empty NEW block parsing issues)
-        # NOTE: update_file file_query parser expects content lines between markers.
-        new_content = "\n"
+        # The blank line between NEW <<<< and >>>> NEW represents the newline character
+        file_query = f"""{file_path}
+        OLD <<<<
+        {old_content}
+        >>>> OLD
+        NEW <<<<
 
-        file_query = file_path + nl
-        file_query += "OLD <<<<" + nl
-        file_query += old_content + nl
-        file_query += ">>>> OLD" + nl
-        file_query += "NEW <<<<" + nl
-        file_query += new_content
-        file_query += ">>>> NEW"
+        >>>> NEW"""
+
+        nl = chr(10)
+        new_content = nl  # For verification purposes
 
         {"new_content": new_content, "file_query": file_query, "old_content": old_content}
     input:

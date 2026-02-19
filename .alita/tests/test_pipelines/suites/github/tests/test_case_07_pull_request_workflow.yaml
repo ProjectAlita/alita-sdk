@@ -57,11 +57,18 @@ nodes:
 
         # File to create (PR needs changes)
         file_path = f"test-data/pr-test-{timestamp}-{random_suffix}.txt"
-        file_contents = f"PR test file created at {timestamp}\nRandom ID: {random_suffix}\nThis file is created to have changes for PR."
+        file_contents = f"""PR test file created at {timestamp}
+        Random ID: {random_suffix}
+        This file is created to have changes for PR."""
 
         # PR details
         pr_title = f"[Test] GH10 PR Workflow - {timestamp}-{random_suffix}"
-        pr_body = f"Automated test PR created by GH10 pipeline.\n\nTimestamp: {timestamp}\nRandom ID: {random_suffix}\n\nThis PR will be closed automatically after validation."
+        pr_body = f"""Automated test PR created by GH10 pipeline.
+
+        Timestamp: {timestamp}
+        Random ID: {random_suffix}
+
+        This PR will be closed automatically after validation."""
 
         {"branch_name": branch_name, "file_path": file_path, "file_contents": file_contents, "pr_title": pr_title, "pr_body": pr_body}
     input:
