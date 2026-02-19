@@ -39,6 +39,11 @@ on:
         required: false
         type: string
         default: ''
+      exclude_suites:
+        description: 'Comma-separated suite names to exclude from execution (applies to "all" and "custom" modes)'
+        required: false
+        type: string
+        default: ''
       enable_parallel:
         description: 'Enable parallel test execution (uses value from pipeline.yaml when enabled)'
         required: false
@@ -64,6 +69,7 @@ jobs:
         run: |
           TEST_CASES_DIR="${{ github.event.inputs.test_cases_dir }}"
           CUSTOM_SUITES="${{ github.event.inputs.custom_suites }}"
+          EXCLUDE_SUITES="${{ github.event.inputs.exclude_suites }}"
           
           if [ "$TEST_CASES_DIR" = "all" ]; then
             # Parse workflow file to extract all test_cases_dir options (excluding 'all' and 'custom')
@@ -75,7 +81,14 @@ jobs:
             MATRIX=$(echo "$CUSTOM_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
           else
             # Create matrix with single directory
-            MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '[$dir]')
+            MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '["$dir"]')
+          fi
+          
+          # Apply exclusions (works for all modes)
+          if [ -n "$EXCLUDE_SUITES" ]; then
+            EXCLUDE_ARRAY=$(echo "$EXCLUDE_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+            MATRIX=$(echo "$MATRIX" | jq -c --argjson ex "$EXCLUDE_ARRAY" 'map(select(. as $s | $ex | index($s) | not))')
+            echo "Excluded suites: $EXCLUDE_ARRAY"
           fi
           
           HAS_TESTS=$(echo "$MATRIX" | jq 'length > 0')
