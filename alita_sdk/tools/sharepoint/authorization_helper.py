@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from urllib.parse import unquote, urlparse, quote
 import base64
+import logging
 
 import jwt
 import requests
@@ -488,15 +489,34 @@ class SharepointAuthorizationHelper:
             drives_response = requests.get(drives_url, headers=headers)
             drives = self._validate_response(drives_response, required_field="value", error_prefix="Drives request")
             
+            # Debug: Log all available drives and folder path
+            folder_path_clean = folder_path.strip('/')
+            logging.debug(f"[SharePoint Upload] Searching for drive matching folder_path: '{folder_path_clean}'")
+            logging.debug(f"[SharePoint Upload] Total drives available: {len(drives)}")
+            
+            # Track all drive paths for diagnostics
+            all_drive_paths = []
+            
             # Find matching drive for the folder path
-            for drive in drives:
-                drive_path = unquote(urlparse(drive.get("webUrl")).path).strip('/') if drive.get("webUrl") else ""
-                folder_path_clean = folder_path.strip('/')
+            for idx, drive in enumerate(drives):
+                drive_weburl = drive.get("webUrl") or ""
+                drive_path = unquote(urlparse(drive_weburl).path).strip('/') if drive_weburl else ""
+                drive_name = drive.get("name", "<unnamed>")
+                
+                all_drive_paths.append({"name": drive_name, "webUrl": drive_weburl, "path": drive_path})
+                
+                logging.debug(f"[SharePoint Upload] Drive {idx + 1}/{len(drives)}: name='{drive_name}'")
+                logging.debug(f"[SharePoint Upload]   webUrl: {drive_weburl}")
+                logging.debug(f"[SharePoint Upload]   extracted path: '{drive_path}'")
+                logging.debug(f"[SharePoint Upload]   folder_path_clean.startswith(drive_path): {folder_path_clean.startswith(drive_path)}")
                 
                 if folder_path_clean.startswith(drive_path):
                     drive_id = drive.get("id")
                     if not drive_id:
+                        logging.warning(f"[SharePoint Upload] Drive {idx + 1} matches path but has no ID, skipping")
                         continue
+                    
+                    logging.info(f"[SharePoint Upload] ✓ Found matching drive: '{drive_name}' (id: {drive_id})")
                     
                     # Calculate relative path within drive
                     relative_path = folder_path_clean.replace(drive_path, '').strip('/')
@@ -590,7 +610,16 @@ class SharepointAuthorizationHelper:
                         
                         raise RuntimeError("Chunked upload completed but no final response received")
             
-            raise RuntimeError(f"Could not find drive for folder path: {folder_path}")
+            # No matching drive found - provide diagnostic information
+            logging.error(f"[SharePoint Upload] ✗ No drive found matching folder_path: '{folder_path_clean}'")
+            logging.error(f"[SharePoint Upload] Available drive paths:")
+            for drive_info in all_drive_paths:
+                logging.error(f"  - {drive_info['name']}: path='{drive_info['path']}' (webUrl: {drive_info['webUrl']})")
+            
+            raise RuntimeError(
+                f"Could not find drive for folder path: {folder_path}. "
+                f"Available drives: {[d['name'] + ' (' + d['path'] + ')' for d in all_drive_paths]}"
+            )
             
         except Exception as e:
             raise RuntimeError(f"Error uploading file to library: {e}")

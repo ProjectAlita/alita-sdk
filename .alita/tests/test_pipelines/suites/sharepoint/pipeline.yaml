@@ -1,0 +1,82 @@
+name: sharepoint_toolkit
+description: |
+  SharePoint toolkit integration tests
+  
+  Test Structure:
+  - List Operations (SP01-SP08): Test SharePoint list management and CRUD operations
+  - File Operations (SP09-SP14): Test document library file operations
+  - Attachment Operations (SP15-SP16): Test list item attachment management
+
+env_mapping:
+  SHAREPOINT_CONFIG_PATH: ${SHAREPOINT_CONFIG_PATH:../../configs/sharepoint-config.json}
+  SHAREPOINT_SITE_URL: ${SHAREPOINT_SITE_URL:https://5clkvm.sharepoint.com/sites/ALITA}
+  SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
+  SHAREPOINT_CLIENT_SECRET: ${SHAREPOINT_CLIENT_SECRET}
+  TEST_LIST_NAME: ${TEST_LIST_NAME:DO_NOT_DELETE_AlitaTestList}
+  TEST_FOLDER: ${TEST_FOLDER:Shared Documents/DO_NOT_DELETE_AlitaTestFiles}
+  TEST_FILE_NAME: ${TEST_FILE_NAME:DO_NOT_DELETE_test-document.txt}
+
+setup:
+  - name: Setup SharePoint Configuration
+    type: configuration
+    config:
+      config_type: sharepoint
+      alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
+      data:
+        site_url: ${SHAREPOINT_SITE_URL:https://5clkvm.sharepoint.com/sites/ALITA}
+        client_id: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
+        client_secret: ${SHAREPOINT_CLIENT_SECRET}
+
+  - name: Create SharePoint Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ${SHAREPOINT_CONFIG_PATH:../../configs/sharepoint-config.json}
+      toolkit_type: sharepoint
+      overrides:
+        sharepoint_configuration:
+          private: true
+          alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
+      toolkit_name: ${SHAREPOINT_TOOLKIT_NAME:sharepoint-testing}
+    save_to_env:
+      - key: SHAREPOINT_TOOLKIT_ID
+        value: $.id
+      - key: SHAREPOINT_TOOLKIT_NAME
+        value: $.name
+
+composable_pipelines: []
+
+execution:
+  test_directory: tests
+  order:
+    - test_case_*.yaml
+
+  substitutions:
+    SHAREPOINT_TOOLKIT_ID: ${SHAREPOINT_TOOLKIT_ID}
+    SHAREPOINT_TOOLKIT_NAME: ${SHAREPOINT_TOOLKIT_NAME}
+    TEST_LIST_NAME: ${TEST_LIST_NAME:DO_NOT_DELETE_AlitaTestList}
+    TEST_FOLDER: ${TEST_FOLDER:Shared Documents/DO_NOT_DELETE_AlitaTestFiles}
+    TEST_FILE_NAME: ${TEST_FILE_NAME:DO_NOT_DELETE_test-document.txt}
+    TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+
+  settings:
+    timeout: 180
+    parallel: 5
+    stop_on_failure: false
+
+exclude_tests: []
+
+cleanup:
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "SP*"
+    continue_on_error: true
+
+  - name: Delete SharePoint Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${SHAREPOINT_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true

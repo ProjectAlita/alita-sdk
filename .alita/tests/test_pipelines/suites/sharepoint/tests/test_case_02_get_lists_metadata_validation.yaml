@@ -1,0 +1,85 @@
+name: "SP02 - get_lists: Metadata validation"
+priority: High
+description: |
+  Verify the SharePoint 'get_lists' tool returns comprehensive metadata for each list.
+  
+  Objective: Test metadata completeness and data type validation
+  
+  Expected Behavior:
+  - Each list object has valid Title (non-empty string)
+  - Each list object has unique Id (GUID format)
+  - Description can be empty but should be a string
+  - ItemCount is a non-negative integer
+  - BaseTemplate is a string or integer representing list type
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  lists_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_lists
+
+nodes:
+  - id: invoke_get_lists
+    type: toolkit
+    tool: get_lists
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - lists_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - lists_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the metadata quality from the 'get_lists' tool execution.
+
+          tool executed: get_lists
+          results: {lists_result}
+
+          expected behavior:
+          - each list has a non-empty title field
+          - each list has a unique id field (guid format)
+          - description field exists (empty string is valid - many sharepoint lists have no description)
+          - itemcount is a non-negative number
+          - basetemplate is a string or integer (e.g., 'documentLibrary', 'genericList', or numeric code)
+
+          evaluate:
+          1. are all required fields present in each list object?
+          2. do title fields contain actual values (not empty)?
+          3. are id values in guid format?
+          4. are itemcount values non-negative integers?
+          5. note: empty description fields are valid and should not cause test failure
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of metadata quality",
+            "error": "error details if validation failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

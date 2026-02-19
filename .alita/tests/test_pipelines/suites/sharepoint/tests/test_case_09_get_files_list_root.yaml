@@ -1,0 +1,113 @@
+name: "SP09 - get_files_list: List root files"
+priority: Critical
+description: |
+  Verify the SharePoint 'get_files_list' tool lists files in root document library.
+  
+  Objective: Test basic file listing in Shared Documents root
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns array of file objects
+  - Each file contains Name, Path, Created, Modified, Link fields
+  - Limit parameter is respected (default 100)
+  - System files/folders are excluded
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+    value: ""
+  limit_files:
+    type: int
+    value: 50
+  files_result:
+    type: dict
+  expected_fields:
+    type: list
+    value: ["Name", "Path", "Created", "Modified", "Link"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception"]
+  test_results:
+    type: dict
+
+entry_point: invoke_get_files_list
+
+nodes:
+  - id: invoke_get_files_list
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+    output:
+      - files_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - files_result
+      - limit_files
+      - expected_fields
+      - error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'get_files_list' tool execution.
+
+          tool executed: get_files_list
+          folder: root (empty string)
+          limit: {limit_files}
+          results: {files_result}
+          expected fields: {expected_fields}
+          error indicators: {error_indicators}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns array of file objects
+          - each file contains name, path, created, modified, and link fields
+          - number of files does not exceed the limit
+          - no system files or form folders in results
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any error indicators in the output?
+          3. is the result an array of file objects?
+          4. do files contain the expected fields?
+          5. is the file count within the specified limit?
+          6. are file paths valid server-relative paths?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

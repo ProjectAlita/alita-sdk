@@ -1,0 +1,110 @@
+name: "SP07 - create_list_item: Create item"
+priority: Critical
+description: |
+  Verify the SharePoint 'create_list_item' tool creates a new list item successfully.
+  
+  Objective: Test basic list item creation functionality
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns created item with id and fields
+  - Item id is a valid positive integer
+  - All provided fields are present in response
+  - No error messages in output
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: ${TEST_LIST_NAME}
+  item_fields:
+    type: dict
+    value:
+      Title: "Test Item Created by SDK"
+  created_item:
+    type: dict
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception"]
+  test_results:
+    type: dict
+
+entry_point: invoke_create_list_item
+
+nodes:
+  - id: invoke_create_list_item
+    type: toolkit
+    tool: create_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_fields
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      fields:
+        type: variable
+        value: item_fields
+    output:
+      - created_item
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - created_item
+      - list_title
+      - item_fields
+      - error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'create_list_item' tool execution.
+
+          tool executed: create_list_item
+          list title: {list_title}
+          provided fields: {item_fields}
+          results: {created_item}
+          error indicators: {error_indicators}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns object with id and fields properties
+          - id is a valid positive integer
+          - all provided fields are present in the response
+          - no error messages in output
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any error indicators in the output?
+          3. does the result contain an id field?
+          4. is the id a positive integer?
+          5. are the provided fields present in the response?
+          6. does the response include the title field value?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

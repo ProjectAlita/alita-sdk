@@ -1,0 +1,148 @@
+name: "SP14 - upload_file: Replace Existing"
+priority: High
+description: |
+  Verify the SharePoint 'upload_file' tool replaces an existing file when replace=True.
+  
+  Objective: Test file replacement functionality
+  
+  Expected Behavior:
+  - First upload creates the file successfully
+  - Second upload with replace=True overwrites the existing file
+  - No errors occur during replacement
+  - Final file contains updated content
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  folder_path:
+    type: str
+    value: ${TEST_FOLDER}
+  initial_content:
+    type: str
+    value: "Initial content for SP14 test - version 1"
+  updated_content:
+    type: str
+    value: "Updated content for SP14 test - version 2 - timestamp: ${TIMESTAMP}"
+  filename:
+    type: str
+    value: "SP14_test_replace.txt"
+  replace:
+    type: bool
+    value: true
+  first_upload_result:
+    type: dict
+  second_upload_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_first_upload
+
+nodes:
+  - id: invoke_first_upload
+    type: toolkit
+    tool: upload_file
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_path
+      - initial_content
+      - filename
+      - replace
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      filedata:
+        type: variable
+        value: initial_content
+      filename:
+        type: variable
+        value: filename
+      replace:
+        type: variable
+        value: replace
+    output:
+      - first_upload_result
+    structured_output: true
+    transition: invoke_second_upload
+
+  - id: invoke_second_upload
+    type: toolkit
+    tool: upload_file
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_path
+      - updated_content
+      - filename
+      - replace
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      filedata:
+        type: variable
+        value: updated_content
+      filename:
+        type: variable
+        value: filename
+      replace:
+        type: variable
+        value: replace
+    output:
+      - second_upload_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - first_upload_result
+      - second_upload_result
+      - filename
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the outputs from two consecutive 'upload_file' tool executions to verify file replacement.
+
+          tool executed: upload_file (twice)
+          filename: {filename}
+          first upload result: {first_upload_result}
+          second upload result: {second_upload_result}
+
+          expected behavior:
+          - both uploads execute successfully without errors
+          - first upload creates the file
+          - second upload replaces the existing file
+          - both results contain valid file metadata
+          - no errors during replacement operation
+
+          evaluate:
+          1. did both uploads execute successfully?
+          2. are there any error messages in either output?
+          3. do both results contain required fields (id, webUrl, path)?
+          4. does the second upload indicate successful replacement?
+          5. are both file paths identical?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

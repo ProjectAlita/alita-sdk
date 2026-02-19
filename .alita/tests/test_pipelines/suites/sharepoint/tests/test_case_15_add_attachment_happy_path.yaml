@@ -1,0 +1,151 @@
+name: "SP15 - add_attachment: Add to Item"
+priority: Critical
+description: |
+  Verify the SharePoint 'add_attachment_to_list_item' tool adds an attachment to a list item.
+  Self-contained test that creates its own list item before adding attachment.
+  
+  Objective: Test basic attachment functionality with filedata parameter
+  
+  Expected Behavior:
+  - List item is created successfully
+  - Attachment is added to the item
+  - Returns attachment metadata including id, name, and size
+  - All expected fields are present in response
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: ${TEST_LIST_NAME}
+  item_fields:
+    type: dict
+    value:
+      Title: "SP15 Test Item for Attachment - ${TIMESTAMP}"
+  filedata:
+    type: str
+    value: |
+      This is a test attachment file created by the SharePoint SDK test suite.
+      Test ID: SP15
+      Purpose: Validate add_attachment_to_list_item functionality
+      Timestamp: ${TIMESTAMP}
+  filename:
+    type: str
+    value: "SP15_test_attachment.txt"
+  replace:
+    type: bool
+    value: true
+  created_item:
+    type: dict
+  attachment_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: create_list_item
+
+nodes:
+  - id: create_list_item
+    type: toolkit
+    tool: create_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_fields
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      fields:
+        type: variable
+        value: item_fields
+    output:
+      - created_item
+    structured_output: true
+    transition: add_attachment
+
+  - id: add_attachment
+    type: toolkit
+    tool: add_attachment_to_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - created_item
+      - filedata
+      - filename
+      - replace
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      item_id:
+        type: fstring
+        value: "{created_item[id]}"
+      filedata:
+        type: variable
+        value: filedata
+      filename:
+        type: variable
+        value: filename
+      replace:
+        type: variable
+        value: replace
+    output:
+      - attachment_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - created_item
+      - attachment_result
+      - filename
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'add_attachment_to_list_item' tool execution.
+
+          tool executed: add_attachment_to_list_item
+          list item created: {created_item}
+          filename: {filename}
+          attachment results: {attachment_result}
+
+          expected behavior:
+          - list item was created successfully
+          - attachment was added to the item
+          - returns object with attachment metadata
+          - response contains id, name, and size fields
+          - no error messages in output
+
+          evaluate:
+          1. was the list item created successfully (has valid id)?
+          2. did the attachment add successfully?
+          3. are there any error messages in the output?
+          4. does the result contain required fields (id, name, size)?
+          5. does the name match the expected filename?
+          6. is the size a positive number?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
