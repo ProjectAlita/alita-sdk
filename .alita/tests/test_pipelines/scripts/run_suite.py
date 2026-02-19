@@ -75,6 +75,7 @@ from utils_common import (
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
+    apply_session_to_pipeline_name,
 )
 
 from logger import TestLogger
@@ -421,7 +422,8 @@ def get_pipelines_from_folder(
         project_id: int,
         folder_name: str,
         headers: dict,
-        pipeline_file: str | None = None
+        pipeline_file: str | None = None,
+        session_id: str | None = None,
 ) -> List[dict]:
     """Get pipelines that match the folder's test case names.
 
@@ -431,6 +433,7 @@ def get_pipelines_from_folder(
         folder_name: Name of the suite folder
         headers: Auth headers
         pipeline_file: Optional specific pipeline config file (e.g., 'pipeline_validation.yaml')
+        session_id: Session ID for parallel execution isolation (matches prefixed names)
     """
     # Read YAML files to get pipeline names
     # Go up from scripts/ to test_pipelines/ directory
@@ -479,7 +482,8 @@ def get_pipelines_from_folder(
             with open(yaml_file) as f:
                 data = yaml.safe_load(f)
                 if data and "name" in data:
-                    pipeline_names.append(data["name"])
+                    # Apply session prefix to match session-scoped pipelines on platform
+                    pipeline_names.append(apply_session_to_pipeline_name(data["name"], session_id))
         except Exception:
             continue
 
@@ -1025,8 +1029,13 @@ def main():
                              "Optional: set alita_sdk log level (debug|info|warning|error, default: error)")
     parser.add_argument("--wildcards", "-w", action="store_true",
                         help="Use shell-style wildcards in patterns (*, ?)")
+    parser.add_argument("--session-id", "--sid",
+                        help="Session ID for parallel execution isolation (matches session-scoped resources)")
 
     args = parser.parse_args()
+
+    # Load session ID from arg or environment
+    session_id = args.session_id or load_from_env("SESSION_ID")
 
     # Load environment file if provided
     if args.env_file:
@@ -1100,7 +1109,7 @@ def main():
             sys.exit(1)
 
         if args.folder:
-            pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file)
+            pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file, session_id=session_id)
             if not pipelines:
                 # Try to get by pattern matching folder name prefix
                 if folder_path.exists():
@@ -1117,7 +1126,8 @@ def main():
                             with open(yaml_file) as f:
                                 data = yaml.safe_load(f)
                                 if data and "name" in data:
-                                    names.append(data["name"])
+                                    # Apply session prefix to match session-scoped pipelines
+                                    names.append(apply_session_to_pipeline_name(data["name"], session_id))
                         except Exception:
                             continue
 

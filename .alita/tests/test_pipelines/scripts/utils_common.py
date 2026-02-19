@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Optional, Dict
 
@@ -21,6 +22,93 @@ import yaml
 
 # Setup logger
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Session ID Management (Parallel Execution Isolation)
+# =============================================================================
+
+
+def generate_session_id() -> str:
+    """Generate a unique short session ID for parallel execution isolation.
+
+    Returns an 8-character hex string (e.g., 'a1b2c3d4') that can be used to
+    scope resources (toolkits, pipelines, env files) to a specific test run,
+    preventing conflicts when multiple runs execute in parallel.
+    """
+    return uuid.uuid4().hex[:8]
+
+
+def get_session_pipeline_prefix(session_id: str | None) -> str:
+    """Get pipeline name prefix for a session.
+
+    Args:
+        session_id: Session ID string, or None for no prefix
+
+    Returns:
+        Prefix string like 'a1b2c3d4_' or empty string if no session
+    """
+    if session_id:
+        return f"{session_id}_"
+    return ""
+
+
+def apply_session_to_toolkit_name(toolkit_name: str, session_id: str | None) -> str:
+    """Apply session ID suffix to a toolkit name for isolation.
+
+    Args:
+        toolkit_name: Original toolkit name (e.g., 'testing-github')
+        session_id: Session ID string, or None for no change
+
+    Returns:
+        Scoped name like 'testing-github-a1b2c3d4' or unchanged if no session
+    """
+    if session_id:
+        return f"{toolkit_name}-{session_id}"
+    return toolkit_name
+
+
+def apply_session_to_pipeline_name(pipeline_name: str, session_id: str | None) -> str:
+    """Apply session ID prefix to a pipeline name for isolation.
+
+    Args:
+        pipeline_name: Original pipeline name (e.g., 'GH01 - List Branches')
+        session_id: Session ID string, or None for no change
+
+    Returns:
+        Scoped name like 'a1b2c3d4_GH01 - List Branches' or unchanged if no session
+    """
+    prefix = get_session_pipeline_prefix(session_id)
+    return f"{prefix}{pipeline_name}"
+
+
+def apply_session_to_cleanup_pattern(pattern: str, session_id: str | None) -> str:
+    """Apply session ID prefix to a cleanup pattern for scoped deletion.
+
+    Args:
+        pattern: Original cleanup pattern (e.g., 'GH*')
+        session_id: Session ID string, or None for no change
+
+    Returns:
+        Scoped pattern like 'a1b2c3d4_GH*' or unchanged if no session
+    """
+    prefix = get_session_pipeline_prefix(session_id)
+    return f"{prefix}{pattern}"
+
+
+def get_session_env_file(session_id: str | None, base_env_file: str = ".env") -> str:
+    """Get session-scoped env file path.
+
+    Args:
+        session_id: Session ID string, or None for default
+        base_env_file: Base env file name (default: '.env')
+
+    Returns:
+        Scoped path like '.env.a1b2c3d4' or unchanged if no session
+    """
+    if session_id:
+        return f"{base_env_file}.{session_id}"
+    return base_env_file
 
 
 # =============================================================================

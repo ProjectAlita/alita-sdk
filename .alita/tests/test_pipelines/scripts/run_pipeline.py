@@ -433,7 +433,18 @@ def process_pipeline_result(
                     try:
                         parsed_content = json.loads(content)
                         if isinstance(parsed_content, dict):
-                            # Check for error field
+                            # IMPORTANT: Check for explicit test_passed field first
+                            # For negative tests, LLM validation may include both 'error' (documenting expected error)
+                            # and 'test_passed': true (indicating test passed because expected error occurred)
+                            if "test_passed" in parsed_content:
+                                # Explicit test_passed takes precedence - this is the validation result
+                                test_passed = parsed_content["test_passed"]
+                                if logger:
+                                    logger.debug(f"Found explicit test_passed={test_passed} in chat history")
+                                # Don't break - continue checking for other messages
+                                continue
+                            
+                            # Check for error field (only if test_passed wasn't explicitly set above)
                             if "error" in parsed_content and parsed_content["error"]:
                                 error_msg = parsed_content["error"]
                                 

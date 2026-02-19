@@ -147,6 +147,11 @@ fi
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
+# Generate session ID for parallel execution isolation
+SESSION_ID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
+ENV_FILE=".env.${SESSION_ID}"
+SESSION_FLAG="--session-id $SESSION_ID"
+
 # Summary tracking
 declare -A SUITE_RESULTS
 declare -A SUITE_PASSED
@@ -221,7 +226,7 @@ run_suite() {
         if [ "$SHOW_OUTPUT" = true ]; then
             # Show output in real-time while also capturing to log
             # Set FORCE_COLOR=1 to preserve colors through tee pipe
-            if FORCE_COLOR=1 python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env 2>&1 | tee "$suite_output_dir/setup.log"; then
+            if FORCE_COLOR=1 python scripts/setup.py "$suite_spec" $VERBOSE --output-env "$ENV_FILE" $SESSION_FLAG 2>&1 | tee "$suite_output_dir/setup.log"; then
                 print_success "Setup completed"
             else
                 print_error "Setup failed - see $suite_output_dir/setup.log"
@@ -230,7 +235,7 @@ run_suite() {
             fi
         else
             # Capture to log only
-            if python scripts/setup.py "$suite_spec" $VERBOSE --output-env .env > "$suite_output_dir/setup.log" 2>&1; then
+            if python scripts/setup.py "$suite_spec" $VERBOSE --output-env "$ENV_FILE" $SESSION_FLAG > "$suite_output_dir/setup.log" 2>&1; then
                 print_success "Setup completed"
             else
                 print_error "Setup failed - see $suite_output_dir/setup.log"
@@ -248,7 +253,7 @@ run_suite() {
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE 2>&1 | tee "$suite_output_dir/seed.log"; then
+        if FORCE_COLOR=1 python scripts/seed_pipelines.py "$suite_spec" --env-file "$ENV_FILE" $VERBOSE $SESSION_FLAG 2>&1 | tee "$suite_output_dir/seed.log"; then
             print_success "Pipelines seeded"
         else
             print_error "Seeding failed - see $suite_output_dir/seed.log"
@@ -257,7 +262,7 @@ run_suite() {
         fi
     else
         # Capture to log only
-        if python scripts/seed_pipelines.py "$suite_spec" --env-file .env $VERBOSE > "$suite_output_dir/seed.log" 2>&1; then
+        if python scripts/seed_pipelines.py "$suite_spec" --env-file "$ENV_FILE" $VERBOSE $SESSION_FLAG > "$suite_output_dir/seed.log" 2>&1; then
             print_success "Pipelines seeded"
         else
             print_error "Seeding failed - see $suite_output_dir/seed.log"
@@ -288,7 +293,7 @@ run_suite() {
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE $PARALLEL_FLAG --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE $PARALLEL_FLAG --env-file "$ENV_FILE" --output-json "$results_file" $SESSION_FLAG 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -298,7 +303,7 @@ run_suite() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" $VERBOSE $PARALLEL_FLAG --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" $VERBOSE $PARALLEL_FLAG --env-file "$ENV_FILE" --output-json "$results_file" $SESSION_FLAG 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -344,7 +349,9 @@ run_suite() {
     # Step 4: Cleanup
     if [ "$SKIP_CLEANUP" = false ]; then
         print_step "Step 4/4: Cleaning up $suite_spec"
-        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/cleanup.log" 2>&1; then
+        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --env-file "$ENV_FILE" $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
+            # Clean up session-scoped env file
+            [ -f "$ENV_FILE" ] && rm -f "$ENV_FILE"
             print_success "Cleanup completed"
         else
             print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
@@ -424,7 +431,7 @@ run_suite_local() {
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
         # Set FORCE_COLOR=1 to preserve colors through tee pipe
-        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --local $PARALLEL_FLAG --output-json "$results_file" 2> >(tee "$suite_output_dir/run.log" >&2); then
+        if FORCE_COLOR=1 python scripts/run_suite.py "$suite_spec" $VERBOSE --local $PARALLEL_FLAG --output-json "$results_file" $SESSION_FLAG 2> >(tee "$suite_output_dir/run.log" >&2); then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -434,7 +441,7 @@ run_suite_local() {
         fi
     else
         # Capture verbose output to log file only
-        if python scripts/run_suite.py "$suite_spec" $VERBOSE --local $PARALLEL_FLAG --output-json "$results_file" 2> "$suite_output_dir/run.log"; then
+        if python scripts/run_suite.py "$suite_spec" $VERBOSE --local $PARALLEL_FLAG --output-json "$results_file" $SESSION_FLAG 2> "$suite_output_dir/run.log"; then
             print_success "Tests completed"
         else
             print_error "Test execution failed - see $suite_output_dir/run.log"
@@ -475,7 +482,7 @@ run_suite_local() {
     # Step 3: Cleanup (with --local flag)
     if [ "$SKIP_CLEANUP" = false ]; then
         print_step "Step 3/3: Cleaning up $suite_spec (local)"
-        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local > "$suite_output_dir/cleanup.log" 2>&1; then
+        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
             print_success "Cleanup completed"
         else
             print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
@@ -503,6 +510,7 @@ if [ "$LOCAL_MODE" = true ]; then
 else
     echo "Mode: REMOTE (backend API)"
 fi
+echo "Session ID: $SESSION_ID"
 echo ""
 
 # Initial cleanup - remove leftover resources from previous runs

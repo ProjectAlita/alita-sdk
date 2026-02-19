@@ -53,6 +53,7 @@ from utils_common import (
     load_base_url_from_env,
     load_project_id_from_env,
     write_env_vars_to_file,
+    apply_session_to_pipeline_name,
 )
 
 from logger import TestLogger
@@ -127,6 +128,7 @@ def seed_composable_pipelines(
     bearer_token: str = None,
     dry_run: bool = False,
     logger: TestLogger = None,
+    session_id: str = None,
 ) -> dict:
     """Seed composable pipelines defined in config.yaml.
 
@@ -145,6 +147,7 @@ def seed_composable_pipelines(
         bearer_token: Bearer token for auth
         dry_run: If True, don't actually create pipelines
         logger: Optional TestLogger instance
+        session_id: Session ID for parallel execution isolation (prefixes pipeline names)
 
     Returns:
         dict with seeded pipeline info and updated env_substitutions
@@ -193,6 +196,10 @@ def seed_composable_pipelines(
 
         # Parse and seed the pipeline
         pipeline_data = parse_pipeline_yaml(yaml_path, env_substitutions=cp_env)
+        
+        # Apply session ID prefix to composable pipeline name
+        pipeline_data["name"] = apply_session_to_pipeline_name(pipeline_data["name"], session_id)
+        
         if logger:
             logger.info(f"[composable] {pipeline_data['name']}")
 
@@ -553,6 +560,7 @@ def run(
     logger: TestLogger = None,
     local: bool = False,
     use_wildcards: bool = False,
+    session_id: str = None,
 ) -> dict:
     """Run seed pipelines programmatically.
     
@@ -570,6 +578,8 @@ def run(
         dry_run: Print payloads without sending requests
         logger: Optional TestLogger instance
         local: Local mode - prepare pipelines locally without backend calls
+        use_wildcards: Use shell-style wildcards in patterns
+        session_id: Session ID for parallel execution isolation (prefixes pipeline names)
     """
     # In local mode, skip backend calls (acts like dry_run for seeding)
     if local:
@@ -627,6 +637,14 @@ def run(
     timestamp = load_from_env("TIMESTAMP")
     if timestamp:
         env_substitutions["TIMESTAMP"] = timestamp
+
+    # Session ID for parallel execution isolation
+    # Load from arg, env, or leave as None
+    if not session_id:
+        session_id = load_from_env("SESSION_ID")
+    if session_id:
+        env_substitutions["SESSION_ID"] = session_id
+        generated_env_vars["SESSION_ID"] = session_id
 
     # Load pipeline config early to get execution.substitutions
     config = load_config(folder_path, pipeline_file)
@@ -720,6 +738,7 @@ def run(
             bearer_token=bearer_token,
             dry_run=dry_run,
             logger=logger,
+            session_id=session_id,
         )
         # Update env_substitutions with IDs from composable pipelines
         env_substitutions = composable_result["env_substitutions"]
@@ -734,6 +753,10 @@ def run(
 
     for yaml_file in yaml_files:
         pipeline_data = parse_pipeline_yaml(yaml_file, env_substitutions=env_substitutions)
+        
+        # Apply session ID prefix to pipeline name for parallel execution isolation
+        pipeline_data["name"] = apply_session_to_pipeline_name(pipeline_data["name"], session_id)
+        
         if logger:
             logger.info(f"[{yaml_file.name}] {pipeline_data['name']}")
 
@@ -862,6 +885,10 @@ def main():
         action="store_true",
         help="Use shell-style wildcards in patterns (*, ?)",
     )
+    parser.add_argument(
+        "--session-id", "--sid",
+        help="Session ID for parallel execution isolation (prefixes pipeline names)",
+    )
 
     args = parser.parse_args()
 
@@ -884,6 +911,7 @@ def main():
             logger=logger,
             local=args.local,
             use_wildcards=args.wildcards,
+            session_id=args.session_id,
         )
     except Exception as e:
         logger.error(f"{e}")

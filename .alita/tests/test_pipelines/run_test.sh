@@ -29,6 +29,7 @@ USE_WILDCARDS=false
 ENV_FILE=".env"
 TIMEOUT=""
 TIMEOUT_SET=false
+SESSION_ID=""
 
 print_usage() {
     echo "Usage: $0 [OPTIONS] <suite> [pattern1] [pattern2] ..."
@@ -49,6 +50,7 @@ print_usage() {
     echo "  --pattern PATTERN  Pattern to match (can be repeated)"
     echo "  --env-file FILE    Environment file to use (default: .env)"
     echo "  --timeout SEC      Execution timeout per pipeline (default: 120)"
+    echo "  --session-id ID    Session ID for parallel isolation (auto-generated with --all/--setup)"
     echo "  -v, --verbose      Enable verbose output"
     echo "  -h, --help         Show this help message"
     echo ""
@@ -140,6 +142,10 @@ while [[ $# -gt 0 ]]; do
             TIMEOUT_SET=true
             shift 2
             ;;
+        --session-id|--sid)
+            SESSION_ID="$2"
+            shift 2
+            ;;
         -v|--verbose)
             VERBOSE="--verbose"
             shift
@@ -225,6 +231,17 @@ if [ ! -f "$SUITE/pipeline.yaml" ]; then
     exit 1
 fi
 
+# Auto-generate session ID for parallel isolation when running full workflow
+# Session ID scopes all resources (toolkits, pipelines, env file) to this run
+if [ -z "$SESSION_ID" ] && { [ "$DO_SETUP" = true ] || [ "$DO_SEED" = true ] && [ "$DO_CLEANUP" = true ]; }; then
+    SESSION_ID=$(python -c "import uuid; print(uuid.uuid4().hex[:8])")
+fi
+
+# Scope env file to session if session ID is set
+if [ -n "$SESSION_ID" ] && [ "$ENV_FILE" = ".env" ]; then
+    ENV_FILE=".env.${SESSION_ID}"
+fi
+
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo -e "${BLUE}  Running Test: $PATTERN${NC}"
 echo -e "${BLUE}  Suite: $SUITE${NC}"
@@ -232,6 +249,10 @@ if [ "$LOCAL_MODE" = true ]; then
     echo -e "${BLUE}  Mode: LOCAL (no backend)${NC}"
 else
     echo -e "${BLUE}  Mode: REMOTE (backend API)${NC}"
+fi
+if [ -n "$SESSION_ID" ]; then
+    echo -e "${BLUE}  Session: $SESSION_ID${NC}"
+    echo -e "${BLUE}  Env File: $ENV_FILE${NC}"
 fi
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo ""
@@ -247,10 +268,16 @@ if [ "$USE_WILDCARDS" = true ]; then
     WILDCARDS_FLAG="--wildcards"
 fi
 
+# Build session ID flag
+SESSION_FLAG=""
+if [ -n "$SESSION_ID" ]; then
+    SESSION_FLAG="--session-id $SESSION_ID"
+fi
+
 # Step 1: Setup (optional)
 if [ "$DO_SETUP" = true ]; then
     echo -e "${YELLOW}▶ Running setup...${NC}"
-    if python scripts/setup.py "$SUITE" $VERBOSE --output-env "$ENV_FILE" $LOCAL_FLAG; then
+    if python scripts/setup.py "$SUITE" $VERBOSE --output-env "$ENV_FILE" $LOCAL_FLAG $SESSION_FLAG; then
         echo -e "${GREEN}✓ Setup completed${NC}"
     else
         echo -e "${RED}✗ Setup failed${NC}"
@@ -276,7 +303,7 @@ if [ "$DO_SEED" = true ]; then
         PATTERN_ARGS+=("--pattern" "$p")
     done
     
-    if python scripts/seed_pipelines.py "$SUITE" --env-file "$ENV_FILE" "${PATTERN_ARGS[@]}" $VERBOSE $LOCAL_FLAG $WILDCARDS_FLAG; then
+    if python scripts/seed_pipelines.py "$SUITE" --env-file "$ENV_FILE" "${PATTERN_ARGS[@]}" $VERBOSE $LOCAL_FLAG $WILDCARDS_FLAG $SESSION_FLAG; then
         echo -e "${GREEN}✓ Pipelines seeded${NC}"
     else
         echo -e "${RED}✗ Seeding failed${NC}"
@@ -316,7 +343,8 @@ if python scripts/run_suite.py "$SUITE" \
     --output-json "$RESULTS_FILE" \
     $VERBOSE \
     $LOCAL_FLAG \
-    $WILDCARDS_FLAG; then
+    $WILDCARDS_FLAG \
+    $SESSION_FLAG; then
 
     RUN_STATUS=0
     echo ""
@@ -331,7 +359,11 @@ fi
 if [ "$DO_CLEANUP" = true ]; then
     echo ""
     echo -e "${YELLOW}▶ Running cleanup...${NC}"
-    if python scripts/cleanup.py "$SUITE" --yes $VERBOSE $LOCAL_FLAG; then
+    if python scripts/cleanup.py "$SUITE" --yes $VERBOSE --env-file "$ENV_FILE" $LOCAL_FLAG $SESSION_FLAG; then
+        # Clean up session-scoped env file
+        if [ -n "$SESSION_ID" ] && [ -f "$ENV_FILE" ] && [[ "$ENV_FILE" == *".${SESSION_ID}" ]]; then
+            rm -f "$ENV_FILE"
+        fi
         echo -e "${GREEN}✓ Cleanup completed${NC}"
     else
         echo -e "${RED}✗ Cleanup failed (continuing)${NC}"

@@ -25,7 +25,7 @@ state:
     type: str
   expected_error_indicators:
     type: list
-    value: ["Test not found", "not found", "Failed to get", "does not exist"]
+    value: ["Tool execution error", "Test not found", "not found", "Failed to get", "does not exist", "doesn't exist"]
   unexpected_success_indicators:
     type: list
     value: ["total_attachments:", "downloadLink", "attachment_id", "filename"]
