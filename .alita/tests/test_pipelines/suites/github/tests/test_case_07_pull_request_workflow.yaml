@@ -18,6 +18,8 @@ state:
     type: str
   file_path:
     type: str
+  file_create_result:
+    type: str
   input:
     type: str
   messages:
@@ -122,7 +124,7 @@ nodes:
         type: variable
         value: file_path
     output:
-      - tool_result
+      - file_create_result
     structured_output: true
     tool: create_file
     toolkit_name: testing
