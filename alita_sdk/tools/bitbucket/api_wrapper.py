@@ -336,11 +336,30 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         Returns:
             str: A success or failure message
         """
+        # Check if file already exists to prevent silent overwrites
+        try:
+            self._read_file(file_path, branch)
+            # If read succeeds, file exists - raise error
+            raise ToolException(
+                f"File already exists: {file_path}. Use update_file() to modify existing files."
+            )
+        except ToolException as e:
+            # If the error is about file not found, proceed with creation
+            # Otherwise, re-raise (it could be our "already exists" error or another issue)
+            error_msg = str(e).lower()
+            if "already exists" in error_msg:
+                raise
+            # File doesn't exist (404 or similar) - proceed with creation
+            pass
+        except Exception:
+            # File doesn't exist or other read error - proceed with creation attempt
+            pass
+        
         try:
             self._bitbucket.create_file(file_path=file_path, file_contents=file_contents, branch=branch)
             return f"File has been created: {file_path}."
         except Exception as e:
-            return ToolException(f"File was not created due to error: {str(e)}")
+            raise ToolException(f"File was not created due to error: {str(e)}")
 
     def update_file(self, file_path: str, update_query: str, branch: str) -> ToolException | str:
         """
