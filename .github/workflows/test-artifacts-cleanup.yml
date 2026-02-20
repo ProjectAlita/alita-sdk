@@ -42,6 +42,11 @@ on:
         required: false
         type: boolean
         default: false
+      verbose:
+        description: "Enable verbose output"
+        required: false
+        type: boolean
+        default: true
 
 jobs:
   cleanup:
@@ -92,6 +97,9 @@ jobs:
 
           # dry-run
           if [ "${{ inputs.dry_run }}" = "true" ]; then FLAGS="$FLAGS --dry-run"; fi
+
+          # verbose
+          if [ "${{ inputs.verbose }}" = "true" ]; then FLAGS="$FLAGS -v"; fi
 
           echo "flags=$FLAGS" >> "$GITHUB_OUTPUT"
           echo "Cleanup flags: $FLAGS"

@@ -8,6 +8,11 @@ on:
         description: 'Test cases directory (e.g., github, ado, confluence)'
         required: true
         type: string
+      tests_to_run:
+        description: 'Specific tests to run (comma-separated IDs like GH01,GH02) or "all" for entire suite'
+        required: false
+        type: string
+        default: 'all'
       environment:
         description: 'Environment to run tests in (local or other)'
         required: false
@@ -57,10 +62,26 @@ jobs:
         run: |
           ENV_FLAG=$([ "${{ inputs.environment }}" = "local" ] && echo "--local" || echo "")
           PARALLEL_FLAG=$([ "${{ inputs.enable_parallel }}" = "true" ] && echo "--parallel" || echo "--no-parallel")
-          TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
+          TESTS_TO_RUN="${{ inputs.tests_to_run }}"
+          
+          # Determine which script to use based on tests_to_run
+          if [ "$TESTS_TO_RUN" = "all" ] || [ -z "$TESTS_TO_RUN" ]; then
+            # Run all tests in suite using run_all_suites.sh
+            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
+          else
+            # Run specific tests using run_test.sh
+            # Convert comma-separated list to space-separated for run_test.sh
+            TEST_PATTERNS=$(echo "$TESTS_TO_RUN" | tr ',' ' ')
+            if [ "${{ inputs.environment }}" = "local" ]; then
+              TEST_COMMAND="/app/.alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
+            else
+              TEST_COMMAND="/app/.alita/tests/test_pipelines/run_test.sh --all --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
+            fi
+          fi
           
           echo "DOCKER_COMMAND_COMPOSED=$TEST_COMMAND" >> $GITHUB_ENV  
-          echo "Running test command: $TEST_COMMAND"         
+          echo "Running test command: $TEST_COMMAND"
+          echo "::notice::Tests to run: $TESTS_TO_RUN"         
 
       - name: Uppercase the environment
         id: set-api-key
