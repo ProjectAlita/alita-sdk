@@ -94,6 +94,19 @@ jobs:
             echo "has-tests=false" >> $GITHUB_OUTPUT
             echo "matrix=[]" >> $GITHUB_OUTPUT
             echo "tests_config=[]" >> $GITHUB_OUTPUT
+            
+            # Write Step Summary for skipped tests
+            {
+              echo "# 🤖 PR Impact Analysis"
+              echo ""
+              echo "## ⏭️ Tests Skipped"
+              echo ""
+              echo "> **Reason:** $REASON"
+              echo ""
+              echo "---"
+              echo "*Analysis performed by AI agent on PR #${{ github.event.pull_request.number }}*"
+            } >> $GITHUB_STEP_SUMMARY
+            
             exit 0
           fi
           
@@ -114,6 +127,43 @@ jobs:
           echo "has-tests=true" >> $GITHUB_OUTPUT
           echo "tests_config=$TESTS_CONFIG" >> $GITHUB_OUTPUT
           echo "::notice::Generated matrix from agent: $SUITES"
+          
+          # Write Step Summary for tests to run
+          {
+            echo "# 🤖 PR Impact Analysis"
+            echo ""
+            echo "## 📊 Analysis Summary"
+            echo ""
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| **PR Number** | #${{ github.event.pull_request.number }} |"
+            echo "| **Run All Tests** | $([ "$RUN_ALL" = "true" ] && echo "✅ Yes" || echo "❌ No") |"
+            echo "| **Suites Affected** | $SUITE_COUNT |"
+            echo ""
+            echo "> **Analysis Reason:** $REASON"
+            echo ""
+            echo "## 🧪 Test Suites to Execute"
+            echo ""
+            echo "| Suite | Tests to Run | Mode |"
+            echo "|-------|--------------|------|"
+            
+            # Generate table rows for each suite
+            jq -r '.matrix[] | "| `\(.suite)` | \(if .run_all_tests then "All tests" else (.tests_to_run | if length == 0 then "All tests" else (map("`\(.)`") | join(", ")) end) end) | \(if .run_all_tests then "🔄 Full Suite" else "🎯 Targeted" end) |"' "$MATRIX_FILE"
+            
+            echo ""
+            echo "---"
+            echo ""
+            echo "<details>"
+            echo "<summary>📋 Raw Agent Output</summary>"
+            echo ""
+            echo '```json'
+            cat "$MATRIX_FILE"
+            echo '```'
+            echo "</details>"
+            echo ""
+            echo "---"
+            echo "*Analysis performed by AI agent on $(date -u '+%Y-%m-%d %H:%M:%S UTC')*"
+          } >> $GITHUB_STEP_SUMMARY
         env:
           GH_TOKEN: ${{ github.token }}
 
