@@ -1,0 +1,92 @@
+name: "SP12 - read_document: Non-existent file"
+priority: High
+description: |
+  Verify the SharePoint 'read_document' tool handles non-existent files gracefully.
+  
+  Objective: Test error handling for invalid file paths
+  
+  Expected Behavior:
+  - Tool executes and returns error information
+  - Error message indicates file not found
+  - Error message includes the file path
+  - No system crashes or unhandled exceptions
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: "/sites/YourSite/Shared Documents/NonExistent_File_12345.txt"
+  document_content:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_read_document
+
+nodes:
+  - id: invoke_read_document
+    type: toolkit
+    tool: read_document
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      path:
+        type: variable
+        value: file_path
+    output:
+      - document_content
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - document_content
+      - file_path
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'read_document' tool for error handling.
+
+          tool executed: read_document
+          file path: {file_path}
+          results: {document_content}
+
+          this test validates error handling for non-existent files.
+
+          perform the following checks:
+          1. confirm the tool executed (result is not empty or null).
+          2. examine any error message for specific meaning. valid error patterns for non-existent files include:
+             - file not found or does not exist
+             - invalid file path or path error
+             - cannot access file or file unavailable
+             - failed to load file or read error
+          3. determine if the error is about the non-existent file itself.
+             errors like "file not found" or "nonexistent_file_12345.txt does not exist" are expected and correct.
+             system errors unrelated to the file path are failures.
+
+          return a json object with:
+          {{
+            "test_passed": true/false (true if error occurred as expected),
+            "summary": "brief description of outcome",
+            "error": "error details if test failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

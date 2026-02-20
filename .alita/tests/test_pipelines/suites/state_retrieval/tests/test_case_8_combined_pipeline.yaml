@@ -57,7 +57,8 @@ nodes:
         query = alita_state.get('user_query', '')
 
         # Extract code from markdown
-        code_match = re.search(r'```python\n(.*?)\n```', output, re.DOTALL)
+        nl = chr(10)
+        code_match = re.search(r'```python' + nl + r'(.*?)' + nl + r'```', output, re.DOTALL)
         extracted_code = code_match.group(1) if code_match else None
 
         # Build comprehensive result

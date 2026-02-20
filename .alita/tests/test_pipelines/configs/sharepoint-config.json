@@ -1,0 +1,14 @@
+{
+  "type": "sharepoint",
+  "toolkit_name": "sharepoint-testing",
+  "selected_tools": [
+    "get_lists",
+    "read_list",
+    "get_list_columns",
+    "create_list_item",
+    "get_files_list",
+    "read_document",
+    "upload_file",
+    "add_attachment_to_list_item"
+  ]
+}

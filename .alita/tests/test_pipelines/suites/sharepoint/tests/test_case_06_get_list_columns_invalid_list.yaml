@@ -1,0 +1,92 @@
+name: "SP06 - get_list_columns: Invalid list"
+priority: High
+description: |
+  Verify the SharePoint 'get_list_columns' tool handles invalid list names gracefully.
+  
+  Objective: Test error handling for non-existent list
+  
+  Expected Behavior:
+  - Tool executes and returns error information
+  - Error message indicates list not found
+  - No system crashes or unhandled exceptions
+  - Error is clear and actionable
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: "InvalidList_99999_DoesNotExist"
+  columns_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_list_columns
+
+nodes:
+  - id: invoke_get_list_columns
+    type: toolkit
+    tool: get_list_columns
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+    output:
+      - columns_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - columns_result
+      - list_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'get_list_columns' tool for error handling.
+
+          tool executed: get_list_columns
+          list title: {list_title}
+          results: {columns_result}
+
+          this test validates error handling for invalid list names.
+
+          perform the following checks:
+          1. confirm the tool executed (result is not empty or null).
+          2. examine any error message for specific meaning. valid error patterns for invalid lists include:
+             - list not found or does not exist
+             - invalid list title or list name
+             - cannot access list or list unavailable
+             - list retrieval failed or list error
+          3. determine if the error is about the invalid list itself.
+             errors like "list 'invalidlist_99999_doesnotexist' not found" are expected and correct.
+             system errors unrelated to the list name are failures.
+
+          return a json object with:
+          {{
+            "test_passed": true/false (true if error occurred as expected),
+            "summary": "brief description of outcome",
+            "error": "error details if test failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

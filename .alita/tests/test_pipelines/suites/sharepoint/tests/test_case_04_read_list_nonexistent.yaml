@@ -1,0 +1,99 @@
+name: "SP04 - read_list: Non-existent list"
+priority: High
+description: |
+  Verify the SharePoint 'read_list' tool handles non-existent list gracefully.
+  
+  Objective: Test error handling for invalid list names
+  
+  Expected Behavior:
+  - Tool executes and returns error information
+  - Error message indicates list not found
+  - No system crashes or unhandled exceptions
+  - Error is clear and actionable
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: "NonExistentList_12345_DoesNotExist"
+  limit:
+    type: int
+    value: 10
+  list_items:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_read_list
+
+nodes:
+  - id: invoke_read_list
+    type: toolkit
+    tool: read_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - limit
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      limit:
+        type: variable
+        value: limit
+    output:
+      - list_items
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - list_items
+      - list_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'read_list' tool for error handling.
+
+          tool executed: read_list
+          list title: {list_title}
+          results: {list_items}
+
+          this test validates error handling for non-existent lists.
+
+          perform the following checks:
+          1. confirm the tool executed (result is not empty or null).
+          2. examine any error message for specific meaning. valid error patterns for non-existent lists include:
+             - list not found or does not exist
+             - list title is invalid or incorrect
+             - cannot retrieve list or access denied
+             - no such list or list name error
+          3. determine if the error is about the non-existent list itself.
+             errors like "list 'nonexistentlist_12345_doesnotexist' not found" are expected and correct.
+             system errors unrelated to the list name are failures.
+
+          return a json object with:
+          {{
+            "test_passed": true/false (true if error occurred as expected),
+            "summary": "brief description of outcome",
+            "error": "error details if test failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

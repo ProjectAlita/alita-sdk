@@ -1,0 +1,135 @@
+name: "SP03 - read_list: Read list items"
+priority: Critical
+description: |
+  Verify the SharePoint 'read_list' tool reads items from a specified list.
+  Self-contained test that creates a test item before reading.
+  
+  Objective: Test basic list reading functionality with default limit
+  
+  Expected Behavior:
+  - Test item is created successfully
+  - Tool executes successfully without errors
+  - Returns array of list item objects
+  - Each item contains properties/fields
+  - Respects limit parameter (default 1000)
+  - No error messages in output
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: ${TEST_LIST_NAME}
+  item_fields:
+    type: dict
+    value:
+      Title: "SP03 Test Item - ${TIMESTAMP}"
+  limit:
+    type: int
+    value: 100
+  created_item:
+    type: dict
+  list_items:
+    type: dict
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "not found", "permission"]
+  test_results:
+    type: dict
+
+entry_point: create_test_item
+
+nodes:
+  - id: create_test_item
+    type: toolkit
+    tool: create_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_fields
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      fields:
+        type: variable
+        value: item_fields
+    output:
+      - created_item
+    structured_output: true
+    transition: invoke_read_list
+
+  - id: invoke_read_list
+    type: toolkit
+    tool: read_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - limit
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      limit:
+        type: variable
+        value: limit
+    output:
+      - list_items
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - list_items
+      - list_title
+      - limit
+      - error_indicators
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'read_list' tool execution.
+
+          tool executed: read_list
+          list title: {list_title}
+          limit: {limit}
+          results: {list_items}
+          error indicators: {error_indicators}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns array of list item objects
+          - each item contains field/property data
+          - number of items does not exceed the limit
+          - no error messages in output
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any error indicators in the output?
+          3. is the result an array or list structure?
+          4. do items contain property data?
+          5. is the item count within the specified limit?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
