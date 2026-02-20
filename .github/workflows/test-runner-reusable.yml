@@ -382,11 +382,13 @@ jobs:
                 echo ""
                 echo "| # | Test | Root Cause | Fix Applied |"
                 echo "|---|------|------------|-------------|"
-                jq -r '.fixed[]?' ./fix_output.json | awk '{print NR " " $0}' | while read -r num item; do
+                COUNTER=1
+                jq -c '.fixed[]?' ./fix_output.json | while read -r item; do
                   TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                   ISSUE=$(echo "$item" | jq -r '.issue // "N/A"')
                   FIX=$(echo "$item" | jq -r '.fix // "N/A"')
-                  echo "| ${num} | ${TEST_IDS} | ${ISSUE} | ${FIX} |"
+                  echo "| ${COUNTER} | ${TEST_IDS} | ${ISSUE} | ${FIX} |"
+                  COUNTER=$((COUNTER + 1))
                 done
                 echo ""
               fi
@@ -402,10 +404,12 @@ jobs:
                 echo ""
                 echo "| # | Test | Reason |"
                 echo "|---|------|--------|"
-                jq -r '.flaky[]?' ./fix_output.json | awk '{print NR " " $0}' | while read -r num item; do
+                COUNTER=1
+                jq -c '.flaky[]?' ./fix_output.json | while read -r item; do
                   TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                   REASON=$(echo "$item" | jq -r '.reason // "N/A"')
-                  echo "| ${num} | ${TEST_IDS} | ${REASON} |"
+                  echo "| ${COUNTER} | ${TEST_IDS} | ${REASON} |"
+                  COUNTER=$((COUNTER + 1))
                 done
                 echo ""
               fi
