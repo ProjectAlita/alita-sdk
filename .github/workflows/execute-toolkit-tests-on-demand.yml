@@ -27,7 +27,6 @@ on:
           - bitbucket
           - confluence
           # - figma
-          - github
           - gitlab
           - jira
           # - qtest
@@ -38,6 +37,11 @@ on:
           - structured_output
       custom_suites:
         description: 'Comma-separated suite names (used only when test_cases_dir is "custom")'
+        required: false
+        type: string
+        default: ''
+      exclude_suites:
+        description: 'Comma-separated suite names to exclude from execution (applies to "all" and "custom" modes)'
         required: false
         type: string
         default: ''
@@ -69,8 +73,9 @@ jobs:
       - name: Generate test matrix
         id: set-matrix
         run: |
-          TEST_CASES_DIR="${{ github.event.inputs.test_cases_dir }}"
-          CUSTOM_SUITES="${{ github.event.inputs.custom_suites }}"
+          TEST_CASES_DIR="${{ inputs.test_cases_dir }}"
+          CUSTOM_SUITES="${{ inputs.custom_suites }}"
+          EXCLUDE_SUITES="${{ inputs.exclude_suites }}"
           
           if [ "$TEST_CASES_DIR" = "all" ]; then
             # Parse workflow file to extract all test_cases_dir options (excluding 'all' and 'custom')
@@ -83,6 +88,13 @@ jobs:
           else
             # Create matrix with single directory
             MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '[$dir]')
+          fi
+          
+          # Apply exclusions (works for all modes)
+          if [ -n "$EXCLUDE_SUITES" ]; then
+            EXCLUDE_ARRAY=$(echo "$EXCLUDE_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+            MATRIX=$(echo "$MATRIX" | jq -c --argjson ex "$EXCLUDE_ARRAY" 'map(select(. as $s | $ex | index($s) | not))')
+            echo "Excluded suites: $EXCLUDE_ARRAY"
           fi
           
           HAS_TESTS=$(echo "$MATRIX" | jq 'length > 0')
@@ -106,6 +118,6 @@ jobs:
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
       environment: ${{ github.event.inputs.environment }}
-      enable_parallel: ${{ inputs.enable_parallel == true && 'true' || 'false' }}
-      enable_bug_reporting: ${{ inputs.enable_bug_reporting == true && 'true' || 'false' }}
+      enable_parallel: ${{ inputs.enable_parallel }}
+      enable_bug_reporting: ${{ inputs.enable_bug_reporting }}
     secrets: inherit

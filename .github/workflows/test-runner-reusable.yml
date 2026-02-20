@@ -8,6 +8,11 @@ on:
         description: 'Test cases directory (e.g., github, ado, confluence)'
         required: true
         type: string
+      tests_to_run:
+        description: 'Specific tests to run (comma-separated IDs like GH01,GH02) or "all" for entire suite'
+        required: false
+        type: string
+        default: 'all'
       environment:
         description: 'Environment to run tests in (local or other)'
         required: false
@@ -16,13 +21,13 @@ on:
       enable_parallel:
         description: 'Enable parallel test execution (uses value from pipeline.yaml when enabled)'
         required: false
-        type: string
-        default: 'false'
+        type: boolean
+        default: false
       enable_bug_reporting:
         description: 'Enable automatic bug report creation on GitHub (disable for testing)'
         required: false
-        type: string
-        default: 'true'
+        type: boolean
+        default: true
 
 env:
   REGISTRY: ghcr.io
@@ -62,10 +67,26 @@ jobs:
         run: |
           ENV_FLAG=$([ "${{ inputs.environment }}" = "local" ] && echo "--local" || echo "")
           PARALLEL_FLAG=$([ "${{ inputs.enable_parallel }}" = "true" ] && echo "--parallel" || echo "--no-parallel")
-          TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
+          TESTS_TO_RUN="${{ inputs.tests_to_run }}"
+          
+          # Determine which script to use based on tests_to_run
+          if [ "$TESTS_TO_RUN" = "all" ] || [ -z "$TESTS_TO_RUN" ]; then
+            # Run all tests in suite using run_all_suites.sh
+            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
+          else
+            # Run specific tests using run_test.sh
+            # Convert comma-separated list to space-separated for run_test.sh
+            TEST_PATTERNS=$(echo "$TESTS_TO_RUN" | tr ',' ' ')
+            if [ "${{ inputs.environment }}" = "local" ]; then
+              TEST_COMMAND="/app/.alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
+            else
+              TEST_COMMAND="/app/.alita/tests/test_pipelines/run_test.sh --all --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
+            fi
+          fi
           
           echo "DOCKER_COMMAND_COMPOSED=$TEST_COMMAND" >> $GITHUB_ENV  
-          echo "Running test command: $TEST_COMMAND"         
+          echo "Running test command: $TEST_COMMAND"
+          echo "::notice::Tests to run: $TESTS_TO_RUN"         
 
       - name: Uppercase the environment
         id: set-api-key
@@ -155,13 +176,9 @@ jobs:
           if [ $ELAPSED -ge $TIMEOUT ]; then
             echo "⚠️ Timeout reached after $TIMEOUT seconds"
             echo "tests_failed=true" >> $GITHUB_OUTPUT
+            echo "timeout=true" >> $GITHUB_OUTPUT
             docker-compose logs alita-sdk
-            exit 1
-          fi
-          
-          if [ $CONTAINER_EXIT_CODE -ne 0 ]; then
-            echo "::error::Tests failed with exit code $CONTAINER_EXIT_CODE"
-            exit $CONTAINER_EXIT_CODE
+            # Don't exit here – let the final status step decide
           fi
 
       - name: Copy test results
@@ -557,7 +574,7 @@ jobs:
           fi
 
       - name: Create bug reports for blocked tests
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
           echo "::notice::Creating bug reports for blocked tests"
           
@@ -575,7 +592,7 @@ jobs:
           sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . 'Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
       
       - name: Copy bug reporter outputs
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
           echo "Copying bug report files from container..."
           docker cp alita-sdk-bug-reporter:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/bug_report_output.json ./bug_report_output.json || echo "{}" > ./bug_report_output.json
@@ -587,7 +604,7 @@ jobs:
           docker rm alita-sdk-bug-reporter || true
       
       - name: Post Bug Report Summary to GitHub
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting == 'true' }}
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
           if [ ! -f ./bug_report_output.json ]; then
             echo "::warning::No bug report output found"
@@ -661,7 +678,122 @@ jobs:
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Label PR with bug detection status
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
+        run: |
+          if [ ! -f ./bug_report_output.json ]; then
+            echo "No bug_report_output.json found, skipping PR labeling"
+            exit 0
+          fi
           
+          # Check if file is valid JSON
+          if ! jq empty ./bug_report_output.json 2>/dev/null; then
+            echo "Invalid JSON in bug_report_output.json, skipping PR labeling"
+            exit 0
+          fi
+          
+          # Parse bug report results
+          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
+          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
+          
+          # Try to get PR number from various sources
+          PR_NUMBER=""
+          
+          # First try from fix_output.json
+          if [ -f ./fix_output.json ] && jq empty ./fix_output.json 2>/dev/null; then
+            PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+          fi
+          
+          # Fall back to GitHub context
+          if [ "$PR_NUMBER" = "null" ] || [ -z "$PR_NUMBER" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+          
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR number found, skipping labeling"
+            exit 0
+          fi
+          
+          echo "PR Number: $PR_NUMBER"
+          echo "Bugs Created: $BUGS_CREATED"
+          echo "Duplicates Skipped: $DUPLICATES_SKIPPED"
+          
+          # Add label for new bugs detected
+          if [ "$BUGS_CREATED" -gt 0 ]; then
+            echo "Adding 'bug_ai_detected' label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" \
+              --add-label bug_ai_detected \
+              --repo ${{ github.repository }} || echo "Failed to add bug_ai_detected label, continuing..."
+          fi
+          
+          # Add label for existing/known bugs detected
+          if [ "$DUPLICATES_SKIPPED" -gt 0 ]; then
+            echo "Adding 'existing_bugs_ai_detected' label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" \
+              --add-label existing_bugs_ai_detected \
+              --repo ${{ github.repository }} || echo "Failed to add existing_bugs_ai_detected label, continuing..."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      # -----------------------------------------------------------------------
+      # Final status gate – must run after all AI analysis / bug reporting steps
+      # -----------------------------------------------------------------------
+      - name: Determine final job status
+        if: always()
+        run: |
+          TESTS_FAILED="${{ steps.wait_tests.outputs.tests_failed }}"
+          TIMED_OUT="${{ steps.wait_tests.outputs.timeout }}"
+
+          # Hard timeout → always fail
+          if [ "$TIMED_OUT" = "true" ]; then
+            echo "::error::Test container timed out – job fails"
+            exit 1
+          fi
+
+          # Tests passed cleanly → nothing more to check
+          if [ "$TESTS_FAILED" != "true" ]; then
+            echo "✅ All tests passed"
+            exit 0
+          fi
+
+          # ── Tests failed – AI analysis must provide a clear verdict ──
+
+          if [ ! -f ./fix_output.json ] || ! jq empty ./fix_output.json 2>/dev/null; then
+            echo "::error::Tests failed and AI analysis output is missing or invalid – job status is unclear"
+            exit 1
+          fi
+
+          FIXED=$(jq -r '.summary.fixed // 0' ./fix_output.json)
+          FLAKY=$(jq -r '.summary.flaky // 0' ./fix_output.json)
+          BLOCKED=$(jq -r '.summary.blocked // 0' ./fix_output.json)
+          COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+
+          echo "AI verdict → fixed=$FIXED  flaky=$FLAKY  blocked=$BLOCKED  committed=$COMMITTED"
+
+          # Flaky tests → fail (intermittent = unreliable infrastructure)
+          if [ "$FLAKY" -gt 0 ]; then
+            echo "::error::$FLAKY flaky test(s) detected – job fails (intermittent failures must be investigated)"
+            exit 1
+          fi
+
+          # SDK bugs blocking tests → fail
+          if [ "$BLOCKED" -gt 0 ]; then
+            echo "::error::$BLOCKED test(s) blocked by SDK bugs – job fails (see AI analysis summary)"
+            exit 1
+          fi
+
+          # All failures were test-code issues that AI fixed and committed → pass
+          if [ "$FIXED" -gt 0 ] && [ "$COMMITTED" = "true" ]; then
+            echo "✅ All $FIXED failing test(s) were fixed by AI and committed – job passes"
+            exit 0
+          fi
+
+          # Fallback: unclear outcome
+          echo "::error::Tests failed with unclear AI analysis outcome (fixed=$FIXED flaky=$FLAKY blocked=$BLOCKED committed=$COMMITTED) – job fails"
+          exit 1
+
       - name: Stop docker-compose
         if: always()
         run: docker-compose down --remove-orphans

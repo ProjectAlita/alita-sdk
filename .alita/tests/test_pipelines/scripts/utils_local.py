@@ -880,15 +880,33 @@ class IsolatedPipelineTestRunner:
                 output={"transformed_yaml": yaml_schema},
             )
 
-        # Check for pre-created tools
-        if not self._tools:
+        # Check if test uses toolkit nodes
+        uses_toolkit_nodes = False
+        try:
+            yaml_dict = yaml.safe_load(yaml_schema)
+            if isinstance(yaml_dict, dict) and 'nodes' in yaml_dict:
+                nodes = yaml_dict['nodes']
+                if isinstance(nodes, list):
+                    for node in nodes:
+                        if isinstance(node, dict) and node.get('type') == 'toolkit':
+                            uses_toolkit_nodes = True
+                            break
+        except Exception as e:
+            logger.debug(f"Could not parse YAML to check for toolkit nodes: {e}")
+        
+        # Only require tools if test uses toolkit nodes
+        if uses_toolkit_nodes and not self._tools:
             return PipelineResult(
                 success=False,
                 pipeline_id=0,
                 pipeline_name=path.stem,
                 error="No toolkit tools provided. Tools must be created by LocalSetupStrategy."
             )
-        logger.info(f"Using {len(self._tools)} toolkit tools")
+        
+        if self._tools:
+            logger.info(f"Using {len(self._tools)} toolkit tools")
+        else:
+            logger.info("No toolkit tools (test uses only code/llm nodes)")
 
         # Extract model from YAML if specified in nodes
         model_name = 'gpt-4o-2024-11-20'  # default

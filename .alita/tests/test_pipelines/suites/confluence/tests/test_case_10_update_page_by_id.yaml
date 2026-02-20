@@ -41,7 +41,7 @@ state:
     type: dict
   timestamp:
     type: str
-    value: 20260126-185712
+    value: ${TIMESTAMP}
   update_result:
     type: str
   updated_body:
