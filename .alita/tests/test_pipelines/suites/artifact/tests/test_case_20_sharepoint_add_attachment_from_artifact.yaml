@@ -1,39 +1,37 @@
-name: "SP15 - add_attachment: Add to Item"
+name: "ART18 - SharePoint Add Attachment from Artifact"
 priority: Critical
 description: |
-  Verify the SharePoint 'add_attachment_to_list_item' tool adds an attachment to a list item.
+  Verify the SharePoint 'add_attachment_to_list_item' tool adds an attachment from artifact storage to a list item.
   Self-contained test that creates its own list item before adding attachment.
   
-  Objective: Test basic attachment functionality with filedata parameter
+  Objective: Test attachment functionality with filepath parameter from artifact storage
   
   Expected Behavior:
   - List item is created successfully
-  - Attachment is added to the item
+  - Attachment is added to the item from artifact file
   - Returns attachment metadata including id, name, and size
   - All expected fields are present in response
 
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
     name: ${SHAREPOINT_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
 
 state:
   list_title:
     type: str
-    value: ${TEST_LIST_NAME}
+    value: ${SHAREPOINT_TEST_LIST}
   item_fields:
     type: dict
     value:
-      Title: "SP15 Test Item for Attachment - ${TIMESTAMP}"
-  filedata:
+      Title: "ART18 Test Item for Attachment - ${TIMESTAMP}"
+  filepath:
     type: str
-    value: |
-      This is a test attachment file created by the SharePoint SDK test suite.
-      Test ID: SP15
-      Purpose: Validate add_attachment_to_list_item functionality
-      Timestamp: ${TIMESTAMP}
+    value: ${SHAREPOINT_TEST_ARTIFACT_ID}
   filename:
     type: str
-    value: "SP15_test_attachment.txt"
+    value: "ART18_test_attachment.txt"
   replace:
     type: bool
     value: true
@@ -73,7 +71,7 @@ nodes:
     input:
       - list_title
       - created_item
-      - filedata
+      - filepath
       - filename
       - replace
     input_mapping:
@@ -83,9 +81,9 @@ nodes:
       item_id:
         type: fstring
         value: "{created_item[id]}"
-      filedata:
+      filepath:
         type: variable
-        value: filedata
+        value: filepath
       filename:
         type: variable
         value: filename

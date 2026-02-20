@@ -1,9 +1,9 @@
-name: "SP13 - upload_file: Upload New File"
+name: "ART16 - SharePoint Upload File from Artifact"
 priority: Critical
 description: |
-  Verify the SharePoint 'upload_file' tool uploads a new file successfully using inline content.
+  Verify the SharePoint 'upload_file' tool uploads a file from artifact storage.
   
-  Objective: Test basic file upload functionality with filedata parameter
+  Objective: Test file upload functionality with filepath parameter from artifact storage
   
   Expected Behavior:
   - Tool executes successfully without errors
@@ -15,21 +15,19 @@ description: |
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
     name: ${SHAREPOINT_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
 
 state:
   folder_path:
     type: str
-    value: ${TEST_FOLDER}
-  filedata:
+    value: ${SHAREPOINT_TEST_FOLDER}
+  filepath:
     type: str
-    value: |
-      This is a test file created by the SharePoint SDK test suite.
-      Test ID: SP13
-      Purpose: Validate upload_file functionality
-      Timestamp: ${TIMESTAMP}
+    value: ${SHAREPOINT_TEST_ARTIFACT_ID}
   filename:
     type: str
-    value: "SP13_test_upload.txt"
+    value: "ART16_test_upload.txt"
   replace:
     type: bool
     value: true
@@ -47,16 +45,16 @@ nodes:
     toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
     input:
       - folder_path
-      - filedata
+      - filepath
       - filename
       - replace
     input_mapping:
       folder_path:
         type: variable
         value: folder_path
-      filedata:
+      filepath:
         type: variable
-        value: filedata
+        value: filepath
       filename:
         type: variable
         value: filename

@@ -1,33 +1,33 @@
-name: "SP14 - upload_file: Replace Existing"
+name: "ART17 - SharePoint Upload File Replace"
 priority: High
 description: |
   Verify the SharePoint 'upload_file' tool replaces an existing file when replace=True.
+  Uses artifact file for both uploads to verify replacement functionality.
   
-  Objective: Test file replacement functionality
+  Objective: Test file replacement functionality with artifact storage
   
   Expected Behavior:
   - First upload creates the file successfully
   - Second upload with replace=True overwrites the existing file
   - No errors occur during replacement
-  - Final file contains updated content
+  - Both uploads complete successfully
 
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
     name: ${SHAREPOINT_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
 
 state:
   folder_path:
     type: str
-    value: ${TEST_FOLDER}
-  initial_content:
+    value: ${SHAREPOINT_TEST_FOLDER}
+  filepath:
     type: str
-    value: "Initial content for SP14 test - version 1"
-  updated_content:
-    type: str
-    value: "Updated content for SP14 test - version 2 - timestamp: ${TIMESTAMP}"
+    value: ${SHAREPOINT_TEST_ARTIFACT_ID}
   filename:
     type: str
-    value: "SP14_test_replace.txt"
+    value: "ART17_test_replace.txt"
   replace:
     type: bool
     value: true
@@ -47,16 +47,16 @@ nodes:
     toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
     input:
       - folder_path
-      - initial_content
+      - filepath
       - filename
       - replace
     input_mapping:
       folder_path:
         type: variable
         value: folder_path
-      filedata:
+      filepath:
         type: variable
-        value: initial_content
+        value: filepath
       filename:
         type: variable
         value: filename
@@ -74,16 +74,16 @@ nodes:
     toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
     input:
       - folder_path
-      - updated_content
+      - filepath
       - filename
       - replace
     input_mapping:
       folder_path:
         type: variable
         value: folder_path
-      filedata:
+      filepath:
         type: variable
-        value: updated_content
+        value: filepath
       filename:
         type: variable
         value: filename

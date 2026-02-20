@@ -1,39 +1,39 @@
-name: "SP16 - add_attachment: Replace Attachment"
+name: "ART19 - SharePoint Add Attachment Replace"
 priority: High
 description: |
   Verify the SharePoint 'add_attachment_to_list_item' tool replaces an existing attachment when replace=True.
-  Self-contained test that creates its own list item and adds attachment twice.
+  Self-contained test that creates its own list item and adds attachment from artifact twice.
+  Uses the same artifact file for both attachments to verify replacement functionality.
   
-  Objective: Test attachment replacement functionality
+  Objective: Test attachment replacement functionality with artifact storage
   
   Expected Behavior:
   - List item is created successfully
-  - First attachment is added successfully
+  - First attachment is added successfully from artifact
   - Second attachment with same filename replaces the first one
   - No errors occur during replacement
-  - Final attachment has updated content
+  - Both attachment operations complete successfully
 
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
     name: ${SHAREPOINT_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
 
 state:
   list_title:
     type: str
-    value: ${TEST_LIST_NAME}
+    value: ${SHAREPOINT_TEST_LIST}
   item_fields:
     type: dict
     value:
-      Title: "SP16 Test Item for Replace Attachment - ${TIMESTAMP}"
-  initial_content:
+      Title: "ART19 Test Item for Replace Attachment - ${TIMESTAMP}"
+  filepath:
     type: str
-    value: "Initial attachment content for SP16 test - version 1"
-  updated_content:
-    type: str
-    value: "Updated attachment content for SP16 test - version 2 - timestamp: ${TIMESTAMP}"
+    value: ${SHAREPOINT_TEST_ARTIFACT_ID}
   filename:
     type: str
-    value: "SP16_test_attachment.txt"
+    value: "ART19_test_attachment.txt"
   replace:
     type: bool
     value: true
@@ -75,7 +75,7 @@ nodes:
     input:
       - list_title
       - created_item
-      - initial_content
+      - filepath
       - filename
       - replace
     input_mapping:
@@ -85,9 +85,9 @@ nodes:
       item_id:
         type: fstring
         value: "{created_item[id]}"
-      filedata:
+      filepath:
         type: variable
-        value: initial_content
+        value: filepath
       filename:
         type: variable
         value: filename
@@ -106,7 +106,7 @@ nodes:
     input:
       - list_title
       - created_item
-      - updated_content
+      - filepath
       - filename
       - replace
     input_mapping:
@@ -116,9 +116,9 @@ nodes:
       item_id:
         type: fstring
         value: "{created_item[id]}"
-      filedata:
+      filepath:
         type: variable
-        value: updated_content
+        value: filepath
       filename:
         type: variable
         value: filename
