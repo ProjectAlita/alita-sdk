@@ -678,6 +678,64 @@ jobs:
               fi
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Label PR with bug detection status
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
+        run: |
+          if [ ! -f ./bug_report_output.json ]; then
+            echo "No bug_report_output.json found, skipping PR labeling"
+            exit 0
+          fi
+          
+          # Check if file is valid JSON
+          if ! jq empty ./bug_report_output.json 2>/dev/null; then
+            echo "Invalid JSON in bug_report_output.json, skipping PR labeling"
+            exit 0
+          fi
+          
+          # Parse bug report results
+          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
+          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
+          
+          # Try to get PR number from various sources
+          PR_NUMBER=""
+          
+          # First try from fix_output.json
+          if [ -f ./fix_output.json ] && jq empty ./fix_output.json 2>/dev/null; then
+            PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+          fi
+          
+          # Fall back to GitHub context
+          if [ "$PR_NUMBER" = "null" ] || [ -z "$PR_NUMBER" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          fi
+          
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR number found, skipping labeling"
+            exit 0
+          fi
+          
+          echo "PR Number: $PR_NUMBER"
+          echo "Bugs Created: $BUGS_CREATED"
+          echo "Duplicates Skipped: $DUPLICATES_SKIPPED"
+          
+          # Add label for new bugs detected
+          if [ "$BUGS_CREATED" -gt 0 ]; then
+            echo "Adding 'bug_ai_detected' label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" \
+              --add-label bug_ai_detected \
+              --repo ${{ github.repository }} || echo "Failed to add bug_ai_detected label, continuing..."
+          fi
+          
+          # Add label for existing/known bugs detected
+          if [ "$DUPLICATES_SKIPPED" -gt 0 ]; then
+            echo "Adding 'existing_bugs_ai_detected' label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" \
+              --add-label existing_bugs_ai_detected \
+              --repo ${{ github.repository }} || echo "Failed to add existing_bugs_ai_detected label, continuing..."
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           
       # -----------------------------------------------------------------------
       # Final status gate – must run after all AI analysis / bug reporting steps
