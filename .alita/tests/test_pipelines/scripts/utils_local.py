@@ -880,15 +880,11 @@ class IsolatedPipelineTestRunner:
                 output={"transformed_yaml": yaml_schema},
             )
 
-        # Check for pre-created tools
-        if not self._tools:
-            return PipelineResult(
-                success=False,
-                pipeline_id=0,
-                pipeline_name=path.stem,
-                error="No toolkit tools provided. Tools must be created by LocalSetupStrategy."
-            )
-        logger.info(f"Using {len(self._tools)} toolkit tools")
+        # Log toolkit tools availability (tests may not need them if only using LLM/code nodes)
+        if self._tools:
+            logger.info(f"Using {len(self._tools)} toolkit tools")
+        else:
+            logger.info("No toolkit tools available (test may only use LLM/code nodes)")
 
         # Extract model from YAML if specified in nodes
         model_name = 'gpt-4o-2024-11-20'  # default
