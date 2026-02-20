@@ -349,13 +349,25 @@ run_suite() {
     # Step 4: Cleanup
     if [ "$SKIP_CLEANUP" = false ]; then
         print_step "Step 4/4: Cleaning up $suite_spec"
-        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --env-file "$ENV_FILE" $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
-            # Clean up session-scoped env file
-            [ -f "$ENV_FILE" ] && rm -f "$ENV_FILE"
-            print_success "Cleanup completed"
+        if [ "$SHOW_OUTPUT" = true ]; then
+            # Show output in real-time while also capturing to log
+            if FORCE_COLOR=1 python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --env-file "$ENV_FILE" $SESSION_FLAG 2>&1 | tee "$suite_output_dir/cleanup.log"; then
+                # Clean up session-scoped env file
+                [ -f "$ENV_FILE" ] && rm -f "$ENV_FILE"
+                print_success "Cleanup completed"
+            else
+                print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+                # Don't fail suite on cleanup failure
+            fi
         else
-            print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
-            # Don't fail suite on cleanup failure
+            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --env-file "$ENV_FILE" $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
+                # Clean up session-scoped env file
+                [ -f "$ENV_FILE" ] && rm -f "$ENV_FILE"
+                print_success "Cleanup completed"
+            else
+                print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+                # Don't fail suite on cleanup failure
+            fi
         fi
     else
         echo "  Skipping cleanup"
@@ -482,11 +494,21 @@ run_suite_local() {
     # Step 3: Cleanup (with --local flag)
     if [ "$SKIP_CLEANUP" = false ]; then
         print_step "Step 3/3: Cleaning up $suite_spec (local)"
-        if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
-            print_success "Cleanup completed"
+        if [ "$SHOW_OUTPUT" = true ]; then
+            # Show output in real-time while also capturing to log
+            if FORCE_COLOR=1 python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local $SESSION_FLAG 2>&1 | tee "$suite_output_dir/cleanup.log"; then
+                print_success "Cleanup completed"
+            else
+                print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+                # Don't fail suite on cleanup failure
+            fi
         else
-            print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
-            # Don't fail suite on cleanup failure
+            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
+                print_success "Cleanup completed"
+            else
+                print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+                # Don't fail suite on cleanup failure
+            fi
         fi
     else
         echo "  Skipping cleanup"
@@ -538,11 +560,21 @@ if [ "$SKIP_INITIAL_CLEANUP" = false ]; then
             suite_output_dir="$OUTPUT_DIR/suites/$clean_log_name"
             mkdir -p "$suite_output_dir"
             
-            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/initial_cleanup.log" 2>&1; then
-                echo "    ✓ Cleaned"
+            if [ "$SHOW_OUTPUT" = true ]; then
+                # Show output in real-time while also capturing to log
+                if FORCE_COLOR=1 python scripts/cleanup.py "$suite_spec" --yes $VERBOSE 2>&1 | tee "$suite_output_dir/initial_cleanup.log"; then
+                    echo "    ✓ Cleaned"
+                else
+                    echo "    ⚠ Cleanup had issues (see $suite_output_dir/initial_cleanup.log)"
+                    CLEANUP_FAILED=true
+                fi
             else
-                echo "    ⚠ Cleanup had issues (see $suite_output_dir/initial_cleanup.log)"
-                CLEANUP_FAILED=true
+                if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE > "$suite_output_dir/initial_cleanup.log" 2>&1; then
+                    echo "    ✓ Cleaned"
+                else
+                    echo "    ⚠ Cleanup had issues (see $suite_output_dir/initial_cleanup.log)"
+                    CLEANUP_FAILED=true
+                fi
             fi
         fi
     done
