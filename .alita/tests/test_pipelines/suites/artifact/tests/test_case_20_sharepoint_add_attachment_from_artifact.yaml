@@ -62,6 +62,8 @@ nodes:
     output:
       - created_item
     structured_output: true
+    structured_output_dict:
+      created_item: "dict"
     transition: add_attachment
 
   - id: add_attachment
