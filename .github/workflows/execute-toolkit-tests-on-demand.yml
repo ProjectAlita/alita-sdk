@@ -26,7 +26,7 @@ on:
           - github
           - bitbucket
           - confluence
-          - figma
+          # - figma
           - gitlab
           - jira
           # - qtest
@@ -118,6 +118,6 @@ jobs:
     with:
       test_cases_dir: ${{ matrix.test_cases_dir }}
       environment: ${{ github.event.inputs.environment }}
-      enable_parallel: ${{ inputs.enable_parallel == true && 'true' || 'false' }}
-      enable_bug_reporting: ${{ inputs.enable_bug_reporting == true && 'true' || 'false' }}
+      enable_parallel: ${{ inputs.enable_parallel }}
+      enable_bug_reporting: ${{ inputs.enable_bug_reporting }}
     secrets: inherit

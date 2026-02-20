@@ -150,7 +150,7 @@ jobs:
     if: needs.configure-matrix.outputs.has-tests == 'true'
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 10
       matrix:
         data: ${{ fromJson(needs.compute-tests.outputs.test_matrix) }}
     uses: ./.github/workflows/test-runner-reusable.yml
@@ -158,4 +158,6 @@ jobs:
       test_cases_dir: ${{ matrix.data.suite }}
       tests_to_run: ${{ matrix.data.tests_to_run }}
       environment: local
+      enable_parallel: true
+      enable_bug_reporting: true
     secrets: inherit
