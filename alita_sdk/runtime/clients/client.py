@@ -679,12 +679,17 @@ class AlitaClient:
                     "streaming": False
                 }
             )
+
+            # Extract callbacks from context_settings for backend integration
+            callbacks = context_settings.get('callbacks', {})
+
             summarization_middleware = SummarizationMiddleware(
                 model=summarization_llm,
                 trigger=("tokens", max_context_tokens),
                 keep=("messages", preserve_recent),
                 summary_prompt=context_settings.get('summary_instructions'),
-                conversation_id=conversation_id
+                conversation_id=conversation_id,
+                callbacks=callbacks if callbacks else None
             )
             middleware_list.append(summarization_middleware)
         except Exception as e:

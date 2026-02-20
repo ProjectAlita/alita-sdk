@@ -8,7 +8,7 @@ when a threshold is reached, preserving recent messages.
 
 import uuid
 import logging
-from typing import Any, Dict, List, Optional, Callable, Union, Literal, cast
+from typing import Dict, List, Optional, Callable, Union, Literal, cast
 
 from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
@@ -138,6 +138,7 @@ class SummarizationMiddleware(Middleware):
         self.token_counter = token_counter
         self.summary_prompt = summary_prompt
         self.trim_tokens_to_summarize = trim_tokens_to_summarize
+        self.last_summarization_details = None
 
         logger.info(
             f"SummarizationMiddleware initialized "
@@ -230,16 +231,25 @@ class SummarizationMiddleware(Middleware):
             f"summarizing {len(messages_to_summarize)}, keeping {len(preserved_messages)}"
         )
 
+        # Fire 'started' callback before creating summary
+        self._fire_callback('started', {
+            'original_count': len(non_system_messages),
+            'to_summarize_count': len(messages_to_summarize),
+            'to_preserve_count': len(preserved_messages),
+        })
+
         summary = self._create_summary(messages_to_summarize)
         logger.info(f"Summarization result: {summary}")
         new_messages = self._build_new_messages(summary)
         logger.info(f"Generated {len(new_messages)} new messages")
 
-        self._fire_callback('summarized', {
+        self.last_summarization_details = {
             'original_count': len(non_system_messages),
             'summarized_count': len(messages_to_summarize),
             'preserved_count': len(preserved_messages),
-        })
+        }
+
+        self._fire_callback('summarized', self.last_summarization_details)
 
         # Use REMOVE_ALL_MESSAGES to clear checkpoint, then add system messages, summary, and preserved
         return {

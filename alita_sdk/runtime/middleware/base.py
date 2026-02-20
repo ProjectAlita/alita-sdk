@@ -307,6 +307,18 @@ class MiddlewareManager:
                 logger.error(f"Middleware {type(mw).__name__} after_model failed: {e}")
         return state
 
+    def get_summarization_details(self) -> Optional[Dict[str, Any]]:
+        """
+        Get summarization details if summarization occurred.
+
+        Returns:
+            Dict with original_count, summarized_count, preserved_count or None
+        """
+        for mw in self._middleware:
+            if hasattr(mw, 'last_summarization_details') and mw.last_summarization_details:
+                return mw.last_summarization_details
+        return None
+
     @staticmethod
     def _apply_message_updates(current_messages: list, updates: list) -> list:
         """
