@@ -133,7 +133,7 @@ nodes:
         value: test_branch_name
     output:
       - duplicate_create_result
-    structured_output: true
+    structured_output: false
     tool: create_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: verify_original_content
