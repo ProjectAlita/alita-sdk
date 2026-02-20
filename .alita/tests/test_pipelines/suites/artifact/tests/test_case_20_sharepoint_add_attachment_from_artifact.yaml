@@ -37,6 +37,8 @@ state:
     value: true
   created_item:
     type: dict
+  item_id:
+    type: str
   attachment_result:
     type: dict
   test_results:
@@ -64,6 +66,37 @@ nodes:
     structured_output: true
     structured_output_dict:
       created_item: "dict"
+    transition: extract_item_id
+
+  - id: extract_item_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+        
+        created_item = alita_state.get('created_item', {})
+        
+        # Extract id from created_item dict
+        item_id = None
+        if isinstance(created_item, dict):
+            item_id = created_item.get('id', '')
+        elif isinstance(created_item, str):
+            # If it's a string, try to parse as JSON
+            try:
+                item_dict = json.loads(created_item)
+                item_id = item_dict.get('id', '')
+            except:
+                # Try regex extraction as fallback
+                id_match = re.search(r'"id"\s*:\s*"?(\d+)"?', created_item)
+                if id_match:
+                    item_id = id_match.group(1)
+        
+        {"item_id": str(item_id) if item_id else ""}
+    output:
+      - item_id
+    structured_output: true
     transition: add_attachment
 
   - id: add_attachment
@@ -72,7 +105,7 @@ nodes:
     toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
     input:
       - list_title
-      - created_item
+      - item_id
       - filepath
       - filename
       - replace
@@ -81,8 +114,8 @@ nodes:
         type: variable
         value: list_title
       item_id:
-        type: fstring
-        value: "{created_item[id]}"
+        type: variable
+        value: item_id
       filepath:
         type: variable
         value: filepath
