@@ -20,7 +20,7 @@ env_mapping:
   sharepoint_client_id: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
   sharepoint_client_secret: ${SHAREPOINT_CLIENT_SECRET}
   sharepoint_test_list: ${SHAREPOINT_TEST_LIST:DO_NOT_DELETE_AlitaTestList}
-  sharepoint_test_folder: ${SHAREPOINT_TEST_FOLDER:'Shared Documents/DO_NOT_DELETE_AlitaTestFiles'}
+  sharepoint_test_folder: ${SHAREPOINT_TEST_FOLDER:'sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles'}
 
 # Setup steps executed before running tests
 # Steps are executed in order; if a step fails, setup stops
