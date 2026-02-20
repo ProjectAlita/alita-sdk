@@ -1,0 +1,120 @@
+name: "ART18 - SharePoint Upload File from Artifact"
+priority: Critical
+description: |
+  Verify the SharePoint 'upload_file' tool uploads a file from artifact storage.
+  
+  Objective: Test file upload functionality with filepath parameter from artifact storage
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - File is created in the document library
+  - Returns file metadata including id, webUrl, path, size, and mime_type
+  - File path matches the target folder
+  - All expected fields are present in response
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  folder_path:
+    type: str
+    value: ${SHAREPOINT_TEST_FOLDER}
+  filepath:
+    type: str
+    value: ${SHAREPOINT_TEST_ARTIFACT_ID}
+  filename:
+    type: str
+    value: "ART16_test_upload.txt"
+  replace:
+    type: bool
+    value: true
+  upload_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_upload_file
+
+nodes:
+  - id: invoke_upload_file
+    type: toolkit
+    tool: upload_file
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_path
+      - filepath
+      - filename
+      - replace
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      filepath:
+        type: variable
+        value: filepath
+      filename:
+        type: variable
+        value: filename
+      replace:
+        type: variable
+        value: replace
+    output:
+      - upload_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - upload_result
+      - filename
+      - folder_path
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the output from the 'upload_file' tool execution.
+
+          tool executed: upload_file
+          filename: {filename}
+          folder path: {folder_path}
+          results: {upload_result}
+
+          expected behavior:
+          - tool executes successfully without errors
+          - returns object with file metadata
+          - response contains id, webUrl, path, size, and mime_type fields
+          - path includes the target folder and filename
+          - no error messages in output
+
+          evaluate:
+          1. did the tool execute successfully?
+          2. are there any error messages in the output?
+          3. does the result contain required fields (id, webUrl, path, size, mime_type)?
+          4. is the id a valid value?
+          5. does the path contain the expected filename?
+          6. is the size a positive number?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -1,0 +1,222 @@
+name: "ART21 - SharePoint Add Attachment Replace"
+priority: High
+description: |
+  Verify the SharePoint 'add_attachment_to_list_item' tool replaces an existing attachment when replace=True.
+  Self-contained test that creates its own list item and adds attachment from artifact twice.
+  Uses the same artifact file for both attachments to verify replacement functionality.
+  
+  Objective: Test attachment replacement functionality with artifact storage
+  
+  Expected Behavior:
+  - List item is created successfully
+  - First attachment is added successfully from artifact
+  - Second attachment with same filename replaces the first one
+  - No errors occur during replacement
+  - Both attachment operations complete successfully
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  list_title:
+    type: str
+    value: ${SHAREPOINT_TEST_LIST}
+  item_fields:
+    type: dict
+    value:
+      Title: "ART19 Test Item for Replace Attachment - ${TIMESTAMP}"
+  filepath:
+    type: str
+    value: ${SHAREPOINT_TEST_ARTIFACT_ID}
+  filename:
+    type: str
+    value: "ART19_test_attachment.txt"
+  replace:
+    type: bool
+    value: true
+  created_item:
+    type: dict
+  item_id:
+    type: str
+  first_attachment_result:
+    type: dict
+  second_attachment_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: create_list_item
+
+nodes:
+  - id: create_list_item
+    type: toolkit
+    tool: create_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_fields
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      fields:
+        type: variable
+        value: item_fields
+    output:
+      - created_item
+    structured_output: true
+    structured_output_dict:
+      created_item: "dict"
+    transition: extract_item_id
+
+  - id: extract_item_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+        
+        created_item = alita_state.get('created_item', {})
+        
+        # Extract id from created_item dict
+        item_id = None
+        if isinstance(created_item, dict):
+            item_id = created_item.get('id', '')
+        elif isinstance(created_item, str):
+            # If it's a string, try to parse as JSON
+            try:
+                item_dict = json.loads(created_item)
+                item_id = item_dict.get('id', '')
+            except:
+                # Try regex extraction as fallback
+                id_match = re.search(r'"id"\s*:\s*"?(\d+)"?', created_item)
+                if id_match:
+                    item_id = id_match.group(1)
+        
+        {"item_id": str(item_id) if item_id else ""}
+    output:
+      - item_id
+    structured_output: true
+    transition: add_first_attachment
+
+  - id: add_first_attachment
+    type: toolkit
+    tool: add_attachment_to_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_id
+      - filepath
+      - filename
+      - replace
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      item_id:
+        type: variable
+        value: item_id
+      filepath:
+        type: variable
+        value: filepath
+      filename:
+        type: variable
+        value: filename
+      replace:
+        type: variable
+        value: replace
+    output:
+      - first_attachment_result
+    structured_output: true
+    transition: add_second_attachment
+
+  - id: add_second_attachment
+    type: toolkit
+    tool: add_attachment_to_list_item
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - list_title
+      - item_id
+      - filepath
+      - filename
+      - replace
+    input_mapping:
+      list_title:
+        type: variable
+        value: list_title
+      item_id:
+        type: variable
+        value: item_id
+      filepath:
+        type: variable
+        value: filepath
+      filename:
+        type: variable
+        value: filename
+      replace:
+        type: variable
+        value: replace
+    output:
+      - second_attachment_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - created_item
+      - first_attachment_result
+      - second_attachment_result
+      - filename
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the outputs from two consecutive 'add_attachment_to_list_item' tool executions to verify attachment replacement.
+
+          tool executed: add_attachment_to_list_item (twice on same item)
+          list item: {created_item}
+          filename: {filename}
+          first attachment result: {first_attachment_result}
+          second attachment result: {second_attachment_result}
+
+          expected behavior:
+          - list item was created successfully
+          - both attachments execute successfully without errors
+          - first attachment adds to the item
+          - second attachment replaces the first one
+          - both results contain valid attachment metadata
+          - no errors during replacement operation
+
+          evaluate:
+          1. was the list item created successfully (has valid id)?
+          2. did both attachment operations execute successfully?
+          3. are there any error messages in either output?
+          4. do both results contain required fields (id, name, size)?
+          5. do both attachments have the same filename?
+          6. does the second operation indicate successful replacement?
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
