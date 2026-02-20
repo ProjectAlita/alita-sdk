@@ -59,7 +59,7 @@ class Assistant:
         # Check both conversation-level internal_tools and agent version meta internal_tools
         conversation_internal_tools = data.get('internal_tools', [])
         version_internal_tools = data.get('meta', {}).get('internal_tools', [])
-        self.swarm_mode = 'swarm' in conversation_internal_tools or 'swarm' in version_internal_tools
+        self.swarm_mode = ('swarm' in conversation_internal_tools or 'swarm' in version_internal_tools) and app_type != 'pipeline'
 
         # Lazy tools mode - reduces token usage by using meta-tools instead of binding all tools
         # Can be set via: 1) constructor param, 2) data['meta']['lazy_tools_mode'], 3) default False
