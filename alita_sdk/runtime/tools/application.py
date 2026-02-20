@@ -72,6 +72,11 @@ class Application(BaseTool):
 
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         """Override default invoke to preserve all fields, not just args_schema"""
+        # Handle ToolCall format: {"name": ..., "args": {...}, "id": ..., "type": "tool_call"}
+        # LangGraph's ToolNode passes the full ToolCall dict directly; BaseTool.invoke() normally
+        # extracts input["args"] via _prep_run_args, but our override bypasses that logic.
+        if isinstance(input, dict) and input.get("type") == "tool_call":
+            input = input["args"]
         schema_values = self.args_schema(**input).model_dump() if self.args_schema else {}
         extras = {k: v for k, v in input.items() if k not in schema_values}
         all_kwargs = {**kwargs, **extras, **schema_values}
