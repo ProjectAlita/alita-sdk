@@ -1544,6 +1544,16 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 if key != 'output':
                     result_with_state[key] = value
 
+        # Extract summary if generated during this invocation
+        logger.info(f"Checking for summary: input keys={list(input.keys())}, result keys={list(result.keys())}")
+        summary_data = input.get('_middleware_summary') or result.get('_middleware_summary')
+        if summary_data:
+            # Store in result for extraction by indexer
+            result_with_state['_summary'] = summary_data
+            logger.info(f"✅ SDK: Summary extracted from middleware: {len(summary_data.get('text', ''))} chars, adding to result_with_state")
+        else:
+            logger.info("SDK: No _middleware_summary found in input or result")
+
         return result_with_state
 
     def _handle_graph_recursion_error(

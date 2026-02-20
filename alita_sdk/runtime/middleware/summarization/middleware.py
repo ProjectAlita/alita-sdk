@@ -8,7 +8,7 @@ when a threshold is reached, preserving recent messages.
 
 import uuid
 import logging
-from typing import Any, Dict, List, Optional, Callable, Union, Literal, cast
+from typing import Dict, List, Optional, Callable, Union, Literal, cast
 
 from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseChatModel
@@ -235,11 +235,20 @@ class SummarizationMiddleware(Middleware):
         new_messages = self._build_new_messages(summary)
         logger.info(f"Generated {len(new_messages)} new messages")
 
-        self._fire_callback('summarized', {
+        # Store summary for later extraction
+        from datetime import datetime, timezone
+        state['_middleware_summary'] = {
+            'text': summary,
             'original_count': len(non_system_messages),
             'summarized_count': len(messages_to_summarize),
             'preserved_count': len(preserved_messages),
-        })
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'summarized_from_index': 0,
+            'summarized_to_index': cutoff_index,
+        }
+
+        # Enhanced callback with summary data
+        self._fire_callback('summarized', state['_middleware_summary'])
 
         # Use REMOVE_ALL_MESSAGES to clear checkpoint, then add system messages, summary, and preserved
         return {

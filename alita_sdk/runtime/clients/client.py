@@ -671,11 +671,14 @@ class AlitaClient:
         try:
             from ..middleware.summarization import SummarizationMiddleware
 
+            summary_llm_settings = context_settings.get('summary_llm_settings', {})
+
+            # TODO use low-tier model for summarization
             summarization_llm = self.get_llm(
                 model_name=context_settings.get('model_name', 'gpt-5-mini'),
                 model_config={
-                    "max_tokens": 4000,
-                    "temperature": 0.7,
+                    "max_tokens": summary_llm_settings.get('max_tokens', 4000),
+                    "temperature": summary_llm_settings.get('temperature', 0.7),
                     "streaming": False
                 }
             )
