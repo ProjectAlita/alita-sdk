@@ -557,7 +557,7 @@ class LLMNode(BaseTool):
         # This may modify state by compressing old messages when token limits are approached
         # Returns both processed state (for LLM) and RemoveMessage ops (for checkpoint)
         middleware_updates = []
-        summarization_details = None
+        context_info = None
         if self.middleware_manager is not None and isinstance(state, dict):
             original_msg_count = len(state.get('messages', []))
             state, middleware_updates = self.middleware_manager.run_before_model(state, config or {})
@@ -568,8 +568,9 @@ class LLMNode(BaseTool):
                     f"[LLMNode] Summarization triggered: {original_msg_count} -> {new_msg_count} messages, "
                     f"RemoveMessage ops: {len(middleware_updates)}"
                 )
-            # Capture summarization details for response
-            summarization_details = self.middleware_manager.get_summarization_details()
+            # Capture context info (always available, includes summarization info when it occurs)
+            context_info = self.middleware_manager.get_context_info()
+            logger.info(f"[LLMNode] Got context_info: {context_info}")
 
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
@@ -680,7 +681,7 @@ class LLMNode(BaseTool):
                 if middleware_updates and 'messages' in result:
                     result['messages'] = list(middleware_updates) + result['messages']
 
-                return self._add_summarization_details(result, summarization_details)
+                return self._add_context_info(result, context_info)
             else:
                 # Handle regular completion
                 completion = llm_client.invoke(messages, config=config)
@@ -695,7 +696,7 @@ class LLMNode(BaseTool):
                     output_msgs = {"messages": self._strip_system_messages(new_messages, middleware_updates)}
                     if self.output_variables:
                         if self.output_variables[0] == 'messages':
-                            return self._add_summarization_details(output_msgs, summarization_details)
+                            return self._add_context_info(output_msgs, context_info)
                         # Extract content properly from thinking-enabled responses
                         if current_completion:
                             content_parts = self._extract_content_from_completion(current_completion)
@@ -727,7 +728,7 @@ class LLMNode(BaseTool):
                         else:
                             output_msgs[self.output_variables[0]] = None
 
-                    return self._add_summarization_details(output_msgs, summarization_details)
+                    return self._add_context_info(output_msgs, context_info)
                 else:
                     # Regular text response - handle both simple strings and thinking-enabled responses
                     content_parts = self._extract_content_from_completion(completion)
@@ -775,13 +776,13 @@ class LLMNode(BaseTool):
                         response_data = {json_output_vars[0]: text_content}
                         new_messages = messages + [ai_message]
                         response_data['messages'] = self._strip_system_messages(new_messages, middleware_updates)
-                        return self._add_summarization_details(response_data, summarization_details)
+                        return self._add_context_info(response_data, context_info)
 
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [ai_message]
-                    return self._add_summarization_details(
+                    return self._add_context_info(
                         {"messages": self._strip_system_messages(new_messages, middleware_updates)},
-                        summarization_details
+                        context_info
                     )
 
         except Exception as e:
@@ -793,9 +794,9 @@ class LLMNode(BaseTool):
 
             error_msg = f"Error: {e}"
             new_messages = messages + [AIMessage(content=error_msg)]
-            return self._add_summarization_details(
+            return self._add_context_info(
                 {"messages": self._strip_system_messages(new_messages, middleware_updates)},
-                summarization_details
+                context_info
             )
 
     @staticmethod
@@ -824,10 +825,10 @@ class LLMNode(BaseTool):
         return filtered
 
     @staticmethod
-    def _add_summarization_details(result: dict, summarization_details: Optional[dict]) -> dict:
-        """Add summarization details to result if summarization occurred."""
-        if summarization_details:
-            result['summarization_details'] = summarization_details
+    def _add_context_info(result: dict, context_info: Optional[dict] = None) -> dict:
+        """Add context info to result (includes summarization info when summarization occurred)."""
+        if context_info:
+            result['context_info'] = context_info
         return result
 
     def _run(self, *args, **kwargs):
