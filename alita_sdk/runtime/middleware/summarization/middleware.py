@@ -88,7 +88,7 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
         """
         Get messages since the last summarization.
 
-        Only counts messages that appear AFTER the most recent summary message.
+        Only counts messages that appear AFTER the most recent summary AND its preserved messages.
         This prevents counting already-summarized messages in subsequent turns.
 
         Returns:
@@ -101,7 +101,21 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
                 last_summary_index = i
 
         if last_summary_index >= 0:
-            return messages[last_summary_index + 1:], last_summary_index
+            # After finding the summary, skip the next N preserved messages
+            # The "keep" parameter tells us how many messages were preserved
+            keep_count = self.keep[1] if isinstance(self.keep, tuple) else 0
+
+            # Start counting from: summary_index + 1 (skip summary) + keep_count (skip preserved)
+            start_index = last_summary_index + 1 + keep_count
+            messages_to_count = messages[start_index:] if start_index < len(messages) else []
+
+            logger.info(
+                f"Found previous summary at index {last_summary_index}, "
+                f"skipping {keep_count} preserved messages, "
+                f"counting {len(messages_to_count)} NEW messages since then "
+                f"(total in checkpoint: {len(messages)})"
+            )
+            return messages_to_count, last_summary_index
         else:
             return messages, -1
 
