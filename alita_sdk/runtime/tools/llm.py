@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import logging
 from traceback import format_exc
 from typing import Any, Optional, List, Union, Literal, Dict, TYPE_CHECKING
@@ -16,6 +17,39 @@ if TYPE_CHECKING:
     from .lazy_tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def auto_after_model_hook(invoke_method):
+    """
+    Decorator that automatically runs after_model middleware hooks.
+
+    Ensures context_info reflects the final state (including LLM response)
+    that gets saved to the checkpoint.
+    """
+    @functools.wraps(invoke_method)
+    def wrapper(self, state, config=None, **kwargs):
+        # Store original state for after_model hooks
+        original_state = state.copy() if isinstance(state, dict) else state
+
+        # Call the original invoke method
+        result = invoke_method(self, state, config, **kwargs)
+
+        # Run after_model hooks if middleware manager exists
+        if self.middleware_manager is not None and isinstance(result, dict) and 'messages' in result:
+            # Create final state with LLM response for after_model hooks
+            final_state = {**original_state, 'messages': result['messages']}
+            self.middleware_manager.run_after_model(final_state, config or {})
+
+            # Capture context_info reflecting the final state
+            context_info = self.middleware_manager.get_context_info()
+            logger.info(f"[LLMNode] Final context_info (after model): {context_info}")
+
+            # Add/update context_info in result
+            result['context_info'] = context_info
+
+        return result
+
+    return wrapper
 
 
 # def _is_thinking_model(llm_client: Any) -> bool:
@@ -536,6 +570,7 @@ class LLMNode(BaseTool):
         # Format as numbered list
         return "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
 
+    @auto_after_model_hook
     def invoke(
             self,
             state: Union[str, dict],
@@ -568,9 +603,6 @@ class LLMNode(BaseTool):
                     f"[LLMNode] Summarization triggered: {original_msg_count} -> {new_msg_count} messages, "
                     f"RemoveMessage ops: {len(middleware_updates)}"
                 )
-            # Capture context info (always available, includes summarization info when it occurs)
-            context_info = self.middleware_manager.get_context_info()
-            logger.info(f"[LLMNode] Got context_info: {context_info}")
 
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)

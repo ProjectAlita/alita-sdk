@@ -201,6 +201,57 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
             ]
         }
 
+    def after_model(self, state: dict, config: dict) -> Optional[dict]:
+        """
+        Recalculate context info after model response.
+
+        This ensures context_info reflects the FINAL state (including new LLM response)
+        that will be saved to the checkpoint.
+        """
+        messages = state.get('messages', [])
+        if not messages:
+            self.last_context_info = {
+                'message_count': 0,
+                'token_count': 0,
+                'summarized': False,
+            }
+            return None
+
+        # Filter out system messages (same logic as before_model)
+        non_system_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+
+        if not non_system_messages:
+            self.last_context_info = {
+                'message_count': 0,
+                'token_count': 0,
+                'summarized': False,
+            }
+            return None
+
+        total_tokens = self.token_counter(non_system_messages)
+
+        # Preserve 'summarized' flag from before_model if it was set
+        was_summarized = self.last_context_info.get('summarized', False) if self.last_context_info else False
+
+        # Update context_info with FINAL state
+        updated_info = {
+            'message_count': len(non_system_messages),
+            'token_count': total_tokens,
+            'summarized': was_summarized,
+        }
+
+        # Preserve summarization stats if they exist
+        if was_summarized and self.last_context_info:
+            if 'summarized_count' in self.last_context_info:
+                updated_info['summarized_count'] = self.last_context_info['summarized_count']
+            if 'preserved_count' in self.last_context_info:
+                updated_info['preserved_count'] = self.last_context_info['preserved_count']
+
+        self.last_context_info = updated_info
+        logger.info(f"[SummarizationMiddleware] Updated context_info after model: {self.last_context_info}")
+
+        return None  # No state updates needed
+
     def _create_summary(self, messages_to_summarize: list) -> str:
         """Generate summary for the given messages.
 
