@@ -84,6 +84,27 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
         """No system prompt modification needed."""
         return ""
 
+    def _get_messages_since_last_summary(self, messages: list) -> tuple[list, int]:
+        """
+        Get messages since the last summarization.
+
+        Only counts messages that appear AFTER the most recent summary message.
+        This prevents counting already-summarized messages in subsequent turns.
+
+        Returns:
+            Tuple of (messages_since_summary, last_summary_index)
+            If no summary found, returns (all_messages, -1)
+        """
+        last_summary_index = -1
+        for i, msg in enumerate(messages):
+            if isinstance(msg, HumanMessage) and msg.additional_kwargs.get('lc_source') == 'summarization':
+                last_summary_index = i
+
+        if last_summary_index >= 0:
+            return messages[last_summary_index + 1:], last_summary_index
+        else:
+            return messages, -1
+
     def before_model(self, state: dict, config: dict) -> Optional[dict]:
         """
         Process messages before model invocation.
@@ -108,19 +129,19 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
 
         self._ensure_message_ids(messages)
 
-        # Filter old summaries to prevent accumulation (Alita-specific)
-        def is_old_summary(msg):
-            return (isinstance(msg, HumanMessage) and
-                    msg.additional_kwargs.get('lc_source') == 'summarization')
+        # Get only messages since the last summary for token counting
+        # This prevents counting already-summarized messages in subsequent turns
+        messages_since_summary, last_summary_idx = self._get_messages_since_last_summary(messages)
 
-        old_summaries = [m for m in messages if is_old_summary(m)]
-        messages = [m for m in messages if not is_old_summary(m)]
+        if last_summary_idx >= 0:
+            logger.info(
+                f"Found previous summary at index {last_summary_idx}, "
+                f"counting {len(messages_since_summary)} messages since then "
+                f"(total in checkpoint: {len(messages)})"
+            )
 
-        if old_summaries:
-            logger.info(f"Filtered out {len(old_summaries)} old summaries from checkpoint")
-
-        # Filter out system messages for processing
-        non_system_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        # Filter out system messages for token counting
+        non_system_messages = [m for m in messages_since_summary if not isinstance(m, SystemMessage)]
 
         if not non_system_messages:
             # Set context_info even when only system messages exist
@@ -210,8 +231,11 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
             }
             return None
 
-        # Filter out system messages (same logic as before_model)
-        non_system_messages = [m for m in messages if not isinstance(m, SystemMessage)]
+        # Get only messages since the last summary (same logic as before_model)
+        messages_since_summary, _ = self._get_messages_since_last_summary(messages)
+
+        # Filter out system messages
+        non_system_messages = [m for m in messages_since_summary if not isinstance(m, SystemMessage)]
 
         if not non_system_messages:
             self.last_context_info = {
