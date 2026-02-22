@@ -133,11 +133,6 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
 
         total_tokens = self.token_counter(non_system_messages)
 
-        logger.info(
-            f"[SummarizationMiddleware] Context check: {len(non_system_messages)} messages, "
-            f"~{total_tokens} tokens, trigger={self.trigger}"
-        )
-
         # Always track current context info (non-system messages/tokens only)
         self.last_context_info = {
             'message_count': len(non_system_messages),
@@ -146,7 +141,6 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
         }
 
         if not self._should_summarize(non_system_messages, total_tokens):
-            logger.info("[SummarizationMiddleware] Threshold not reached, skipping summarization")
             return None
 
         cutoff_index = self._determine_cutoff_index(non_system_messages)
@@ -187,7 +181,6 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
             'summarized_count': len(messages_to_summarize),
             'preserved_count': len(preserved_messages),
         }
-        logger.info(f"[SummarizationMiddleware] Set last_context_info (summarized): {self.last_context_info}")
 
         # Fire 'summarized' callback (Alita-specific)
         self._fire_callback('summarized', self.last_context_info)
@@ -248,7 +241,6 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
                 updated_info['preserved_count'] = self.last_context_info['preserved_count']
 
         self.last_context_info = updated_info
-        logger.info(f"[SummarizationMiddleware] Updated context_info after model: {self.last_context_info}")
 
         return None  # No state updates needed
 
@@ -287,20 +279,16 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
         if not formatted_messages.strip():
             return "No conversation content to summarize."
 
-        logger.info(f"Formatted messages for summary ({len(formatted_messages)} chars): {formatted_messages[:200]}...")
-
         try:
-            logger.info(f"Summary prompt template ({len(self.summary_prompt)} chars): {self.summary_prompt[:100]}...")
-            logger.info(f"Has {{messages}} placeholder: {'{messages}' in self.summary_prompt}")
             if '{messages}' in self.summary_prompt:
                 prompt_content = self.summary_prompt.format(messages=formatted_messages).rstrip()
             else:
                 # Template doesn't have placeholder, append messages
                 prompt_content = f"{self.summary_prompt}\n\n<messages>\n{formatted_messages}\n</messages>"
-            logger.info(f"Summary prompt length: {len(prompt_content)} chars, model: {type(self.model).__name__}")
+
             # Wrap in HumanMessage for model compatibility
             response = self.model.invoke([HumanMessage(content=prompt_content)])
-            logger.info(f"Summary response type: {type(response)}, has text: {hasattr(response, 'text')}, has content: {hasattr(response, 'content')}")
+
             # Handle both .text and .content
             if hasattr(response, 'content'):
                 content = response.content
@@ -309,7 +297,6 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware, Middleware):
                 result = response.text.strip()
             else:
                 result = str(response)
-            logger.info(f"Summary result ({len(result)} chars): {result[:200]}...")
             return result
         except Exception as e:
             logger.error(f"Error generating summary: {e}")

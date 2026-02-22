@@ -42,7 +42,6 @@ def auto_after_model_hook(invoke_method):
 
             # Capture context_info reflecting the final state
             context_info = self.middleware_manager.get_context_info()
-            logger.info(f"[LLMNode] Final context_info (after model): {context_info}")
 
             # Add/update context_info in result
             result['context_info'] = context_info

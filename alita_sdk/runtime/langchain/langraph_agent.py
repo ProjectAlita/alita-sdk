@@ -1539,22 +1539,10 @@ class LangGraphAgentRunnable(CompiledStateGraph):
 
         # Include all state values in the result
         if hasattr(config_state, 'values') and config_state.values:
-            logger.info(f"[LangGraphAgentRunnable] State values keys: {list(config_state.values.keys())}")
-            # Check if summarization_details is in state
-            if 'summarization_details' in config_state.values:
-                logger.info(f"[LangGraphAgentRunnable] summarization_details in state: {config_state.values.get('summarization_details')}")
-            else:
-                logger.info("[LangGraphAgentRunnable] summarization_details NOT in state values")
             # except of key = 'output' which is already included
             for key, value in config_state.values.items():
                 if key != 'output':
                     result_with_state[key] = value
-
-        # Log if summarization_details is present
-        if 'summarization_details' in result_with_state:
-            logger.info(f"[LangGraphAgentRunnable] Final result has summarization_details: {result_with_state.get('summarization_details')}")
-        else:
-            logger.info("[LangGraphAgentRunnable] No summarization_details in final result")
 
         return result_with_state
 
