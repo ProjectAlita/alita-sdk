@@ -647,7 +647,11 @@ class StateModifierNode(Runnable):
             if var in state:
                 # Empty the variable based on its type
                 if isinstance(state[var], list):
-                    result[var] = []
+                    result[var] = [
+                        RemoveMessage(id=msg.id)
+                        for msg in state[var]
+                        if hasattr(msg, 'id') and msg.id
+                    ] if var == 'messages' else []
                 elif isinstance(state[var], dict):
                     result[var] = {}
                 elif isinstance(state[var], str):
