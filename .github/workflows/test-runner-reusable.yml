@@ -247,11 +247,26 @@ jobs:
         if: always()
         run: |
           docker-compose logs alita-sdk > docker-logs.txt 2>&1 || echo "Failed to retrieve logs" > docker-logs.txt
-      
+
+      - name: Download PR change context
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-change-context
+          path: .alita/tests/test_pipelines/
+        continue-on-error: true
+
       - name: Do AI analysis of logs
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
           echo "::notice::Running AI analysis of test results"
+          
+          # Check if PR change context is available
+          if [ -f ".alita/tests/test_pipelines/pr_change_context.json" ]; then
+            echo "::notice::PR change context available - test fixer will distinguish PR regressions from pre-existing bugs"
+          else
+            echo "::notice::No PR change context - all SDK bugs will be treated as pre-existing"
+          fi
           
           # Re-export all environment variables
           export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
@@ -573,6 +588,48 @@ jobs:
             echo "bug_report_needed=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Report PR regressions (bugs in new code)
+        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
+        id: check_pr_regressions
+        run: |
+          if [ ! -f ./fix_output.json ]; then
+            echo "pr_regressions_found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check for PR regressions (bugs introduced by the PR's new code)
+          PR_REGRESSION_COUNT=$(jq -r '.pr_regressions // [] | length' ./fix_output.json)
+          echo "PR regressions count: $PR_REGRESSION_COUNT"
+
+          if [ "$PR_REGRESSION_COUNT" -gt 0 ]; then
+            echo "::warning::Found $PR_REGRESSION_COUNT test failure(s) caused by NEW code in this PR"
+            echo "pr_regressions_found=true" >> $GITHUB_OUTPUT
+
+            # Write PR Regression Summary to GitHub Step Summary
+            if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+              {
+                echo ""
+                echo "## ⚠️ PR Regressions Detected"
+                echo ""
+                echo "> [!WARNING]"
+                echo "> The following test failures are caused by **new code introduced in this PR**."
+                echo "> These are NOT pre-existing bugs — they were introduced by your changes."
+                echo "> Please fix them before merging."
+                echo ""
+                echo "| Test(s) | Component | Method(s) | Description |"
+                echo "|---------|-----------|-----------|-------------|"
+                jq -r '.pr_regressions[]? | "| \((.test_ids // []) | join(", ")) | `\(.sdk_component // "N/A")` | \((.affected_methods // []) | join(", ")) | \(.bug_description // "N/A") |"' ./fix_output.json
+                echo ""
+                echo "### Recommendations"
+                echo ""
+                jq -r '.pr_regressions[]? | "- **\((.test_ids // []) | join(", "))**: \(.recommendation // "Fix the regression in your PR code")"' ./fix_output.json
+                echo ""
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+          else
+            echo "pr_regressions_found=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create bug reports for blocked tests
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
@@ -620,6 +677,7 @@ jobs:
           # Parse bug report results
           BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
           DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
+          PR_REGRESSIONS_SKIPPED=$(jq -r '.summary.pr_regressions_skipped // 0' ./bug_report_output.json)
           FAILED=$(jq -r '.summary.failed // 0' ./bug_report_output.json)
           TOTAL=$(jq -r '.summary.total_analyzed // 0' ./bug_report_output.json)
           
@@ -634,6 +692,7 @@ jobs:
               echo "| Total Analyzed | **${TOTAL}** |"
               echo "| ✅ Bugs Created | ${BUGS_CREATED} |"
               echo "| ⏭️ Duplicates Skipped | ${DUPLICATES_SKIPPED} |"
+              echo "| 🔄 PR Regressions (not reported) | ${PR_REGRESSIONS_SKIPPED} |"
               echo "| ❌ Failed to Report | ${FAILED} |"
               echo ""
               

@@ -69,7 +69,7 @@ def _paginate(url: str, token: str, batch: int = 200, extra_params: dict = None)
     return rows
 
 
-def _run_cleanup(label: str, items: list, delete_url_fn, token: str, dry_run: bool) -> dict:
+def _run_cleanup(label: str, items: list, delete_url_fn, token: str, dry_run: bool, verbose: bool = False) -> dict:
     """Generic delete loop shared by pipelines and toolkits."""
     deleted = failed = 0
     for item in items:
@@ -80,7 +80,8 @@ def _run_cleanup(label: str, items: list, delete_url_fn, token: str, dry_run: bo
             continue
         ok = requests.delete(delete_url_fn(item), headers=_auth(token)).status_code == 204
         if ok:
-            print(f"  Deleted {label}: '{name}' (ID: {iid})")
+            if verbose:
+                print(f"  Deleted {label}: '{name}' (ID: {iid})")
             deleted += 1
         else:
             print(f"  FAILED  {label}: '{name}' (ID: {iid})", file=sys.stderr)
@@ -102,7 +103,7 @@ def _has_tag(pipeline: dict, tag: str) -> bool:
     return False
 
 
-def cleanup_pipelines(base_url, project_id, token, tag, dry_run) -> dict:
+def cleanup_pipelines(base_url, project_id, token, tag, dry_run, verbose=False) -> dict:
     print(f"\n[Pipelines] tag = '{tag}'")
     all_items = _paginate(
         f"{base_url}/api/v2/elitea_core/applications/prompt_lib/{project_id}",
@@ -114,7 +115,7 @@ def cleanup_pipelines(base_url, project_id, token, tag, dry_run) -> dict:
     return _run_cleanup(
         "pipeline", matching,
         lambda p: f"{base_url}/api/v2/elitea_core/application/prompt_lib/{project_id}/{p['id']}",
-        token, dry_run,
+        token, dry_run, verbose=verbose,
     )
 
 
@@ -122,7 +123,7 @@ def cleanup_pipelines(base_url, project_id, token, tag, dry_run) -> dict:
 # Toolkit cleanup
 # ---------------------------------------------------------------------------
 
-def cleanup_toolkits(base_url, project_id, token, keyword, dry_run) -> dict:
+def cleanup_toolkits(base_url, project_id, token, keyword, dry_run, verbose=False) -> dict:
     print(f"\n[Toolkits] name contains '{keyword}'")
     all_items = _paginate(
         f"{base_url}/api/v2/elitea_core/tools/prompt_lib/{project_id}",
@@ -134,7 +135,7 @@ def cleanup_toolkits(base_url, project_id, token, keyword, dry_run) -> dict:
     return _run_cleanup(
         "toolkit", matching,
         lambda t: f"{base_url}/api/v2/elitea_core/tool/prompt_lib/{project_id}/{t['id']}",
-        token, dry_run,
+        token, dry_run, verbose=verbose,
     )
 
 
@@ -167,6 +168,7 @@ Examples:
     parser.add_argument("--token",      default=None,      help="Bearer token / API key")
     parser.add_argument("--dry-run",    action="store_true", help="List targets without deleting")
     parser.add_argument("--yes", "-y",  action="store_true", help="Skip confirmation (required for CI)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose output")
 
     args = parser.parse_args()
 
@@ -199,11 +201,11 @@ Examples:
     total_deleted = total_failed = 0
 
     if not args.toolkits_only:
-        s = cleanup_pipelines(base_url, project_id, token, args.pipeline_tag,    args.dry_run)
+        s = cleanup_pipelines(base_url, project_id, token, args.pipeline_tag,    args.dry_run, verbose=args.verbose)
         total_deleted += s["deleted"]; total_failed += s["failed"]
 
     if not args.pipelines_only:
-        s = cleanup_toolkits(base_url, project_id, token, args.toolkit_keyword, args.dry_run)
+        s = cleanup_toolkits(base_url, project_id, token, args.toolkit_keyword, args.dry_run, verbose=args.verbose)
         total_deleted += s["deleted"]; total_failed += s["failed"]
 
     print("\n" + "=" * 60)

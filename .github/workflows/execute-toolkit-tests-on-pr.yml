@@ -167,6 +167,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Upload PR change context artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-change-context
+          path: .alita/tests/test_pipelines/pr_change_context.json
+          if-no-files-found: warn
+          retention-days: 1
+
   # Job to compute tests_to_run for each suite from tests_config
   compute-tests:
     needs: configure-matrix
@@ -211,3 +220,22 @@ jobs:
       enable_parallel: true
       enable_bug_reporting: true
     secrets: inherit
+
+  summarize-and-comment:
+    needs: [configure-matrix, test-execution]
+    if: always() && needs.configure-matrix.outputs.has-tests == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Post test summary to PR
+        uses: ./.github/actions/post-test-summary
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          pr-number: ${{ github.event.pull_request.number }}

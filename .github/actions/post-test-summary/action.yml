@@ -1,0 +1,108 @@
+name: 'Post Test Summary to PR'
+description: >
+  Downloads all test-results-* artifacts from the current workflow run,
+  aggregates them into a single Markdown report, and posts (or updates)
+  a comment on the PR.
+
+inputs:
+  github-token:
+    description: 'GitHub token with pull-requests:write permission'
+    required: true
+  pr-number:
+    description: 'PR number to comment on'
+    required: true
+  run-url:
+    description: 'URL of the workflow run (for the "View full run details" link)'
+    required: false
+    default: ''
+  artifact-pattern:
+    description: 'Glob pattern for artifact names to download'
+    required: false
+    default: 'test-results-*'
+  comment-marker:
+    description: 'Hidden HTML marker used to identify the comment for upsert'
+    required: false
+    default: '<!-- elitea-sdk-test-results -->'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download all test-results artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ${{ inputs.artifact-pattern }}
+        path: ${{ runner.temp }}/test-artifacts
+
+    - name: List downloaded artifacts
+      shell: bash
+      run: |
+        echo "::group::Downloaded artifacts"
+        find "${{ runner.temp }}/test-artifacts" -type f 2>/dev/null | head -100 || echo "No artifacts found"
+        echo "::endgroup::"
+
+    - name: Generate consolidated Markdown
+      shell: bash
+      run: |
+        RUN_URL="${{ inputs.run-url }}"
+        if [ -z "$RUN_URL" ]; then
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+        fi
+
+        python "${{ github.workspace }}/.alita/tests/test_pipelines/scripts/aggregate_pr_comment.py" \
+          --artifacts-dir "${{ runner.temp }}/test-artifacts" \
+          --pr-number "${{ inputs.pr-number }}" \
+          --run-url "$RUN_URL" \
+          --output-file "${{ runner.temp }}/pr_comment.md"
+
+        echo "::group::Generated comment preview"
+        head -80 "${{ runner.temp }}/pr_comment.md"
+        echo "::endgroup::"
+
+    - name: Post or update PR comment
+      uses: actions/github-script@v7
+      env:
+        COMMENT_BODY_FILE: ${{ runner.temp }}/pr_comment.md
+        PR_NUMBER: ${{ inputs.pr-number }}
+        MARKER: ${{ inputs.comment-marker }}
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: |
+          const fs = require('fs');
+          const body = fs.readFileSync(process.env.COMMENT_BODY_FILE, 'utf8');
+          const prNumber = parseInt(process.env.PR_NUMBER, 10);
+          const MARKER = process.env.MARKER;
+
+          if (!prNumber) {
+            core.warning('No PR number available – skipping comment');
+            return;
+          }
+
+          const fullBody = `${MARKER}\n${body}`;
+
+          // Find existing comment with our marker
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: prNumber,
+            per_page: 100,
+          });
+
+          const existing = comments.find(c => c.body && c.body.includes(MARKER));
+
+          if (existing) {
+            core.info(`Updating existing comment ${existing.id}`);
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body: fullBody,
+            });
+          } else {
+            core.info('Creating new PR comment');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: fullBody,
+            });
+          }
