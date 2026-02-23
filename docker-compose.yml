@@ -33,7 +33,6 @@ services:
       - SANDBOX_BASE=/app/
       - DENO_DIR=/app/
       - PYTHONPATH=/app
-      - PYODIDE_SANDBOX_PKG=jsr:@langchain/pyodide-sandbox@0.0.4
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
     volumes:

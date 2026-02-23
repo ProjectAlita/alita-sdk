@@ -41,8 +41,15 @@ COPY LICENSE ./
 
 RUN pip install --no-cache-dir -U pip setuptools wheel
 
+# Copy patched Pyodide sandbox runtime (fixes \n escaping & chardet version pin)
+COPY infra/data/sandbox/main.ts /app/data/sandbox/main.ts
+ENV PYODIDE_SANDBOX_PKG=/app/data/sandbox/main.ts
+
 # Build wheels for Pyodide packages
-RUN pip wheel -w /app/pyodide dill chardet
+# Pin chardet<6: requests 2.x only supports chardet 3.x-5.x;
+# without the pin, micropip would install the latest (6.x) from PyPI,
+# triggering RequestsDependencyWarning at runtime.
+RUN pip wheel -w /app/pyodide dill "chardet<6"
 
 # Install dependencies in stages to avoid resolution-too-deep error
 RUN pip install --no-cache-dir -e ".[cli]"

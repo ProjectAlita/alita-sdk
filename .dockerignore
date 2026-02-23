@@ -54,6 +54,7 @@ Thumbs.db
 
 # Data directories
 data/
+!data/sandbox/main.ts
 *.log
 
 # Charts

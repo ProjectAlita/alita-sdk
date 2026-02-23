@@ -349,6 +349,64 @@ For each affected toolkit, try to identify specific tests:
 2. Write to `.alita/tests/test_pipelines/test_matrix.json`
 3. Print the JSON to stdout for logging
 
+### Step 8: Generate PR Change Context
+
+**PURPOSE:** Produce a change context file that downstream agents (Test Fixer, Bug Reporter) use to distinguish **bugs introduced by the PR's new code** from **pre-existing bugs**. This is critical for the CI pipeline — without it, ALL SDK bugs get reported to the board, even regressions that the PR author should fix themselves.
+
+1. **Fetch PR diff details** using GitHub MCP tools:
+   - For each changed file, extract: `path`, `status` (added/modified/deleted), `additions`, `deletions`
+   - For `.py` files under `alita_sdk/`, use the patch/diff to identify changed method/function names (look for `def ` lines in the hunks)
+
+2. **Build the change context object:**
+
+```json
+{
+  "pr_number": 543,
+  "pr_url": "https://github.com/ProjectAlita/alita-sdk/pull/543",
+  "pr_branch": "feature/my-change",
+  "pr_author": "username",
+  "base_branch": "main",
+  "changed_files": [
+    {
+      "path": "alita_sdk/tools/github/api_wrapper.py",
+      "status": "modified",
+      "additions": 15,
+      "deletions": 5,
+      "changed_methods": ["create_issue", "list_issues"]
+    }
+  ],
+  "changed_sdk_files": [
+    "alita_sdk/tools/github/api_wrapper.py",
+    "alita_sdk/tools/github/__init__.py"
+  ],
+  "changed_methods_by_file": {
+    "alita_sdk/tools/github/api_wrapper.py": ["create_issue", "list_issues"]
+  },
+  "impact_categories": {
+    "toolkits_changed": ["github"],
+    "runtime_changed": false,
+    "core_changed": false,
+    "rule_applied": "Rule 2"
+  }
+}
+```
+
+3. **Write to** `.alita/tests/test_pipelines/pr_change_context.json`
+4. Print confirmation to stdout
+
+**Field definitions:**
+
+| Field | Purpose |
+|-------|---------|
+| `changed_files` | All files changed in the PR with metadata |
+| `changed_sdk_files` | Filtered list: only `alita_sdk/` source files (not tests, docs, configs) |
+| `changed_methods_by_file` | Map of SDK file → list of changed method/function names extracted from diff hunks |
+| `impact_categories` | Summary matching the test matrix analysis |
+
+**How downstream agents use this:**
+- **Test Fixer**: When diagnosing an SDK bug, checks if the failing code path is in `changed_sdk_files` or `changed_methods_by_file`. If YES → classifies as `pr_regression` (dev feedback, not board bug).
+- **Bug Reporter**: Skips `pr_regression` items entirely — only files board bugs for pre-existing issues.
+
 ---
 
 ## Examples
