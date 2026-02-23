@@ -184,6 +184,22 @@ nodes:
     structured_output: true
     tool: create_pull_request
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
@@ -250,20 +266,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_delete_branch
-
-  - id: cleanup_delete_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - source_branch
-    input_mapping:
-      branch_name:
-        type: variable
-        value: source_branch
-    output:
-      - delete_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END
