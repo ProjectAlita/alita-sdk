@@ -9,7 +9,11 @@ state:
   test_data:
     type: number
     value: '1'
+  test_results:
+    type: dict
+
 entry_point: code_to_catch_bug_with_new_lines
+
 nodes:
   - id: code_to_catch_bug_with_new_lines
     type: code
@@ -20,12 +24,27 @@ nodes:
         current_date = datetime.now()
         current_time = datetime.now()
 
-        output_string = f"""11
-        Test comment {current_date}{current_time}"""
-        print(output_string)
-
-        {"formatted_message": output_string}
+        output_string = f"11\n\n Test comment {current_date}{current_time}"
+        
+        # Validation checks
+        checks = {
+            "has_prefix": output_string.startswith("11\n\n Test comment"),
+            "contains_newlines": "\n\n" in output_string,
+            "has_datetime": len(output_string) > len("11\n\n Test comment"),
+            "is_string": isinstance(output_string, str),
+            "not_empty": len(output_string) > 0
+        }
+        
+        all_passed = all(checks.values())
+        
+        {
+            "test_passed": all_passed,
+            "formatted_message": output_string,
+            "checks": checks,
+            "message_length": len(output_string)
+        }
     input: []
-    output: []
+    output:
+      - test_results
     structured_output: true
     transition: END
