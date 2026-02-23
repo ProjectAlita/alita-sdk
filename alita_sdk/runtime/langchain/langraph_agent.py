@@ -20,7 +20,7 @@ from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
-from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE
+from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE, DEAULT_AGENT_NAME
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META
@@ -1030,7 +1030,9 @@ def create_graph(
                 elif isinstance(connected_tools, list):
                     # Use provided tool names as-is
                     tool_names = connected_tools
-                
+
+                # For non-agent LLM nodes (PIPELINE node without toolkits defined) we don't add any hidden tools by default, to avoid confusion and encourage explicit tool selection
+                available_tools = []
                 if tool_names:
                     # Filter tools by name
                     tool_dict = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
@@ -1038,8 +1040,10 @@ def create_graph(
                     if len(available_tools) != len(tool_names):
                         missing_tools = [name for name in tool_names if name not in tool_dict]
                         logger.warning(f"Some tools not found for LLM node {node_id}: {missing_tools}")
-                else:
-                    # Use all available tools
+                # If this is an agent (NOT A PIPELINE NODE) without explicit tool_names, bind all tools by default for backward compatibility
+                elif yaml.safe_load(yaml_schema).get('name', '').lower() == DEAULT_AGENT_NAME:
+                    # agent flow
+                    logger.info(f"LLM node '{node_id}' in React Agent flow - binding all available tools")
                     available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
 
                 # Determine if we should use lazy tools mode for this LLM node

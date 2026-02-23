@@ -12,7 +12,7 @@ from .langraph_agent import create_graph
 from .constants import (
     USER_ADDON, QA_ASSISTANT, NERDY_ASSISTANT, QUIRKY_ASSISTANT, CYNICAL_ASSISTANT,
     DEFAULT_ASSISTANT, PLAN_ADDON, PYODITE_ADDON, DATA_ANALYSIS_ADDON,
-    SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS
+    SEARCH_INDEX_ADDON, FILE_HANDLING_INSTRUCTIONS, DEAULT_AGENT_NAME
 )
 from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
 from ..middleware.base import Middleware, MiddlewareManager
@@ -436,7 +436,7 @@ class Assistant:
         state_messages_config = {'type': 'list'}
         
         schema_dict = {
-            'name': 'react_agent',
+            'name': DEAULT_AGENT_NAME,
             'state': {
                 'input': {
                     'type': 'str'
