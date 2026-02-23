@@ -339,16 +339,21 @@ def process_pipeline_result(
                         if isinstance(parsed_output, dict):
                             # Check for error field or execution failure status
                             if "error" in parsed_output and parsed_output["error"]:
-                                # IMPORTANT: Check if tool also returned a valid result
-                                # If "result" field exists, the "error" field likely contains warnings, not failures
+                                # IMPORTANT: Check if tool also returned a valid result with test_passed: true
+                                # If "result" field exists with test_passed: true, the "error" field contains warnings, not failures
                                 # This is common with pyodide_sandbox which returns warnings in "error" but succeeds
                                 has_valid_result = "result" in parsed_output and parsed_output["result"]
+                                result_passed = False
                                 
-                                if has_valid_result:
-                                    # Tool succeeded with warnings - log but don't fail the test
+                                if has_valid_result and isinstance(parsed_output["result"], dict):
+                                    # Check if test explicitly passed
+                                    result_passed = parsed_output["result"].get("test_passed") is True
+                                
+                                if has_valid_result and result_passed:
+                                    # Tool succeeded with test_passed: true - error field contains warnings only
                                     if logger:
                                         error_msg = parsed_output["error"]
-                                        logger.debug(f"Tool returned warning (not failure): {error_msg[:100]}...")
+                                        logger.debug(f"Tool returned warning (not failure) - test passed: {error_msg[:100]}...")
                                     # Continue to next tool call without marking as error
                                     continue
                                 
