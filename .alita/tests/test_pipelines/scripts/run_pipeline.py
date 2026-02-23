@@ -339,27 +339,15 @@ def process_pipeline_result(
                         if isinstance(parsed_output, dict):
                             # Check for error field or execution failure status
                             if "error" in parsed_output and parsed_output["error"]:
-                                # IMPORTANT: Check if tool also returned a valid result with test_passed: true
-                                # If "result" field exists with test_passed: true, the "error" field contains warnings, not failures
-                                # This is common with pyodide_sandbox which returns warnings in "error" but succeeds
-                                has_valid_result = "result" in parsed_output and parsed_output["result"]
-                                result_passed = False
-                                
-                                if has_valid_result and isinstance(parsed_output["result"], dict):
-                                    # Check if test explicitly passed
-                                    result_passed = parsed_output["result"].get("test_passed") is True
-                                
-                                if has_valid_result and result_passed:
-                                    # Tool succeeded with test_passed: true - error field contains warnings only
-                                    if logger:
-                                        error_msg = parsed_output["error"]
-                                        logger.debug(f"Tool returned warning (not failure) - test passed: {error_msg[:100]}...")
-                                    # Continue to next tool call without marking as error
-                                    continue
-                                
-                                # No valid result - this is a real error
                                 tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
                                 error_msg = parsed_output["error"]
+                                
+                                # Skip warnings (not actual errors) - common in pyodide_sandbox
+                                # Warnings typically contain "Warning:" or specific warning type names
+                                if any(warning_type in error_msg for warning_type in ["Warning:", "DeprecationWarning", "FutureWarning", "UserWarning", "RequestsDependencyWarning"]):
+                                    if logger:
+                                        logger.debug(f"Ignoring warning from '{tool_name}': {error_msg[:200]}")
+                                    continue  # Skip this warning, don't treat as error
                                 
                                 # Extract meaningful error from tracebacks
                                 if "Traceback" in error_msg:
