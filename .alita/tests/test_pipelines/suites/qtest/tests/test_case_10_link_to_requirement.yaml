@@ -17,7 +17,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID:1}
+    value: ${QTEST_PROJECT_ID}
   requirement_id:
     type: str
     value: ${QTEST_REQUIREMENT_ID:RQ-1}
@@ -147,24 +147,28 @@ nodes:
       type: fixed
       value: |
         import json
-        import re
         
         # Extract test case IDs from creation results
         result_1 = alita_state.get("create_result_1", "")
         result_2 = alita_state.get("create_result_2", "")
         
-        def extract_tc_id(result_str):
-            # Look for Id: TC-xxx pattern
-            match = re.search(r"['\"]Id['\"]:\s*['\"]?(TC-\d+)['\"]?", result_str)
-            if match:
-                return match.group(1)
+        def extract_tc_id(result):
+            # Parse the create_result (can be string or dict)
+            if isinstance(result, str):
+                result_dict = json.loads(result)
+            else:
+                result_dict = result
+            
+            # Get test_case_id from the test_cases array
+            if 'test_cases' in result_dict and len(result_dict['test_cases']) > 0:
+                return result_dict['test_cases'][0].get('test_case_id')
             return None
         
         test_case_id_1 = extract_tc_id(result_1)
         test_case_id_2 = extract_tc_id(result_2)
         
         if not test_case_id_1 or not test_case_id_2:
-            raise Exception(f"Failed to extract test case IDs. TC1: {test_case_id_1}, TC2: {test_case_id_2}")
+            raise Exception(f"Failed to extract test case IDs. Result1: {result_1}, Result2: {result_2}")
         
         # Create JSON array string for linking
         test_case_ids = [test_case_id_1, test_case_id_2]
@@ -254,7 +258,8 @@ nodes:
     model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
-    structured_output: true
+    structured_output_dict:
+      test_results: "dict"
     transition: end
 
   - id: end
