@@ -17,7 +17,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID:1}
+    value: ${QTEST_PROJECT_ID}
   test_case_id:
     type: str
   dql_query:
@@ -192,7 +192,8 @@ nodes:
     model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
-    structured_output: true
+    structured_output_dict:
+      test_results: "dict"
     transition: end
 
   - id: end

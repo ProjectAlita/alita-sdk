@@ -17,7 +17,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID:1}
+    value: ${QTEST_PROJECT_ID}
   test_case_json:
     type: str
   create_result:
@@ -180,37 +180,7 @@ nodes:
           }}
     output:
       - test_results
-    structured_output: true
+    structured_output_dict:
+      test_results: "dict"
     model: ${DEFAULT_LLM_MODEL}
-    transition: check_test_status
-
-  - id: check_test_status
-    type: code
-    code:
-      type: fixed
-      value: |
-        test_results = alita_state.get("test_results", {})
-        test_passed = test_results.get("test_passed", False)
-        
-        if not test_passed:
-            reason = test_results.get("reason", "Unknown failure")
-            raise Exception(f"Test QT03 FAILED: {reason}")
-        
-        # Store created IDs for potential cleanup
-        created_test_id = alita_state.get("created_test_id", "")
-        created_test_qt_id = alita_state.get("created_test_qt_id", "")
-        
-        {
-            "status": "Test QT03 PASSED", 
-            "details": test_results,
-            "created_test_id": created_test_id,
-            "created_test_qt_id": created_test_qt_id
-        }
-    input:
-      - test_results
-      - created_test_id
-      - created_test_qt_id
-    output:
-      - status
-    structured_output: true
     transition: END

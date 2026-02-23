@@ -16,6 +16,11 @@ env_mapping:
   confluence_base_url: ${CONFLUENCE_BASE_URL:https://epamelitea.atlassian.net/}
   confluence_api_key: ${CONFLUENCE_API_KEY}
   confluence_username: ${CONFLUENCE_USERNAME}
+  sharepoint_site_url: ${SHAREPOINT_SITE_URL:https://5clkvm.sharepoint.com/sites/ALITA}
+  sharepoint_client_id: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
+  sharepoint_client_secret: ${SHAREPOINT_CLIENT_SECRET}
+  sharepoint_test_list: ${SHAREPOINT_TEST_LIST:DO_NOT_DELETE_AlitaTestList}
+  sharepoint_test_folder: ${SHAREPOINT_TEST_FOLDER:'sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles'}
 
 # Setup steps executed before running tests
 # Steps are executed in order; if a step fails, setup stops
@@ -49,6 +54,35 @@ setup:
       - key: CONFLUENCE_TOOLKIT_ID
         value: $.id
       - key: CONFLUENCE_TOOLKIT_NAME
+        value: $.name
+
+  # Step 2b: Setup SharePoint Configuration
+  - name: Setup SharePoint Configuration
+    type: configuration
+    config:
+      config_type: sharepoint
+      alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
+      data:
+        site_url: ${SHAREPOINT_SITE_URL:https://5clkvm.sharepoint.com/sites/ALITA}
+        client_id: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
+        client_secret: ${SHAREPOINT_CLIENT_SECRET}
+
+  # Step 2c: Create SharePoint Toolkit
+  - name: Create SharePoint Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/sharepoint-config.json
+      toolkit_type: sharepoint
+      overrides:
+        sharepoint_configuration:
+          private: true
+          alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
+      toolkit_name: ${SHAREPOINT_TOOLKIT_NAME:sharepoint-testing}
+    save_to_env:
+      - key: SHAREPOINT_TOOLKIT_ID
+        value: $.id
+      - key: SHAREPOINT_TOOLKIT_NAME
         value: $.name
 
   # Step 3: Create Artifact Toolkit on the platform
@@ -88,6 +122,26 @@ setup:
         value: $.result.filepath
         default: "/artifact-test-bucket/test_upload.txt"
 
+  # Step 5: Create test file artifact for SharePoint tests
+  - name: Create SharePoint Test File Artifact
+    type: toolkit_invoke
+    config:
+      toolkit_id: ${ARTIFACT_TOOLKIT_ID}
+      tool_name: createFile
+      tool_params:
+        filename: sharepoint_test_upload.txt
+        filedata: |
+          This is a test file for SharePoint file upload and attachment testing.
+          
+          Created at ${TIMESTAMP}
+          Test Suite: Artifact Toolkit
+          
+          This file is used to test the upload_file and add_attachment_to_list_item tools.
+    save_to_env:
+      - key: SHAREPOINT_TEST_ARTIFACT_ID
+        value: $.result.filepath
+        default: "/artifact-test-bucket/sharepoint_test_upload.txt"
+
 # Composable pipelines - seeded first, used by hooks and other pipelines
 # These are reusable pipeline components that can be invoked conditionally
 composable_pipelines: []
@@ -113,6 +167,10 @@ execution:
     - test_case_13_*.yaml  # ART13 - Get File Type
     - test_case_25_*.yaml  # ART14 - Confluence Add File
     - test_case_26_*.yaml  # ART15 - Confluence Add File Validation
+    - test_case_18_*.yaml  # ART16 - SharePoint Upload File from Artifact
+    - test_case_19_*.yaml  # ART17 - SharePoint Upload File Replace
+    - test_case_20_*.yaml  # ART18 - SharePoint Add Attachment from Artifact
+    - test_case_21_*.yaml  # ART19 - SharePoint Add Attachment Replace
 
   # Variables to substitute in test YAML files
   substitutions:
@@ -120,14 +178,19 @@ execution:
     ARTIFACT_TOOLKIT_NAME: ${ARTIFACT_TOOLKIT_NAME}
     CONFLUENCE_TOOLKIT_ID: ${CONFLUENCE_TOOLKIT_ID}
     CONFLUENCE_TOOLKIT_NAME: ${CONFLUENCE_TOOLKIT_NAME}
+    SHAREPOINT_TOOLKIT_ID: ${SHAREPOINT_TOOLKIT_ID}
+    SHAREPOINT_TOOLKIT_NAME: ${SHAREPOINT_TOOLKIT_NAME}
+    SHAREPOINT_TEST_LIST: ${sharepoint_test_list}
+    SHAREPOINT_TEST_FOLDER: ${sharepoint_test_folder}
     TIMESTAMP: ${TIMESTAMP}
     TEST_BUCKET: ${TEST_BUCKET}
     TEST_ARTIFACT_ID: ${TEST_ARTIFACT_ID}
+    SHAREPOINT_TEST_ARTIFACT_ID: ${SHAREPOINT_TEST_ARTIFACT_ID}
 
   # Execution settings
   settings:
     timeout: 120
-    parallel: 1  # Sequential for dependent tests
+    parallel: 5  # Sequential for dependent tests
     stop_on_failure: false
 
 # Cleanup steps executed after tests complete
@@ -153,6 +216,14 @@ cleanup:
     type: toolkit
     config:
       toolkit_id: ${CONFLUENCE_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  # Step 4: Delete the SharePoint toolkit
+  - name: Delete SharePoint Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${SHAREPOINT_TOOLKIT_ID}
     enabled: true
     continue_on_error: true
 

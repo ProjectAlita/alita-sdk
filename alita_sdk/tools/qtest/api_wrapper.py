@@ -894,9 +894,15 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
         try:
             response = test_case_api_instance.create_test_case(self.qtest_project_id, body)
             test_case_id = response.pid
+            qtest_id = response.id
             url = response.web_url
             test_name = response.name
-            return {'test_case_id': test_case_id, 'test_case_name': test_name, 'url': url}
+            return {
+                'test_case_id': test_case_id,
+                'qtest_id': qtest_id,
+                'test_case_name': test_name,
+                'url': url
+            }
         except ApiException as e:
             stacktrace = format_exc()
             logger.error(f"Exception when calling TestCaseApi->create_test_case:\n {stacktrace}")
@@ -2060,7 +2066,49 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
             kwargs["parent_id"] = parent_id
         if search:
             kwargs["search"] = search
-        return module_api.get_sub_modules_of(project_id=self.qtest_project_id, **kwargs)
+        
+        modules = module_api.get_sub_modules_of(project_id=self.qtest_project_id, **kwargs)
+        
+        # Format modules for output
+        formatted = []
+        
+        def format_module(mod, level=0):
+            """Recursively format module and its children"""
+            mod_dict = mod.to_dict() if hasattr(mod, 'to_dict') else mod
+            
+            # Handle both dict and object attribute access
+            if isinstance(mod_dict, dict):
+                mod_id = mod_dict.get('id')
+                mod_name = mod_dict.get('name')
+                mod_pid = mod_dict.get('pid')
+                children = mod_dict.get('children', [])
+            else:
+                mod_id = getattr(mod, 'id', None)
+                mod_name = getattr(mod, 'name', None)
+                mod_pid = getattr(mod, 'pid', None)
+                children = getattr(mod, 'children', [])
+            
+            formatted.append({
+                'id': mod_id,
+                'name': mod_name,
+                'pid': mod_pid,
+                'full_name': f"{mod_pid} {mod_name}" if mod_pid and mod_name else (mod_name or ''),
+                'level': level,
+                'has_children': bool(children)
+            })
+            
+            # Recursively format children
+            if children:
+                for child in children:
+                    format_module(child, level + 1)
+        
+        for module in modules:
+            format_module(module)
+        
+        if not formatted:
+            return "No modules found in the specified location."
+        
+        return f"Found {len(formatted)} module(s):\n{str(formatted)}"
 
     @extend_with_parent_available_tools
     def get_available_tools(self):

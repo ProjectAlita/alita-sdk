@@ -124,6 +124,7 @@ jobs:
           export GITLAB_PRIVATE_TOKEN="${{ secrets.GITLAB_PRIVATE_TOKEN }}"
           export POSTMAN_API_KEY="${{ secrets.POSTMAN_API_KEY }}"
           export SHAREPOINT_CLIENT_SECRET="${{ secrets.SHAREPOINT_CLIENT_SECRET }}"
+          export QTEST_API_TOKEN="${{ secrets.QTEST_API_TOKEN }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
@@ -410,9 +411,18 @@ jobs:
               if [ "$FIXED_COUNT" -gt 0 ]; then
                 echo "### ✅ Fixed Tests"
                 echo ""
-                echo "| Test | Root Cause | Fix Applied |"
-                echo "|------|------------|-------------|"
-                jq -r '.fixed[]? | "| \((.test_ids // []) | join(", ")) | \(.issue // "N/A") | \(.fix // "N/A") |"' ./fix_output.json
+                echo "**Total fixed: ${FIXED_COUNT} test(s)**"
+                echo ""
+                echo "| # | Test | Root Cause | Fix Applied |"
+                echo "|---|------|------------|-------------|"
+                COUNTER=1
+                jq -c '.fixed[]?' ./fix_output.json | while read -r item; do
+                  TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                  ISSUE=$(echo "$item" | jq -r '.issue // "N/A"')
+                  FIX=$(echo "$item" | jq -r '.fix // "N/A"')
+                  echo "| ${COUNTER} | ${TEST_IDS} | ${ISSUE} | ${FIX} |"
+                  COUNTER=$((COUNTER + 1))
+                done
                 echo ""
               fi
               
@@ -423,9 +433,17 @@ jobs:
                 echo "> [!WARNING]"
                 echo "> The following tests failed initially but passed on rerun"
                 echo ""
-                echo "| Test | Reason |"
-                echo "|------|--------|"
-                jq -r '.flaky[]? | "| \((.test_ids // []) | join(", ")) | \(.reason // "N/A") |"' ./fix_output.json
+                echo "**Total flaky: ${FLAKY_COUNT} test(s)**"
+                echo ""
+                echo "| # | Test | Reason |"
+                echo "|---|------|--------|"
+                COUNTER=1
+                jq -c '.flaky[]?' ./fix_output.json | while read -r item; do
+                  TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                  REASON=$(echo "$item" | jq -r '.reason // "N/A"')
+                  echo "| ${COUNTER} | ${TEST_IDS} | ${REASON} |"
+                  COUNTER=$((COUNTER + 1))
+                done
                 echo ""
               fi
               
@@ -436,8 +454,37 @@ jobs:
                 echo "> [!IMPORTANT]"
                 echo "> These tests were **not patched** because the failures are caused by SDK code defects, not test logic errors. Weakening assertions would hide real bugs."
                 echo ""
-                jq -r '.blocked[]? | "<details>\n<summary><b>\((.test_ids // []) | join(", "))</b> — \(.bug_description // "N/A")</summary>\n\n| Field | Detail |\n|-------|--------|\n| Bug Description | \(.bug_description // "N/A") |\n| Expected Behavior | \(.expected_behavior // "N/A") |\n| Actual Behavior | \(.actual_behavior // "N/A") |\n| SDK Component | \(.sdk_component // "N/A") |\n| Affected Methods | \((.affected_methods // []) | join(", ")) |\n| Error Location | \(.error_location // "N/A") |\n| Bug Report Needed | \(.bug_report_needed // false) |\n\n</details>\n"' ./fix_output.json
+                echo "**Total blocked: ${BLOCKED_COUNT} test(s)**"
                 echo ""
+                # Add numbering to blocked tests
+                COUNTER=1
+                jq -c '.blocked[]?' ./fix_output.json | while read -r item; do
+                  TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                  BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
+                  EXPECTED=$(echo "$item" | jq -r '.expected_behavior // "N/A"')
+                  ACTUAL=$(echo "$item" | jq -r '.actual_behavior // "N/A"')
+                  SDK_COMP=$(echo "$item" | jq -r '.sdk_component // "N/A"')
+                  METHODS=$(echo "$item" | jq -r '(.affected_methods // []) | join(", ")')
+                  ERROR_LOC=$(echo "$item" | jq -r '.error_location // "N/A"')
+                  BUG_NEEDED=$(echo "$item" | jq -r '.bug_report_needed // false')
+                  
+                  echo "<details>"
+                  echo "<summary><b>${COUNTER}. ${TEST_IDS}</b> — ${BUG_DESC}</summary>"
+                  echo ""
+                  echo "| Field | Detail |"
+                  echo "|-------|--------|"
+                  echo "| Bug Description | ${BUG_DESC} |"
+                  echo "| Expected Behavior | ${EXPECTED} |"
+                  echo "| Actual Behavior | ${ACTUAL} |"
+                  echo "| SDK Component | ${SDK_COMP} |"
+                  echo "| Affected Methods | ${METHODS} |"
+                  echo "| Error Location | ${ERROR_LOC} |"
+                  echo "| Bug Report Needed | ${BUG_NEEDED} |"
+                  echo ""
+                  echo "</details>"
+                  echo ""
+                  COUNTER=$((COUNTER + 1))
+                done
               fi
               
               # Show Intent Analysis from milestone (how each test was classified)
@@ -700,9 +747,20 @@ jobs:
               if [ "$BUGS_CREATED" -gt 0 ]; then
                 echo "### ✅ Bugs Created on ELITEA Board"
                 echo ""
-                echo "| Issue | Tests | Component | Labels |"
-                echo "|-------|-------|-----------|--------|"
-                jq -r '.bugs_created[]? | "| [\(.title)](\(.issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + (.issue_number | tostring)))) | \((.test_ids // []) | join(", ")) | \(.affected_component // "N/A") | \((.labels // []) | join(", ")) |"' ./bug_report_output.json
+                echo "**Total created: ${BUGS_CREATED} bug(s)**"
+                echo ""
+                echo "| # | Issue | Tests | Component | Labels |"
+                echo "|---|-------|-------|-----------|--------|"
+                COUNTER=1
+                jq -c '.bugs_created[]?' ./bug_report_output.json | while read -r item; do
+                  TITLE=$(echo "$item" | jq -r '.title')
+                  ISSUE_URL=$(echo "$item" | jq -r '.issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + (.issue_number | tostring))')
+                  TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                  COMPONENT=$(echo "$item" | jq -r '.affected_component // "N/A"')
+                  LABELS=$(echo "$item" | jq -r '(.labels // []) | join(", ")')
+                  echo "| ${COUNTER} | [${TITLE}](${ISSUE_URL}) | ${TEST_IDS} | ${COMPONENT} | ${LABELS} |"
+                  COUNTER=$((COUNTER + 1))
+                done
                 echo ""
               fi
               
