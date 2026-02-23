@@ -236,6 +236,22 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: bitbucket-testing
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - test_branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: test_branch_name
+    output:
+      - cleanup_branch_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: bitbucket-testing
     transition: validate_results
 
   - id: validate_results
@@ -298,22 +314,6 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_branch
-
-  - id: cleanup_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - test_branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: test_branch_name
-    output:
-      - cleanup_branch_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: bitbucket-testing
     transition: END
 
 
