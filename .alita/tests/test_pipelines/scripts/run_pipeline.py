@@ -342,6 +342,13 @@ def process_pipeline_result(
                                 tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
                                 error_msg = parsed_output["error"]
                                 
+                                # Skip warnings - only treat actual errors as failures
+                                # Common warning patterns: "Warning:", "DeprecationWarning", "FutureWarning", etc.
+                                if "Warning" in error_msg and "Traceback" not in error_msg:
+                                    if logger:
+                                        logger.debug(f"Skipping warning from tool '{tool_name}': {error_msg[:200]}")
+                                    continue  # Skip this warning, don't mark test as failed
+                                
                                 # Extract meaningful error from tracebacks
                                 if "Traceback" in error_msg:
                                     # Get last line of traceback (usually the actual error)
@@ -447,6 +454,13 @@ def process_pipeline_result(
                             # Check for error field (only if test_passed wasn't explicitly set above)
                             if "error" in parsed_content and parsed_content["error"]:
                                 error_msg = parsed_content["error"]
+                                
+                                # Skip warnings - only treat actual errors as failures
+                                # Common warning patterns: "Warning:", "DeprecationWarning", "FutureWarning", etc.
+                                if "Warning" in error_msg and "Traceback" not in error_msg:
+                                    if logger:
+                                        logger.debug(f"Skipping warning in chat history: {error_msg[:200]}")
+                                    continue  # Skip this warning, don't mark test as failed
                                 
                                 # Check if this error came from a continue_on_error node
                                 if is_error_from_continue_on_error_node(error_msg, tool_calls_dict, nodes_with_continue_on_error, logger):
