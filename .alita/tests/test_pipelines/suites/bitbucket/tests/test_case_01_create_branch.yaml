@@ -84,6 +84,22 @@ nodes:
     structured_output: true
     tool: list_branches_in_repo
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
@@ -141,20 +157,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_delete_branch
-
-  - id: cleanup_delete_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: branch_name
-    output:
-      - delete_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END
