@@ -338,45 +338,37 @@ def process_pipeline_result(
                         parsed_output = json.loads(tool_output)
                         if isinstance(parsed_output, dict):
                             # Check for error field or execution failure status
+                            # BUT: Don't treat as error if result indicates success (e.g., test_passed=true)
+                            # This handles cases where tools return warnings in stderr/error field
                             if "error" in parsed_output and parsed_output["error"]:
-                                tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
-                                error_msg = parsed_output["error"]
-                                
-                                # CRITICAL: Distinguish warnings from actual errors
-                                # Warnings (e.g., RequestsDependencyWarning, DeprecationWarning) should not fail tests
-                                # Only treat as error if it's a real exception/failure, not just a warning
-                                is_warning = (
-                                    "Warning:" in error_msg or
-                                    "warnings.warn" in error_msg or
-                                    "DeprecationWarning" in error_msg or
-                                    "FutureWarning" in error_msg or
-                                    "UserWarning" in error_msg or
-                                    "RequestsDependencyWarning" in error_msg
-                                )
-                                
-                                if is_warning:
-                                    # Log warning but don't fail test
+                                # Check if result indicates success despite error/warning in stderr
+                                result_data = parsed_output.get("result")
+                                if isinstance(result_data, dict) and result_data.get("test_passed") is True:
+                                    # Tool returned warnings in error field but test passed
+                                    # Log as warning but don't fail the test
                                     if logger:
-                                        logger.debug(f"Tool '{tool_name}' returned warning (not treating as error): {error_msg[:100]}")
-                                    # Don't set test_passed = False, don't break - continue checking
-                                    continue
-                                
-                                # Extract meaningful error from tracebacks
-                                if "Traceback" in error_msg:
-                                    # Get last line of traceback (usually the actual error)
-                                    lines = error_msg.strip().split('\n')
-                                    error_summary = lines[-1] if lines else error_msg
+                                        logger.warning(f"Tool returned warnings in error field but test passed: {parsed_output['error'][:200]}")
                                 else:
-                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
-                                
-                                detected_error = f"Tool '{tool_name}' returned error: {error_summary}"
-                                test_passed = False
-                                
-                                if logger:
-                                    logger.error(f"Tool output error detected: {detected_error}")
-                                    logger.debug(f"Full error: {error_msg}")
-                                
-                                break
+                                    # Actual error - tool failed
+                                    tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                                    error_msg = parsed_output["error"]
+                                    
+                                    # Extract meaningful error from tracebacks
+                                    if "Traceback" in error_msg:
+                                        # Get last line of traceback (usually the actual error)
+                                        lines = error_msg.strip().split('\n')
+                                        error_summary = lines[-1] if lines else error_msg
+                                    else:
+                                        error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                    
+                                    detected_error = f"Tool '{tool_name}' returned error: {error_summary}"
+                                    test_passed = False
+                                    
+                                    if logger:
+                                        logger.error(f"Tool output error detected: {detected_error}")
+                                        logger.debug(f"Full error: {error_msg}")
+                                    
+                                    break
                             
                             # Check for execution failure status
                             elif parsed_output.get("status") == "Execution failed":
