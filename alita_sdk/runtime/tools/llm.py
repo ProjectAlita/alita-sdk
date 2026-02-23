@@ -34,14 +34,23 @@ def auto_after_model_hook(invoke_method):
         # Call the original invoke method
         result = invoke_method(self, state, config, **kwargs)
 
+        # Get middleware manager - prefer explicit, fall back to context variable
+        middleware_mgr = self.middleware_manager
+        if middleware_mgr is None:
+            try:
+                from ..middleware.base import get_current_middleware
+                middleware_mgr = get_current_middleware()
+            except ImportError:
+                pass
+
         # Run after_model hooks if middleware manager exists
-        if self.middleware_manager is not None and isinstance(result, dict) and 'messages' in result:
+        if middleware_mgr is not None and isinstance(result, dict) and 'messages' in result:
             # Create final state with LLM response for after_model hooks
             final_state = {**original_state, 'messages': result['messages']}
-            self.middleware_manager.run_after_model(final_state, config or {})
+            middleware_mgr.run_after_model(final_state, config or {})
 
             # Capture context_info reflecting the final state
-            context_info = self.middleware_manager.get_context_info()
+            context_info = middleware_mgr.get_context_info()
 
             # Add/update context_info in result
             result['context_info'] = context_info
@@ -592,9 +601,19 @@ class LLMNode(BaseTool):
         # Returns both processed state (for LLM) and RemoveMessage ops (for checkpoint)
         middleware_updates = []
         context_info = None
-        if self.middleware_manager is not None and isinstance(state, dict):
+
+        # Get middleware manager - prefer explicit, fall back to context variable
+        middleware_mgr = self.middleware_manager
+        if middleware_mgr is None:
+            try:
+                from ..middleware.base import get_current_middleware
+                middleware_mgr = get_current_middleware()
+            except ImportError:
+                pass
+
+        if middleware_mgr is not None and isinstance(state, dict):
             original_msg_count = len(state.get('messages', []))
-            state, middleware_updates = self.middleware_manager.run_before_model(state, config or {})
+            state, middleware_updates = middleware_mgr.run_before_model(state, config or {})
             # Only log if summarization actually triggered (RemoveMessage ops returned)
             if middleware_updates:
                 new_msg_count = len(state.get('messages', []))
@@ -724,7 +743,7 @@ class LLMNode(BaseTool):
                         self.__perform_tool_calling(completion, messages, llm_client, config)
                     )
 
-                    output_msgs = {"messages": self._strip_system_messages(new_messages, middleware_updates)}
+                    output_msgs = {"messages": self._prepare_output_messages(new_messages, middleware_updates)}
                     if self.output_variables:
                         if self.output_variables[0] == 'messages':
                             return self._add_context_info(output_msgs, context_info)
@@ -806,13 +825,13 @@ class LLMNode(BaseTool):
                         # set response to be the first output variable for non-structured output
                         response_data = {json_output_vars[0]: text_content}
                         new_messages = messages + [ai_message]
-                        response_data['messages'] = self._strip_system_messages(new_messages, middleware_updates)
+                        response_data['messages'] = self._prepare_output_messages(new_messages, middleware_updates)
                         return self._add_context_info(response_data, context_info)
 
                     # Simple text response (either no output variables or JSON parsing failed)
                     new_messages = messages + [ai_message]
                     return self._add_context_info(
-                        {"messages": self._strip_system_messages(new_messages, middleware_updates)},
+                        {"messages": self._prepare_output_messages(new_messages, middleware_updates)},
                         context_info
                     )
 
@@ -826,18 +845,30 @@ class LLMNode(BaseTool):
             error_msg = f"Error: {e}"
             new_messages = messages + [AIMessage(content=error_msg)]
             return self._add_context_info(
-                {"messages": self._strip_system_messages(new_messages, middleware_updates)},
+                {"messages": self._prepare_output_messages(new_messages, middleware_updates)},
                 context_info
             )
 
     @staticmethod
-    def _strip_system_messages(messages: list, middleware_updates: list = None) -> list:
+    def _strip_system_messages(messages: list) -> list:
         """Strip SystemMessage objects from a message list before returning to graph state.
 
         The LLMNode constructs SystemMessage on-the-fly from its input_mapping['system']
         for each invocation. Storing SystemMessages in the graph state would cause them
         to accumulate in checkpoints, leading to "multiple non-consecutive system messages"
         errors on subsequent turns (especially with Anthropic models).
+
+        Args:
+            messages: List of messages to process
+
+        Returns:
+            Filtered message list without SystemMessage objects
+        """
+        return [m for m in messages if not isinstance(m, SystemMessage)]
+
+    @staticmethod
+    def _prepare_output_messages(messages: list, middleware_updates: list = None) -> list:
+        """Prepare messages for output, stripping system messages and prepending middleware updates.
 
         Args:
             messages: List of messages to process
@@ -850,8 +881,6 @@ class LLMNode(BaseTool):
         """
         filtered = [m for m in messages if not isinstance(m, SystemMessage)]
         if middleware_updates:
-            # Prepend RemoveMessage ops so LangGraph clears old messages first
-            # Then the new messages (summary + preserved + LLM response) are added
             return list(middleware_updates) + filtered
         return filtered
 

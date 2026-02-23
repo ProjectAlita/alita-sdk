@@ -1,10 +1,8 @@
 """
 ContextEditingMiddleware - Clears old tool outputs to reduce context size.
 
-Similar to PlanningMiddleware, this middleware:
-1. Wraps LangChain's prebuilt ContextEditingMiddleware
-2. Provides before_model hook to clear old tool results
-3. Supports configuration via constructor
+Uses LangChain's ClearToolUsesEdit strategy to automatically clear old tool
+outputs when token thresholds are exceeded.
 
 Usage:
     from alita_sdk.runtime.middleware.context_editing import ContextEditingMiddleware
@@ -23,8 +21,10 @@ Usage:
 """
 
 import logging
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, Callable
 
+from langchain_core.messages.utils import count_tokens_approximately
 from langchain_core.tools import BaseTool
 
 from ..base import Middleware
@@ -32,17 +32,11 @@ from ..base import Middleware
 logger = logging.getLogger(__name__)
 
 
-class _MinimalRuntime:
-    """Minimal runtime interface for LangChain AgentMiddleware."""
-    def __init__(self, config: dict):
-        self.config = config
-
-
 class ContextEditingMiddleware(Middleware):
     """
     Middleware that clears old tool outputs to reduce context size.
 
-    Wraps LangChain's ContextEditingMiddleware with ClearToolUsesEdit.
+    Uses LangChain's ClearToolUsesEdit strategy directly (no wrapper needed).
     Triggers when total context exceeds token threshold.
 
     Args:
@@ -69,34 +63,27 @@ class ContextEditingMiddleware(Middleware):
         self.keep_tool_results = keep_tool_results
         self.placeholder = placeholder
 
-        # Lazy-initialize LangChain middleware
-        self._lc_middleware = None
+        # Lazy-initialize the edit strategy
+        self._edit_strategy = None
 
         logger.info(
             f"ContextEditingMiddleware initialized "
             f"(trigger={trigger_tokens} tokens, keep={keep_tool_results} results)"
         )
 
-    def _ensure_middleware(self):
-        """Lazy initialization of LangChain middleware."""
-        if self._lc_middleware is None:
+    def _ensure_edit_strategy(self):
+        """Lazy initialization of ClearToolUsesEdit strategy."""
+        if self._edit_strategy is None:
             try:
-                from langchain.agents.middleware import (
-                    ContextEditingMiddleware as LCContextEditingMiddleware,
-                    ClearToolUsesEdit,
-                )
+                from langchain.agents.middleware.context_editing import ClearToolUsesEdit
 
-                self._lc_middleware = LCContextEditingMiddleware(
-                    edits=[
-                        ClearToolUsesEdit(
-                            trigger=self.trigger_tokens,
-                            keep=self.keep_tool_results,
-                            placeholder=self.placeholder,
-                        ),
-                    ],
+                self._edit_strategy = ClearToolUsesEdit(
+                    trigger=self.trigger_tokens,
+                    keep=self.keep_tool_results,
+                    placeholder=self.placeholder,
                 )
             except ImportError as e:
-                logger.error(f"Failed to import LangChain ContextEditingMiddleware: {e}")
+                logger.error(f"Failed to import ClearToolUsesEdit: {e}")
                 raise
 
     def get_tools(self) -> List[BaseTool]:
@@ -120,29 +107,39 @@ class ContextEditingMiddleware(Middleware):
         Returns:
             State updates with modified messages, or None
         """
-        self._ensure_middleware()
+        self._ensure_edit_strategy()
+
+        messages = state.get('messages', [])
+        if not messages:
+            return None
 
         try:
-            runtime = _MinimalRuntime(config)
-            updates = self._lc_middleware.before_model(state, runtime)
+            # Create a deep copy to avoid mutating original state
+            edited_messages = deepcopy(list(messages))
+            original_contents = {id(m): getattr(m, 'content', None) for m in edited_messages}
 
-            if updates:
-                cleared_count = self._count_cleared(updates)
+            # Apply the edit strategy directly (modifies in place)
+            self._edit_strategy.apply(
+                edited_messages,
+                count_tokens=count_tokens_approximately,
+            )
+
+            # Check if any messages were actually cleared
+            cleared_count = sum(
+                1 for m in edited_messages
+                if hasattr(m, 'content') and m.content == self.placeholder
+                and original_contents.get(id(m)) != self.placeholder
+            )
+
+            if cleared_count > 0:
                 self._fire_callback('context_edited', {
                     'cleared_count': cleared_count,
                 })
                 logger.info(f"Context editing triggered: cleared {cleared_count} tool outputs")
+                return {'messages': edited_messages}
 
-            return updates
+            return None
 
         except Exception as e:
             logger.warning(f"ContextEditingMiddleware.before_model failed: {e}")
             return None
-
-    def _count_cleared(self, updates: dict) -> int:
-        """Count how many tool outputs were cleared."""
-        messages = updates.get('messages', [])
-        return sum(
-            1 for m in messages
-            if hasattr(m, 'content') and m.content == self.placeholder
-        )

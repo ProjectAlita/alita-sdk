@@ -40,9 +40,9 @@ Usage:
 
     # Create summarization middleware (compresses old messages)
     summarization = SummarizationMiddleware(
-        model="openai:gpt-4o-mini",
-        trigger_tokens=50000,
-        keep_messages=10,
+        model=llm,  # BaseChatModel instance
+        trigger=("tokens", 50000),
+        keep=("messages", 10),
     )
 
     # Create context editing middleware (clears old tool outputs)
@@ -50,6 +50,12 @@ Usage:
         trigger_tokens=100000,
         keep_tool_results=3,
     )
+
+    # Or use context variable for simpler integration
+    from alita_sdk.runtime.middleware import set_middleware_context, get_current_middleware
+    set_middleware_context(manager)  # Set at start of execution
+    # ... later in LLMNode ...
+    manager = get_current_middleware()  # Access without parameter passing
 
     # Create error handler with default strategies (recommended)
     error_handler = ToolExceptionHandlerMiddleware.create_default(
@@ -69,7 +75,12 @@ Usage:
     prompt = manager.get_combined_prompt()
 """
 
-from .base import Middleware, MiddlewareManager
+from .base import (
+    Middleware,
+    MiddlewareManager,
+    get_current_middleware,
+    set_middleware_context,
+)
 from .planning import PlanningMiddleware
 from .summarization import SummarizationMiddleware
 from .context_editing import ContextEditingMiddleware
@@ -86,6 +97,8 @@ from .strategies import (
 __all__ = [
     "Middleware",
     "MiddlewareManager",
+    "get_current_middleware",
+    "set_middleware_context",
     "PlanningMiddleware",
     "SummarizationMiddleware",
     "ContextEditingMiddleware",
