@@ -279,7 +279,30 @@ def process_pipeline_result(
 
     # CRITICAL: Check for tool execution errors FIRST (before checking test_passed from LLM)
     # This prevents false positives where LLM says "test passed" but a tool actually failed
+    # BUT: First check if ANY tool call has test_passed=true (for multi-node tests)
+    has_explicit_test_passed = False
     if isinstance(result_data, dict) and "tool_calls_dict" in result_data:
+        tool_calls = result_data.get("tool_calls_dict", {})
+        if isinstance(tool_calls, dict):
+            for tool_call_id, tool_call in tool_calls.items():
+                if not isinstance(tool_call, dict):
+                    continue
+                tool_output = tool_call.get("tool_output") or tool_call.get("content")
+                if isinstance(tool_output, str) and tool_output.strip():
+                    try:
+                        parsed_output = json.loads(tool_output)
+                        if isinstance(parsed_output, dict):
+                            result_data_inner = parsed_output.get("result", {})
+                            if isinstance(result_data_inner, dict) and result_data_inner.get("test_passed") is True:
+                                has_explicit_test_passed = True
+                                if logger:
+                                    logger.debug(f"Found explicit test_passed=true in tool call {tool_call_id}")
+                                break
+                    except json.JSONDecodeError:
+                        pass
+    
+    # Now check for errors (but skip if we found explicit test_passed=true)
+    if isinstance(result_data, dict) and "tool_calls_dict" in result_data and not has_explicit_test_passed:
         tool_calls = result_data.get("tool_calls_dict", {})
         if isinstance(tool_calls, dict):
             for tool_call_id, tool_call in tool_calls.items():
