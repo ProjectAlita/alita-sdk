@@ -24,7 +24,22 @@ nodes:
         Test comment {current_date}{current_time}"""
         print(output_string)
 
-        {"formatted_message": output_string}
+        # Verify the output contains expected elements
+        nl = chr(10)
+        has_newline = nl in output_string
+        has_number = "11" in output_string
+        has_comment = "Test comment" in output_string
+        has_datetime = "2026" in output_string or "2025" in output_string or "2024" in output_string
+
+        test_results = {
+            "test_passed": has_newline and has_number and has_comment and has_datetime,
+            "formatted_message": output_string,
+            "has_newline": has_newline,
+            "has_number": has_number,
+            "has_comment": has_comment,
+            "has_datetime": has_datetime
+        }
+        test_results
     input: []
     output: []
     structured_output: true
