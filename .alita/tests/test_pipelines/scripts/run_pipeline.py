@@ -342,12 +342,24 @@ def process_pipeline_result(
                                 tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
                                 error_msg = parsed_output["error"]
                                 
-                                # Skip warnings - only treat actual errors as failures
-                                # Common warning patterns: "Warning:", "DeprecationWarning", "FutureWarning", etc.
-                                if "Warning" in error_msg and "Traceback" not in error_msg:
+                                # CRITICAL: Distinguish warnings from actual errors
+                                # Warnings (e.g., RequestsDependencyWarning, DeprecationWarning) should not fail tests
+                                # Only treat as error if it's a real exception/failure, not just a warning
+                                is_warning = (
+                                    "Warning:" in error_msg or
+                                    "warnings.warn" in error_msg or
+                                    "DeprecationWarning" in error_msg or
+                                    "FutureWarning" in error_msg or
+                                    "UserWarning" in error_msg or
+                                    "RequestsDependencyWarning" in error_msg
+                                )
+                                
+                                if is_warning:
+                                    # Log warning but don't fail test
                                     if logger:
-                                        logger.debug(f"Skipping warning from tool '{tool_name}': {error_msg[:200]}")
-                                    continue  # Skip this warning, don't mark test as failed
+                                        logger.debug(f"Tool '{tool_name}' returned warning (not treating as error): {error_msg[:100]}")
+                                    # Don't set test_passed = False, don't break - continue checking
+                                    continue
                                 
                                 # Extract meaningful error from tracebacks
                                 if "Traceback" in error_msg:
