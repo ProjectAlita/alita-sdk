@@ -43,12 +43,6 @@ Usage:
         keep=("messages", 10),
     )
 
-    # Or use context variable for simpler integration
-    from alita_sdk.runtime.middleware import set_middleware_context, get_current_middleware
-    set_middleware_context(manager)  # Set at start of execution
-    # ... later in LLMNode ...
-    manager = get_current_middleware()  # Access without parameter passing
-
     # Create error handler with default strategies (recommended)
     error_handler = ToolExceptionHandlerMiddleware.create_default(
         llm=llm,
@@ -69,8 +63,6 @@ Usage:
 from .base import (
     Middleware,
     MiddlewareManager,
-    get_current_middleware,
-    set_middleware_context,
 )
 from .planning import PlanningMiddleware
 from .summarization import SummarizationMiddleware
@@ -87,8 +79,6 @@ from .strategies import (
 __all__ = [
     "Middleware",
     "MiddlewareManager",
-    "get_current_middleware",
-    "set_middleware_context",
     "PlanningMiddleware",
     "SummarizationMiddleware",
     "ToolExceptionHandlerMiddleware",

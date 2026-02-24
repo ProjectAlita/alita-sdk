@@ -12,46 +12,11 @@ Inspired by LangChain's middleware pattern but adapted for Alita's architecture.
 
 import logging
 from abc import ABC, abstractmethod
-from contextvars import ContextVar
-from typing import Any, List, Optional, Dict, Callable, TYPE_CHECKING
+from typing import Any, List, Optional, Dict, Callable
 
 from langchain_core.tools import BaseTool
 
-if TYPE_CHECKING:
-    from . import MiddlewareManager
-
 logger = logging.getLogger(__name__)
-
-# Context variable for accessing middleware manager without threading through layers
-_middleware_context: ContextVar[Optional['MiddlewareManager']] = ContextVar(
-    'middleware_manager', default=None
-)
-
-
-def get_current_middleware() -> Optional['MiddlewareManager']:
-    """Get the current middleware manager from context.
-
-    This allows LLMNode and other components to access the middleware
-    without requiring explicit parameter passing through all layers.
-
-    Returns:
-        MiddlewareManager instance or None if not set
-    """
-    return _middleware_context.get()
-
-
-def set_middleware_context(manager: Optional['MiddlewareManager']):
-    """Set the middleware manager in context.
-
-    Should be called at the start of agent execution.
-
-    Args:
-        manager: MiddlewareManager instance to set
-
-    Returns:
-        Token that can be used to reset the context
-    """
-    return _middleware_context.set(manager)
 
 
 class Middleware(ABC):

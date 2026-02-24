@@ -1,5 +1,4 @@
 import asyncio
-import functools
 import logging
 from traceback import format_exc
 from typing import Any, Optional, List, Union, Literal, Dict, TYPE_CHECKING
@@ -17,47 +16,6 @@ if TYPE_CHECKING:
     from .lazy_tools import ToolRegistry
 
 logger = logging.getLogger(__name__)
-
-
-def auto_after_model_hook(invoke_method):
-    """
-    Decorator that automatically runs after_model middleware hooks.
-
-    Ensures context_info reflects the final state (including LLM response)
-    that gets saved to the checkpoint.
-    """
-    @functools.wraps(invoke_method)
-    def wrapper(self, state, config=None, **kwargs):
-        # Store original state for after_model hooks
-        original_state = state.copy() if isinstance(state, dict) else state
-
-        # Call the original invoke method
-        result = invoke_method(self, state, config, **kwargs)
-
-        # Get middleware manager - prefer explicit, fall back to context variable
-        middleware_mgr = self.middleware_manager
-        if middleware_mgr is None:
-            try:
-                from ..middleware.base import get_current_middleware
-                middleware_mgr = get_current_middleware()
-            except ImportError:
-                pass
-
-        # Run after_model hooks if middleware manager exists
-        if middleware_mgr is not None and isinstance(result, dict) and 'messages' in result:
-            # Create final state with LLM response for after_model hooks
-            final_state = {**original_state, 'messages': result['messages']}
-            middleware_mgr.run_after_model(final_state, config or {})
-
-            # Capture context_info reflecting the final state
-            context_info = middleware_mgr.get_context_info()
-
-            # Add/update context_info in result
-            result['context_info'] = context_info
-
-        return result
-
-    return wrapper
 
 
 # def _is_thinking_model(llm_client: Any) -> bool:
@@ -578,7 +536,6 @@ class LLMNode(BaseTool):
         # Format as numbered list
         return "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
 
-    @auto_after_model_hook
     def invoke(
             self,
             state: Union[str, dict],
@@ -596,31 +553,50 @@ class LLMNode(BaseTool):
         Returns:
             Updated state with LLM response
         """
-        # Run middleware before_model hooks (e.g., summarization, context editing)
-        # This may modify state by compressing old messages when token limits are approached
-        # Returns both processed state (for LLM) and RemoveMessage ops (for checkpoint)
-        middleware_updates = []
-        context_info = None
-
-        # Get middleware manager - prefer explicit, fall back to context variable
         middleware_mgr = self.middleware_manager
-        if middleware_mgr is None:
-            try:
-                from ..middleware.base import get_current_middleware
-                middleware_mgr = get_current_middleware()
-            except ImportError:
-                pass
+        middleware_updates = []
+        original_state = None
 
+        # Run before_model hooks (may summarize messages)
         if middleware_mgr is not None and isinstance(state, dict):
-            original_msg_count = len(state.get('messages', []))
+            original_state = state.copy()
             state, middleware_updates = middleware_mgr.run_before_model(state, config or {})
-            # Only log if summarization actually triggered (RemoveMessage ops returned)
-            if middleware_updates:
-                new_msg_count = len(state.get('messages', []))
-                logger.info(
-                    f"[LLMNode] Summarization triggered: {original_msg_count} -> {new_msg_count} messages, "
-                    f"RemoveMessage ops: {len(middleware_updates)}"
-                )
+
+        # Do LLM invocation
+        try:
+            result = self._invoke_llm_internal(state, config, middleware_updates)
+        except Exception as e:
+            model_info = getattr(self.client, 'model_name', None) or getattr(self.client, 'model', 'unknown')
+            logger.error(f"Error in LLM Node: {format_exc()}")
+            logger.error(f"Model being used: {model_info}")
+            logger.error(f"Error type: {type(e).__name__}")
+            result = {"messages": [AIMessage(content=f"Error: {e}")]}
+
+        # Run after_model hooks and add context_info
+        if middleware_mgr is not None and isinstance(result, dict) and 'messages' in result:
+            final_state = {**(original_state or state), 'messages': result['messages']}
+            middleware_mgr.run_after_model(final_state, config or {})
+            result['context_info'] = middleware_mgr.get_context_info()
+
+        return result
+
+    def _invoke_llm_internal(
+            self,
+            state: Union[str, dict],
+            config: Optional[RunnableConfig],
+            middleware_updates: list,
+    ) -> dict:
+        """
+        Internal LLM invocation logic. Separated to allow automatic after_model hooks.
+
+        Args:
+            state: The current state (possibly modified by before_model hooks)
+            config: Optional runnable config
+            middleware_updates: RemoveMessage ops from before_model hooks
+
+        Returns:
+            Result dict with 'messages' key
+        """
 
         func_args = propagate_the_input_mapping(input_mapping=self.input_mapping, input_variables=self.input_variables,
                                                 state=state)
@@ -706,98 +682,55 @@ class LLMNode(BaseTool):
             else:
                 logger.warning("No tools to bind to LLM")
 
-        try:
-            if self.structured_output and self.output_variables:
-                # Handle structured output
-                struct_params = self._prepare_structured_output_params()
-                struct_model = create_pydantic_model(f"LLMOutput", struct_params)
+        if self.structured_output and self.output_variables:
+            # Handle structured output
+            struct_params = self._prepare_structured_output_params()
+            struct_model = create_pydantic_model(f"LLMOutput", struct_params)
 
-                try:
-                    completion, initial_completion, final_messages = self._invoke_with_structured_output(
-                        llm_client, messages, struct_model, config
-                    )
-                except ValueError as e:
-                    # Handle fallback for structured output failures
-                    completion = self._handle_structured_output_fallback(
-                        llm_client, messages, struct_model, config, e
-                    )
-                    initial_completion = None
-                    final_messages = messages
+            try:
+                completion, initial_completion, final_messages = self._invoke_with_structured_output(
+                    llm_client, messages, struct_model, config
+                )
+            except ValueError as e:
+                # Handle fallback for structured output failures
+                completion = self._handle_structured_output_fallback(
+                    llm_client, messages, struct_model, config, e
+                )
+                initial_completion = None
+                final_messages = messages
 
-                result = completion.model_dump()
-                result = self._format_structured_output_result(result, final_messages, initial_completion or completion)
+            result = completion.model_dump()
+            result = self._format_structured_output_result(result, final_messages, initial_completion or completion)
 
-                # Prepend middleware updates to messages for checkpoint
-                if middleware_updates and 'messages' in result:
-                    result['messages'] = list(middleware_updates) + result['messages']
+            # Prepend middleware updates to messages for checkpoint
+            if middleware_updates and 'messages' in result:
+                result['messages'] = list(middleware_updates) + result['messages']
 
-                return self._add_context_info(result, context_info)
-            else:
-                # Handle regular completion
-                completion = llm_client.invoke(messages, config=config)
-                logger.info(f"Initial completion: {completion}")
-                # Handle both tool-calling and regular responses
-                if hasattr(completion, 'tool_calls') and completion.tool_calls:
-                    # Handle iterative tool-calling and execution
-                    new_messages, current_completion = self._run_async_in_sync_context(
-                        self.__perform_tool_calling(completion, messages, llm_client, config)
-                    )
+            return result
 
-                    output_msgs = {"messages": self._prepare_output_messages(new_messages, middleware_updates)}
-                    if self.output_variables:
-                        if self.output_variables[0] == 'messages':
-                            return self._add_context_info(output_msgs, context_info)
-                        # Extract content properly from thinking-enabled responses
-                        if current_completion:
-                            content_parts = self._extract_content_from_completion(current_completion)
-                            text_content = content_parts.get('text')
-                            thinking = content_parts.get('thinking')
-                            
-                            # Dispatch thinking event if present
-                            if thinking:
-                                try:
-                                    model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
-                                    dispatch_custom_event(
-                                        name="thinking_step",
-                                        data={
-                                            "message": thinking,
-                                            "tool_name": f"LLM ({model_name})",
-                                            "toolkit": "reasoning",
-                                        },
-                                        config=config,
-                                    )
-                                except Exception as e:
-                                    logger.warning(f"Failed to dispatch thinking event: {e}")
-                            
-                            if text_content:
-                                output_msgs[self.output_variables[0]] = text_content
-                            else:
-                                # Fallback to raw content
-                                content = current_completion.content
-                                output_msgs[self.output_variables[0]] = content if isinstance(content, str) else str(content)
-                        else:
-                            output_msgs[self.output_variables[0]] = None
+        # Handle regular completion
+        completion = llm_client.invoke(messages, config=config)
+        logger.info(f"Initial completion: {completion}")
 
-                    return self._add_context_info(output_msgs, context_info)
-                else:
-                    # Regular text response - handle both simple strings and thinking-enabled responses
-                    content_parts = self._extract_content_from_completion(completion)
+        # Handle both tool-calling and regular responses
+        if hasattr(completion, 'tool_calls') and completion.tool_calls:
+            # Handle iterative tool-calling and execution
+            new_messages, current_completion = self._run_async_in_sync_context(
+                self.__perform_tool_calling(completion, messages, llm_client, config)
+            )
+
+            output_msgs = {"messages": self._prepare_output_messages(new_messages, middleware_updates)}
+            if self.output_variables:
+                if self.output_variables[0] == 'messages':
+                    return output_msgs
+                # Extract content properly from thinking-enabled responses
+                if current_completion:
+                    content_parts = self._extract_content_from_completion(current_completion)
+                    text_content = content_parts.get('text')
                     thinking = content_parts.get('thinking')
-                    text_content = content_parts.get('text') or ''
-                    
-                    # Fallback to string representation if no content extracted
-                    if not text_content:
-                        if hasattr(completion, 'content'):
-                            content = completion.content
-                            text_content = content.strip() if isinstance(content, str) else str(content)
-                        else:
-                            text_content = str(completion)
-                    
-                    # Dispatch thinking step event to chat if present
+
+                    # Dispatch thinking event if present
                     if thinking:
-                        logger.info(f"Model thinking: {thinking[:200]}..." if len(thinking) > 200 else f"Model thinking: {thinking}")
-                        
-                        # Dispatch custom event for thinking step to be displayed in chat
                         try:
                             model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
                             dispatch_custom_event(
@@ -811,43 +744,69 @@ class LLMNode(BaseTool):
                             )
                         except Exception as e:
                             logger.warning(f"Failed to dispatch thinking event: {e}")
-                    
-                    # Build the AI message with both thinking and text
-                    # Store thinking in additional_kwargs for potential future use
-                    ai_message_kwargs = {'content': text_content}
-                    if thinking:
-                        ai_message_kwargs['additional_kwargs'] = {'thinking': thinking}
-                    ai_message = AIMessage(**ai_message_kwargs)
 
-                    # Try to extract JSON if output variables are specified (but exclude 'messages' which is handled separately)
-                    json_output_vars = [var for var in (self.output_variables or []) if var != 'messages']
-                    if json_output_vars:
-                        # set response to be the first output variable for non-structured output
-                        response_data = {json_output_vars[0]: text_content}
-                        new_messages = messages + [ai_message]
-                        response_data['messages'] = self._prepare_output_messages(new_messages, middleware_updates)
-                        return self._add_context_info(response_data, context_info)
+                    if text_content:
+                        output_msgs[self.output_variables[0]] = text_content
+                    else:
+                        # Fallback to raw content
+                        content = current_completion.content
+                        output_msgs[self.output_variables[0]] = content if isinstance(content, str) else str(content)
+                else:
+                    output_msgs[self.output_variables[0]] = None
 
-                    # Simple text response (either no output variables or JSON parsing failed)
-                    new_messages = messages + [ai_message]
-                    return self._add_context_info(
-                        {"messages": self._prepare_output_messages(new_messages, middleware_updates)},
-                        context_info
-                    )
+            return output_msgs
 
-        except Exception as e:
-            # Enhanced error logging with model diagnostics
-            model_info = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'unknown')
-            logger.error(f"Error in LLM Node: {format_exc()}")
-            logger.error(f"Model being used: {model_info}")
-            logger.error(f"Error type: {type(e).__name__}")
+        # Regular text response - handle both simple strings and thinking-enabled responses
+        content_parts = self._extract_content_from_completion(completion)
+        thinking = content_parts.get('thinking')
+        text_content = content_parts.get('text') or ''
 
-            error_msg = f"Error: {e}"
-            new_messages = messages + [AIMessage(content=error_msg)]
-            return self._add_context_info(
-                {"messages": self._prepare_output_messages(new_messages, middleware_updates)},
-                context_info
-            )
+        # Fallback to string representation if no content extracted
+        if not text_content:
+            if hasattr(completion, 'content'):
+                content = completion.content
+                text_content = content.strip() if isinstance(content, str) else str(content)
+            else:
+                text_content = str(completion)
+
+        # Dispatch thinking step event to chat if present
+        if thinking:
+            logger.info(f"Model thinking: {thinking[:200]}..." if len(thinking) > 200 else f"Model thinking: {thinking}")
+
+            # Dispatch custom event for thinking step to be displayed in chat
+            try:
+                model_name = getattr(llm_client, 'model_name', None) or getattr(llm_client, 'model', 'LLM')
+                dispatch_custom_event(
+                    name="thinking_step",
+                    data={
+                        "message": thinking,
+                        "tool_name": f"LLM ({model_name})",
+                        "toolkit": "reasoning",
+                    },
+                    config=config,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to dispatch thinking event: {e}")
+
+        # Build the AI message with both thinking and text
+        # Store thinking in additional_kwargs for potential future use
+        ai_message_kwargs = {'content': text_content}
+        if thinking:
+            ai_message_kwargs['additional_kwargs'] = {'thinking': thinking}
+        ai_message = AIMessage(**ai_message_kwargs)
+
+        # Try to extract JSON if output variables are specified (but exclude 'messages' which is handled separately)
+        json_output_vars = [var for var in (self.output_variables or []) if var != 'messages']
+        if json_output_vars:
+            # set response to be the first output variable for non-structured output
+            response_data = {json_output_vars[0]: text_content}
+            new_messages = messages + [ai_message]
+            response_data['messages'] = self._prepare_output_messages(new_messages, middleware_updates)
+            return response_data
+
+        # Simple text response (either no output variables or JSON parsing failed)
+        new_messages = messages + [ai_message]
+        return {"messages": self._prepare_output_messages(new_messages, middleware_updates)}
 
     @staticmethod
     def _strip_system_messages(messages: list) -> list:
@@ -883,13 +842,6 @@ class LLMNode(BaseTool):
         if middleware_updates:
             return list(middleware_updates) + filtered
         return filtered
-
-    @staticmethod
-    def _add_context_info(result: dict, context_info: Optional[dict] = None) -> dict:
-        """Add context info to result (includes summarization info when summarization occurred)."""
-        if context_info:
-            result['context_info'] = context_info
-        return result
 
     def _run(self, *args, **kwargs):
         # Legacy support for old interface
