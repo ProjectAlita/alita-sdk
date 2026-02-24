@@ -28,12 +28,12 @@ services:
       - GITLAB_PRIVATE_TOKEN=${GITLAB_PRIVATE_TOKEN:-}
       - POSTMAN_API_KEY=${POSTMAN_API_KEY:-}
       - SHAREPOINT_CLIENT_SECRET=${SHAREPOINT_CLIENT_SECRET:-}
+      - QTEST_API_TOKEN=${QTEST_API_TOKEN:-}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
       - DEFAULT_LLM_MODEL=gpt-4o-2024-11-20
       - SANDBOX_BASE=/app/
       - DENO_DIR=/app/
       - PYTHONPATH=/app
-      - PYODIDE_SANDBOX_PKG=jsr:@langchain/pyodide-sandbox@0.0.4
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
     volumes:
