@@ -6,12 +6,11 @@ Middleware provides modular extensions for agents, including:
 - System prompt modifications
 - State restoration on conversation resume
 - Callbacks for UI/CLI integration
-- Context management (summarization, context editing)
+- Context management (summarization)
 
 Available middleware:
 - PlanningMiddleware: Task planning and progress tracking
 - SummarizationMiddleware: Automatic context compression when token limits approached
-- ContextEditingMiddleware: Automatic clearing of old tool outputs
 - ToolExceptionHandlerMiddleware: Smart tool error handling with strategies
 
 Available strategies (for ToolExceptionHandlerMiddleware):
@@ -27,7 +26,6 @@ Usage:
     from alita_sdk.runtime.middleware import (
         PlanningMiddleware,
         SummarizationMiddleware,
-        ContextEditingMiddleware,
         ToolExceptionHandlerMiddleware,
         MiddlewareManager
     )
@@ -43,12 +41,6 @@ Usage:
         model=llm,  # BaseChatModel instance
         trigger=("tokens", 50000),
         keep=("messages", 10),
-    )
-
-    # Create context editing middleware (clears old tool outputs)
-    context_editing = ContextEditingMiddleware(
-        trigger_tokens=100000,
-        keep_tool_results=3,
     )
 
     # Or use context variable for simpler integration
@@ -67,7 +59,6 @@ Usage:
     manager = MiddlewareManager()
     manager.add(planning)
     manager.add(summarization)
-    manager.add(context_editing)
     manager.add(error_handler)
 
     # Get tools and prompts
@@ -83,7 +74,6 @@ from .base import (
 )
 from .planning import PlanningMiddleware
 from .summarization import SummarizationMiddleware
-from .context_editing import ContextEditingMiddleware
 from .tool_exception_handler import ToolExceptionHandlerMiddleware
 from .strategies import (
     ExceptionHandlerStrategy,
@@ -101,7 +91,6 @@ __all__ = [
     "set_middleware_context",
     "PlanningMiddleware",
     "SummarizationMiddleware",
-    "ContextEditingMiddleware",
     "ToolExceptionHandlerMiddleware",
     # Strategies
     "ExceptionHandlerStrategy",
