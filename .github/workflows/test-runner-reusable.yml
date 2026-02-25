@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: true
+      enable_rp_reporting:
+        description: 'Enable ReportPortal/OneTest reporting (sends test results to TMS)'
+        required: false
+        type: boolean
+        default: false
 
 env:
   REGISTRY: ghcr.io
@@ -125,6 +130,9 @@ jobs:
           export POSTMAN_API_KEY="${{ secrets.POSTMAN_API_KEY }}"
           export SHAREPOINT_CLIENT_SECRET="${{ secrets.SHAREPOINT_CLIENT_SECRET }}"
           export QTEST_API_TOKEN="${{ secrets.QTEST_API_TOKEN }}"
+          export RP_ENABLED="${{ inputs.enable_rp_reporting }}"
+          export RP_PROJECT="${{ secrets.RP_PROJECT }}"
+          export RP_API_KEY="${{ secrets.RP_API_KEY }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"

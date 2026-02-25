@@ -36,6 +36,10 @@ services:
       - PYTHONPATH=/app
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - RP_ENABLED=${RP_ENABLED:-false}                             
+      - RP_ENDPOINT=${RP_ENDPOINT:-https://tms.onetest.ai/api/receiver}
+      - RP_PROJECT=${RP_PROJECT:-}
+      - RP_API_KEY=${RP_API_KEY:-}
     volumes:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk

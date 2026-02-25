@@ -219,6 +219,7 @@ jobs:
       environment: local
       enable_parallel: true
       enable_bug_reporting: true
+      enable_rp_reporting: true
     secrets: inherit
 
   summarize-and-comment:
