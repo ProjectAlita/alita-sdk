@@ -24,6 +24,8 @@ state:
     type: dict
   created_case_ids:
     type: str
+  cleanup_result:
+    type: str
 
 entry_point: invoke_add_cases
 
@@ -119,16 +121,17 @@ nodes:
           1. Did the add_cases tool execute successfully?
           2. Are there any errors in the creation result?
           3. Does the output confirm case creation?
-          4. Was cleanup successful (can ignore cleanup errors)?
+          4. Was cleanup attempted (verify delete_case was called)?
+          5. Check cleanup result for successful deletion (can tolerate errors if attempt was made).
 
           Return a JSON object with:
           {{
-            "test_passed": true/false,
-            "summary": "brief description of outcome",
+            "test_passed": true/false (based on creation success AND cleanup attempt),
+            "summary": "brief description of outcome including cleanup status",
             "error": "error details if failed, null if passed"
           }}
 
-          Note: test_passed should be based ONLY on creation success, not cleanup.
+          Note: test_passed requires both creation success AND cleanup attempt (actual deletion can fail but must be attempted).
           Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed

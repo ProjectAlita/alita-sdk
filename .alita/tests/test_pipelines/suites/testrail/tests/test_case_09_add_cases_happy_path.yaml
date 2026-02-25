@@ -22,7 +22,13 @@ state:
     type: dict
   test_results:
     type: dict
-  created_case_ids:
+  case_id_1:
+    type: str
+  case_id_2:
+    type: str
+  cleanup_result_1:
+    type: str
+  cleanup_result_2:
     type: str
 
 entry_point: invoke_add_cases
@@ -55,50 +61,63 @@ nodes:
       task:
         type: fstring
         value: |
-          Extract all test case IDs from the bulk creation result.
+          Extract the TWO test case IDs from the bulk creation result.
           
           Tool Result: {tool_result}
           
-          Find and extract all case IDs created. The result may contain multiple cases.
-          Return the case IDs as a comma-separated string with no spaces.
+          This operation created exactly 2 test cases. Extract both IDs.
+          The IDs may be in fields like 'id', 'case_id', or within arrays.
           
-          Example: If 2 cases were created with IDs 12345 and 12346, return: 12345,12346
+          Return a JSON object with:
+          {{
+            "case_id_1": "first case ID as string",
+            "case_id_2": "second case ID as string"
+          }}
+          
+          Return ONLY the JSON object, no additional text.
       chat_history:
         type: fixed
         value: []
     output:
-      - created_case_ids
+      - case_id_1
+      - case_id_2
     structured_output: true
-    transition: cleanup_delete_cases
+    transition: cleanup_delete_case_1
 
-  - id: cleanup_delete_cases
-    type: llm
-    model: gpt-4o-2024-11-20
+  - id: cleanup_delete_case_1
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
     input:
-      - created_case_ids
+      - case_id_1
     input_mapping:
-      system:
+      case_id:
+        type: variable
+        value: case_id_1
+      soft_delete:
         type: fixed
-        value: "You are a cleanup orchestrator for TestRail test cases."
-      task:
-        type: fstring
-        value: |
-          You need to delete the following test case IDs: {created_case_ids}
-          
-          Split the comma-separated IDs and call delete_case for each one.
-          Use soft_delete=true for all deletions.
-          
-          Return a summary of all deletions performed.
-      chat_history:
-        type: fixed
-        value: []
-    tools:
-      - type: toolkit
-        toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
-        selected_tools:
-          - delete_case
+        value: true
     output:
-      - cleanup_result
+      - cleanup_result_1
+    structured_output: false
+    continue_on_error: true
+    transition: cleanup_delete_case_2
+
+  - id: cleanup_delete_case_2
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - case_id_2
+    input_mapping:
+      case_id:
+        type: variable
+        value: case_id_2
+      soft_delete:
+        type: fixed
+        value: true
+    output:
+      - cleanup_result_2
     structured_output: false
     continue_on_error: true
     transition: validate_result
@@ -108,7 +127,8 @@ nodes:
     model: gpt-4o-2024-11-20
     input:
       - tool_result
-      - cleanup_result
+      - cleanup_result_1
+      - cleanup_result_2
     input_mapping:
       system:
         type: fixed
@@ -119,29 +139,31 @@ nodes:
           Analyze the complete test workflow results.
 
           Creation Result: {tool_result}
-          Cleanup Result: {cleanup_result}
+          Cleanup Result 1: {cleanup_result_1}
+          Cleanup Result 2: {cleanup_result_2}
 
           Expected behavior:
           - Tool executed successfully
-          - Created multiple test cases
+          - Created exactly 2 test cases
           - Result contains array of created case confirmations
-          - Cleanup deleted the created test cases
+          - Both test cases were deleted (2 delete operations)
           - No errors or exceptions in creation
 
           Evaluate:
           1. Did the add_cases tool execute successfully?
           2. Are there any errors in the creation result?
-          3. Does the output confirm multiple case creations?
-          4. Was cleanup successful (can ignore cleanup errors)?
+          3. Does the output confirm 2 case creations?
+          4. Were BOTH delete operations attempted (verify cleanup_result_1 and cleanup_result_2 exist)?
+          5. Check if both deletions succeeded (can tolerate errors if attempts were made).
 
           Return a JSON object with:
           {{
-            "test_passed": true/false,
-            "summary": "brief description of outcome",
+            "test_passed": true/false (based on creation success AND both cleanup attempts),
+            "summary": "brief description including cleanup status for both deletions",
             "error": "error details if failed, null if passed"
           }}
 
-          Note: test_passed should be based ONLY on creation success, not cleanup.
+          Note: test_passed requires creation success AND both delete attempts (actual deletion can fail but must be attempted).
           Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed

@@ -109,53 +109,6 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    transition: validate_result
-
-  - id: validate_result
-    type: llm
-    model: gpt-4o-2024-11-20
-    input:
-      - tool_result
-    input_mapping:
-      system:
-        type: fixed
-        value: "You are a quality assurance validator."
-      task:
-        type: fstring
-        value: |
-          Analyze the output from the add_file_to_case tool with invalid file path.
-
-          Tool Result: {tool_result}
-
-          This test validates error handling for non-existent artifact file.
-
-          Perform the following checks:
-          1. Confirm the tool executed (result is not empty or null).
-          2. Examine any error message for specific meaning. Valid error patterns for missing file include:
-             - file not found or does not exist
-             - failed to download artifact
-             - artifact not accessible
-             - file path invalid
-          3. Determine if the error is about the missing file itself.
-             Errors like "failed to download artifact" are expected and correct.
-             System errors unrelated to the file path are failures.
-
-          Return a JSON object named test_results with the following structure:
-
-          {{
-            "test_passed": boolean (TRUE if error occurred as expected),
-            "summary": "brief description of outcome",
-            "error": "error details if failed, null if passed"
-          }}
-
-          Return **ONLY** the JSON object. No markdown, no additional text.
-      chat_history:
-        type: fixed
-        value: []
-    output:
-      - test_results
-    structured_output_dict:
-      test_results: "dict"
     transition: delete_testcase
 
   - id: delete_testcase
@@ -168,8 +121,66 @@ nodes:
       case_id:
         type: variable
         value: created_case_id
+      soft_delete:
+        type: fixed
+        value: true
     output:
       - cleanup_result
     structured_output: false
     continue_on_error: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - cleanup_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete test workflow results.
+
+          File Attachment Result: {tool_result}
+          Cleanup Result: {cleanup_result}
+
+          This test validates error handling for non-existent artifact file AND verifies cleanup.
+
+          Perform the following checks:
+          1. File Attachment Error Validation:
+             - Confirm the tool executed (result is not empty or null).
+             - Examine any error message for specific meaning. Valid error patterns for missing file include:
+               * file not found or does not exist
+               * failed to download artifact
+               * artifact not accessible
+               * file path invalid
+             - Determine if the error is about the missing file itself.
+               Errors like "failed to download artifact" are expected and correct.
+               System errors unrelated to the file path are failures.
+          
+          2. Cleanup Verification:
+             - Verify the cleanup (delete_case) was attempted.
+             - Check if cleanup result indicates successful deletion.
+             - Note: Cleanup errors can be ignored, but attempt must be made.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (TRUE if error occurred as expected AND cleanup was attempted),
+            "summary": "brief description of outcome including cleanup status",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
     transition: END
