@@ -1,0 +1,170 @@
+name: "TR11 update case"
+priority: Critical
+description: |
+  Verify the update_case tool updates an existing test case.
+  
+  Objective: Test updating test case properties.
+  
+  Expected Behavior:
+  - Tool executes successfully with case ID and updates
+  - Updates specified fields
+  - Returns updated timestamp
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+
+state:
+  section_id:
+    type: str
+    value: ${TESTRAIL_SECTION_ID}
+  case_id:
+    type: str
+  created_case_id:
+    type: str
+  case_properties:
+    type: dict
+    value:
+      title: "Updated Test Case Title"
+      priority_id: 4
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  cleanup_result:
+    type: str
+
+entry_point: create_testcase
+
+nodes:
+  - id: create_testcase
+    type: toolkit
+    tool: add_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - section_id
+    input_mapping:
+      section_id:
+        type: variable
+        value: section_id
+      title:
+        type: fixed
+        value: "[Auto] Test Case for TR11 - Update Case Test"
+      case_properties:
+        type: fixed
+        value:
+          template_id: 1
+          type_id: 1
+          priority_id: 2
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_case_id
+
+  - id: extract_case_id
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a JSON data extractor."
+      task:
+        type: fstring
+        value: |
+          Extract the test case ID from the tool result.
+          
+          Tool Result: {tool_result}
+          
+          Find and extract the case ID (it may be in fields like 'id', 'case_id', or within the result text).
+          Return ONLY the numeric case ID as a plain string with no additional text or formatting.
+          
+          Example: If the result contains "Test case #12345", return: 12345
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - created_case_id
+    structured_output: true
+    transition: invoke_update_case
+
+  - id: invoke_update_case
+    type: toolkit
+    tool: update_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+      - case_properties
+    input_mapping:
+      case_id:
+        type: variable
+        value: created_case_id
+      case_properties:
+        type: variable
+        value: case_properties
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the tool execution results and determine if the test passed.
+
+          tool executed: update_case
+          results: {tool_result}
+
+          expected behavior:
+          - tool executed successfully
+          - updated test case properties
+          - result contains updated timestamp
+          - no errors or exceptions
+
+          Evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output confirm case update?
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: delete_testcase
+
+  - id: delete_testcase
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+    input_mapping:
+      case_id:
+        type: variable
+        value: created_case_id
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true
+    transition: END

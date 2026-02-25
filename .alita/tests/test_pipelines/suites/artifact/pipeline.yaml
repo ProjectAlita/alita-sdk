@@ -21,6 +21,7 @@ env_mapping:
   sharepoint_client_secret: ${SHAREPOINT_CLIENT_SECRET}
   sharepoint_test_list: ${SHAREPOINT_TEST_LIST:DO_NOT_DELETE_AlitaTestList}
   sharepoint_test_folder: ${SHAREPOINT_TEST_FOLDER:'sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles'}
+  testrail_url: ${TESTRAIL_URL:https://epamelitea.testrail.io}
 
 # Setup steps executed before running tests
 # Steps are executed in order; if a step fails, setup stops
@@ -85,6 +86,35 @@ setup:
       - key: SHAREPOINT_TOOLKIT_NAME
         value: $.name
 
+  # Step 2d: Setup TestRail Configuration
+  - name: Setup TestRail Configuration
+    type: configuration
+    config:
+      config_type: testrail
+      alita_title: ${TESTRAIL_SECRET_NAME:testrail}
+      data:
+        url: ${TESTRAIL_URL:https://epamelitea.testrail.io}
+        email: ${TESTRAIL_EMAIL:liana_gevorgyan@epam.com}
+        password: ${TESTRAIL_PASSWORD}
+
+  # Step 2e: Create TestRail Toolkit
+  - name: Create TestRail Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      config_file: ../../configs/testrail-config.json
+      toolkit_type: testrail
+      overrides:
+        # Credentials must use secret reference format (platform requirement)
+        testrail_configuration:
+          private: true
+          alita_title: ${TESTRAIL_SECRET_NAME:testrail}
+    save_to_env:
+      - key: TESTRAIL_TOOLKIT_ID
+        value: $.id
+      - key: TESTRAIL_TOOLKIT_NAME
+        value: $.name
+
   # Step 3: Create Artifact Toolkit on the platform
   - name: Create Artifact Toolkit
     type: toolkit
@@ -142,6 +172,26 @@ setup:
         value: $.result.filepath
         default: "/artifact-test-bucket/sharepoint_test_upload.txt"
 
+  # Step 6: Create test file artifact for TestRail tests
+  - name: Create TestRail Test File Artifact
+    type: toolkit_invoke
+    config:
+      toolkit_id: ${ARTIFACT_TOOLKIT_ID}
+      tool_name: createFile
+      tool_params:
+        filename: testrail_test_attachment.txt
+        filedata: |
+          This is a test file for TestRail file attachment testing.
+          
+          Created at ${TIMESTAMP}
+          Test Suite: Artifact Toolkit
+          
+          This file is used to test the add_file_to_case tool.
+    save_to_env:
+      - key: TESTRAIL_TEST_ARTIFACT_ID
+        value: $.result.filepath
+        default: "/artifact-test-bucket/testrail_test_attachment.txt"
+
 # Composable pipelines - seeded first, used by hooks and other pipelines
 # These are reusable pipeline components that can be invoked conditionally
 composable_pipelines: []
@@ -171,6 +221,7 @@ execution:
     - test_case_19_*.yaml  # ART17 - SharePoint Upload File Replace
     - test_case_20_*.yaml  # ART18 - SharePoint Add Attachment from Artifact
     - test_case_21_*.yaml  # ART19 - SharePoint Add Attachment Replace
+    - test_case_22_*.yaml  # ART22 - TestRail Add File to Case
 
   # Variables to substitute in test YAML files
   substitutions:
@@ -182,6 +233,11 @@ execution:
     SHAREPOINT_TOOLKIT_NAME: ${SHAREPOINT_TOOLKIT_NAME}
     SHAREPOINT_TEST_LIST: ${sharepoint_test_list}
     SHAREPOINT_TEST_FOLDER: ${sharepoint_test_folder}
+    TESTRAIL_TOOLKIT_ID: ${TESTRAIL_TOOLKIT_ID}
+    TESTRAIL_TOOLKIT_NAME: ${TESTRAIL_TOOLKIT_NAME}
+    TESTRAIL_PROJECT_ID: ${TESTRAIL_PROJECT_ID:"10"}
+    TESTRAIL_SECTION_ID: ${TESTRAIL_SECTION_ID:"652"}
+    TESTRAIL_TEST_ARTIFACT_ID: ${TESTRAIL_TEST_ARTIFACT_ID}
     TIMESTAMP: ${TIMESTAMP}
     TEST_BUCKET: ${TEST_BUCKET}
     TEST_ARTIFACT_ID: ${TEST_ARTIFACT_ID}
@@ -224,6 +280,14 @@ cleanup:
     type: toolkit
     config:
       toolkit_id: ${SHAREPOINT_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+  # Step 5: Delete the TestRail toolkit
+  - name: Delete TestRail Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${TESTRAIL_TOOLKIT_ID}
     enabled: true
     continue_on_error: true
 
