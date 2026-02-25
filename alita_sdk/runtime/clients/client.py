@@ -22,6 +22,7 @@ from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
 from ..middleware.tool_exception_handler import ToolExceptionHandlerMiddleware
+from ...configurations import get_class_configurations
 
 logger = logging.getLogger(__name__)
 
@@ -1684,6 +1685,110 @@ class AlitaClient:
                 "llm_model": llm_model if 'llm_model' in locals() else None,
                 "events_dispatched": [],
                 "execution_time_seconds": 0.0
+            }
+
+    def test_config_connection(self, configuration_settings: dict) -> dict:
+        """
+        Test toolkit connection using the configuration class's check_connection method.
+
+        Resolves the configuration class by toolkit type, calls its static
+        check_connection(settings) -> str | None method, and normalizes the result
+        into a consistent response dict.
+
+        Args:
+            configuration_settings: Configuration dictionary containing:
+                - type: Toolkit type key (e.g. 'github', 'jira', 'confluence')
+                - settings: Dictionary with toolkit-specific connection settings
+
+        Returns:
+            Dictionary containing:
+                - success: Boolean indicating if the connection was successful
+                - error: Error message string (only present when unsuccessful)
+                - toolkit_config: Original toolkit configuration
+                - execution_time_seconds: Time taken for the connection check in seconds
+
+        Raises:
+            Nothing — all exceptions are caught and returned as success: False.
+
+        Example:
+            >>> config = {
+            ...     'type': 'jira',
+            ...     'settings': {
+            ...         'base_url': 'https://myorg.atlassian.net',
+            ...         'token': 'my-api-token'
+            ...     }
+            ... }
+            >>> result = client.test_config_connection(config)
+            >>> if result['success']:
+            ...     print("Connected!")
+            ... else:
+            ...     print(f"Failed: {result['error']}")
+        """
+        import time
+
+        toolkit_type = configuration_settings.get('type', '')
+        settings = configuration_settings.get('settings') or {}
+
+        if not toolkit_type:
+            return {
+                "success": False,
+                "error": "toolkit_config is missing required 'type' field",
+                "toolkit_config": configuration_settings,
+                "execution_time_seconds": 0.0
+            }
+
+        # Resolve configuration class by toolkit type
+        config_classes = get_class_configurations()
+        config_class = config_classes.get(toolkit_type)
+
+        if config_class is None or not callable(getattr(config_class, 'check_connection', None)):
+            return {
+                "success": False,
+                "error": f"check_connection not supported for toolkit type '{toolkit_type}'",
+                "toolkit_config": configuration_settings,
+                "execution_time_seconds": 0.0
+            }
+
+        logger.info(f"Testing toolkit connection for type='{toolkit_type}'")
+        start_time = time.time()
+
+        try:
+            result = config_class.check_connection(settings)
+            execution_time = time.time() - start_time
+
+            if result is None:
+                # None return value means success
+                logger.info(
+                    f"Toolkit connection successful for type='{toolkit_type}' in {execution_time:.3f}s"
+                )
+                return {
+                    "success": True,
+                    "toolkit_config": configuration_settings,
+                    "execution_time_seconds": execution_time
+                }
+            else:
+                # Any non-None return is an error message string
+                error_message = str(result)
+                logger.warning(
+                    f"Toolkit connection failed for type='{toolkit_type}': {error_message}"
+                )
+                return {
+                    "success": False,
+                    "error": error_message,
+                    "toolkit_config": configuration_settings,
+                    "execution_time_seconds": execution_time
+                }
+
+        except Exception as e:
+            execution_time = time.time() - start_time
+            logger.error(
+                f"Toolkit connection check raised exception for type='{toolkit_type}': {str(e)}"
+            )
+            return {
+                "success": False,
+                "error": f"Connection check failed: {str(e)}",
+                "toolkit_config": configuration_settings,
+                "execution_time_seconds": execution_time
             }
 
     def test_mcp_connection(self, toolkit_config: dict, mcp_tokens: dict = None) -> dict:

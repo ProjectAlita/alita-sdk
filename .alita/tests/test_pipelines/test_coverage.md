@@ -11,8 +11,8 @@ Generated on: 2026-02-23
 | **Toolkits with Test Coverage** | 15 |
 | **Toolkits WITHOUT Tests** | 35 |
 | **Overall Toolkit Coverage** | **30%** (15/50) |
-| **Tools Tested** | ~266 out of ~450 |
-| **Total Test Cases** | 329 |
+| **Tools Tested** | ~270 out of ~450 |
+| **Total Test Cases** | 333 |
 | **Framework Test Suites** | 2 (State Retrieval, Structured Output) |
 
 ## Test Coverage by Toolkit (15 Toolkits with Tests)
@@ -28,7 +28,7 @@ Generated on: 2026-02-23
 | **GitLab** | 19 | 18 | **95%** | 22 | 🟢 Excellent |
 | **Jira** | 17 | 14 | **82%** | 28 | 🟢 Good |
 | **Postman** | 31 | 31 | **100%** | 57 | 🟢 Complete ✅ |
-| **QTest** | 16 | 15 | **94%** | 15 | 🟢 Excellent |
+| **QTest** | 16 | 15 | **94%** | 18 | 🟢 Excellent |
 | **SharePoint** | 8 | 8 | **100%** | 16 | 🟢 Complete ✅ |
 | **Xray** | 6 | 6 | **100%** | 10 | 🟢 Complete ✅ |
 | **Zephyr Essential** | 51 | 24 | **47%** | 24 | 🟡 Needs Work |
@@ -325,24 +325,24 @@ See detailed breakdown above in ADO section.
 
 | Tool Name | Tested | Test Case(s) |
 |-----------|--------|--------------|
-| `get_projects` | ✅ | test_case_01 |
-| `get_releases` | ✅ | test_case_02 |
-| `get_test_cycles` | ✅ | test_case_03 |
-| `get_test_suites` | ✅ | test_case_04 |
-| `get_test_cases` | ✅ | test_case_05 |
-| `get_test_case` | ✅ | test_case_06 |
-| `create_test_case` | ✅ | test_case_07 |
-| `update_test_case` | ✅ | test_case_08 |
-| `get_test_runs` | ✅ | test_case_09 |
-| `get_test_run` | ✅ | test_case_10 |
-| `create_test_run` | ✅ | test_case_11 |
-| `update_test_run` | ✅ | test_case_12 |
-| `get_test_logs` | ✅ | test_case_13 |
-| `create_test_log` | ✅ | test_case_14 |
-| `get_defects` | ✅ | test_case_15 |
-| `link_defect` | ❌ | - |
+| `search_by_dql` | ✅ | test_case_01, test_case_13 |
+| `create_test_cases` | ✅ | test_case_03, test_case_04, test_case_05, test_case_07, test_case_09, test_case_10, test_case_17 |
+| `update_test_case` | ✅ | test_case_05, test_case_15 |
+| `find_test_case_by_id` | ✅ | test_case_04, test_case_14 |
+| `delete_test_case` | ✅ | test_case_09 |
+| `link_tests_to_qtest_requirement` | ✅ | test_case_10 |
+| `link_tests_to_jira_requirement` | ❌ | |
+| `get_modules` | ✅ | test_case_06 |
+| `get_all_test_cases_fields_for_project` | ✅ | test_case_02 |
+| `find_test_cases_by_requirement_id` | ✅ | test_case_08 |
+| `find_requirements_by_test_case_id` | ✅ | test_case_11 |
+| `find_test_runs_by_test_case_id` | ✅ | test_case_12 |
+| `find_defects_by_test_run_id` | ✅ | test_case_16 |
+| `search_entities_by_dql` | ✅ | test_case_08 |
+| `find_entity_by_id` | ✅ | test_case_17, test_case_18 |
+| `add_file_to_test_case` | ✅ | test_case_07 |
 
-**Notes**: Excellent coverage for test management operations.
+**Notes**: Excellent coverage! 15 out of 16 tools tested with 18 test cases. Missing test for `link_tests_to_jira_requirement`. Test cases cover: DQL search, CRUD operations, linking QTest requirements, defect tracking, entity lookup, file attachments, and comprehensive error handling.
 
 ---
 
@@ -596,7 +596,7 @@ Framework structure for negative test cases:
 - **Postman** - 100% coverage (31/31 tools, 57 tests) ✅ **NEW** - Largest test suite!
 - **ADO Work Items** - 100% coverage (10/10 tools, 10 tests) ✅
 - **Xray** - 100% coverage (6/6 tools, 10 tests) ✅
-- **QTest** - 94% coverage (15/16 tools, 15 tests) ✅
+- **QTest** - 94% coverage (15/16 tools, 18 tests) ✅
 - **Zephyr Essential** - 47% coverage (24/51 tools, 24 tests) 🟡
 - **GitLab** - 95% coverage (18/19 tools, 22 tests) ✅
 
@@ -655,7 +655,7 @@ Test cases increased by **87.4%** (167 → 313) since initial report.
    - Priority: Complete attachment operations testing
 
 5. **QTest** (94% → 100%)
-   - Add test for: `link_defect`
+   - Add test for: `link_tests_to_jira_requirement`
 
 6. **GitLab** (95% → 100%)
    - Add test for: `get_issues`

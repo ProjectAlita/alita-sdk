@@ -114,6 +114,49 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
         # Flag to track if this tool was processed by the main loop
         # Used to prevent double processing by fallback systems
         tool_handled = False
+        # # --- OAuth token injection for non-MCP toolkits (SharePoint and others) ---
+        # try:
+        #     settings_preview = tool.get('settings', {}) if isinstance(tool, dict) else {}
+        #     # Determine common URL fields used by toolkits
+        #     toolkit_url = settings_preview.get('base_url') or settings_preview.get('site_url') or settings_preview.get('url')
+        #     session_id_from_token = None
+        #     access_token = None
+        #     if mcp_tokens and toolkit_url:
+        #         try:
+        #             canonical_url = canonical_resource(toolkit_url)
+        #         except Exception:
+        #             canonical_url = toolkit_url
+        #         # Prefer canonical key, fallback to raw URL
+        #         token_data = mcp_tokens.get(canonical_url) or mcp_tokens.get(toolkit_url)
+        #         if token_data:
+        #             if isinstance(token_data, dict):
+        #                 access_token = token_data.get('access_token') or token_data.get('token') or None
+        #                 session_id_from_token = token_data.get('session_id')
+        #             else:
+        #                 access_token = token_data
+        #
+        #     if access_token:
+        #         # Inject token for SharePoint toolkit (expects `token` setting)
+        #         if tool.get('type') == 'sharepoint' or 'site_url' in settings_preview:
+        #             settings = dict(tool.get('settings', {}) or {})
+        #             settings['token'] = access_token
+        #             if session_id_from_token:
+        #                 settings['session_id'] = session_id_from_token
+        #             tool['settings'] = settings
+        #             logger.info(f"[OAUTH] Injected SharePoint token for toolkit {tool.get('name')}")
+        #         else:
+        #             # Generic injection: set Authorization header in settings.headers
+        #             settings = dict(tool.get('settings', {}) or {})
+        #             headers = dict(settings.get('headers') or {})
+        #             headers.setdefault('Authorization', f'Bearer {access_token}')
+        #             settings['headers'] = headers
+        #             if session_id_from_token:
+        #                 settings['session_id'] = session_id_from_token
+        #             tool['settings'] = settings
+        #             logger.info(f"[OAUTH] Injected Authorization header for toolkit {tool.get('name')}")
+        # except Exception:
+        #     # Token injection must be non-fatal
+        #     logger.debug("OAuth token injection skipped due to an error", exc_info=True)
         try:
             if tool['type'] == 'application':
                 tool_handled = True
@@ -329,6 +372,11 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
     logger.info(f"[RUNTIME_TOOLS] Community tools loaded: {len(community_loaded)} tools")
 
     # Add alita tools (only for unhandled tools)
+    # set tokens to tools in order to handle case when token is required for authentication
+    # Tool must have its own logic of handling it
+    if mcp_tokens:
+        for tool in unhandled_tools:
+            tool['settings']['tokens'] = mcp_tokens
     alita_loaded = alita_tools(unhandled_tools, alita_client, llm, memory_store)
     tools += alita_loaded
     logger.info(f"[RUNTIME_TOOLS] Alita tools loaded: {len(alita_loaded)} tools")

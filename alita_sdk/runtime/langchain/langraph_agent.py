@@ -20,7 +20,7 @@ from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
 
-from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE
+from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE, DEAULT_AGENT_NAME
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META
@@ -32,7 +32,7 @@ from ..tools.loop_output import LoopToolNode
 from ..tools.tool import ToolNode
 from ..tools.lazy_tools import ToolRegistry
 from ..utils.evaluate import EvaluateTemplate
-from ..utils.utils import clean_string
+from ..utils.utils import clean_string, deduplicate_tool_names
 from ..tools.router import RouterNode
 
 logger = logging.getLogger(__name__)
@@ -647,7 +647,11 @@ class StateModifierNode(Runnable):
             if var in state:
                 # Empty the variable based on its type
                 if isinstance(state[var], list):
-                    result[var] = []
+                    result[var] = [
+                        RemoveMessage(id=msg.id)
+                        for msg in state[var]
+                        if hasattr(msg, 'id') and msg.id
+                    ] if var == 'messages' else []
                 elif isinstance(state[var], dict):
                     result[var] = {}
                 elif isinstance(state[var], str):
@@ -855,6 +859,11 @@ def create_graph(
                 f"[LazyTools] Auto-disabled: only {tool_count} tools "
                 f"(threshold: {LAZY_TOOLS_MIN_THRESHOLD}). Using direct binding."
             )
+            # Dedup tool names: lazy_tools_mode=True caused __init__ to skip dedup,
+            # but direct binding (bind_tools) requires unique names.
+            renamed = deduplicate_tool_names(tools, context="lazy-auto-disable")
+            if renamed:
+                logger.info(f"[LazyTools] Deduplicated {renamed} tool names after auto-disable")
         elif base_tools:
             tool_registry = ToolRegistry.from_tools(base_tools)
             toolkit_count = len(tool_registry.get_toolkit_names())
@@ -1024,7 +1033,9 @@ def create_graph(
                 elif isinstance(connected_tools, list):
                     # Use provided tool names as-is
                     tool_names = connected_tools
-                
+
+                # For non-agent LLM nodes (PIPELINE node without toolkits defined) we don't add any hidden tools by default, to avoid confusion and encourage explicit tool selection
+                available_tools = []
                 if tool_names:
                     # Filter tools by name
                     tool_dict = {tool.name: tool for tool in tools if isinstance(tool, BaseTool)}
@@ -1032,8 +1043,10 @@ def create_graph(
                     if len(available_tools) != len(tool_names):
                         missing_tools = [name for name in tool_names if name not in tool_dict]
                         logger.warning(f"Some tools not found for LLM node {node_id}: {missing_tools}")
-                else:
-                    # Use all available tools
+                # If this is an agent (NOT A PIPELINE NODE) without explicit tool_names, bind all tools by default for backward compatibility
+                elif yaml.safe_load(yaml_schema).get('name', '').lower() == DEAULT_AGENT_NAME:
+                    # agent flow
+                    logger.info(f"LLM node '{node_id}' in React Agent flow - binding all available tools")
                     available_tools = [tool for tool in tools if isinstance(tool, BaseTool)]
 
                 # Determine if we should use lazy tools mode for this LLM node

@@ -1,0 +1,228 @@
+name: "QT16 - find_defects_by_test_run_id: Find defects for test run"
+description: |
+  Verify the QTest 'find_defects_by_test_run_id' tool finds defects associated with a test run.
+
+  Objective: Test retrieval of defects linked to test run execution
+
+  Expected Behavior:
+  - Query executes without errors
+  - Returns list of defects (if any exist)
+  - Response contains defect fields (Id, Name, Description)
+  - Handles test runs with no defects gracefully
+  - No error indicators in output
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID}
+  test_case_id:
+    type: str
+  dql_query:
+    type: str
+  search_result:
+    type: str
+  test_runs_result:
+    type: dict
+  test_run_id:
+    type: str
+  find_defects_result:
+    type: str
+  expected_success_indicators:
+    type: list
+    value: ["defects", "test run", "Id"]
+  error_indicators:
+    type: list
+    value: ["error", "failed", "exception", "not found"]
+  test_results:
+    type: dict
+
+entry_point: find_existing_test_case
+
+nodes:
+  - id: find_existing_test_case
+    type: code
+    code:
+      type: fixed
+      value: |
+        project_id = alita_state.get("project_id")
+        dql_query = f"Id is 'not empty'"
+        {"dql_query": dql_query}
+    input:
+      - project_id
+    output:
+      - dql_query
+    structured_output: true
+    transition: search_test_cases
+
+  - id: search_test_cases
+    type: toolkit
+    input:
+      - dql_query
+    input_mapping:
+      dql:
+        type: variable
+        value: dql_query
+    output:
+      - search_result
+    structured_output: false
+    tool: search_by_dql
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: extract_test_case_id
+
+  - id: extract_test_case_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+        
+        result_str = alita_state.get("search_result", "")
+        test_case_id = "TC-1"
+        
+        try:
+            match = re.search(r"(TC-\d+)", result_str)
+            if match:
+                test_case_id = match.group(1)
+        except Exception:
+            pass
+        
+        {"test_case_id": test_case_id}
+    input:
+      - search_result
+    output:
+      - test_case_id
+    structured_output: true
+    transition: find_test_runs
+
+  - id: find_test_runs
+    type: toolkit
+    input:
+      - test_case_id
+    input_mapping:
+      test_case_id:
+        type: variable
+        value: test_case_id
+    output:
+      - test_runs_result
+    structured_output: true
+    tool: find_test_runs_by_test_case_id
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: extract_test_run_id
+
+  - id: extract_test_run_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        result = alita_state.get("test_runs_result", "")
+        test_run_id = None
+        
+        # Parse result - it's a dict from find_test_runs_by_test_case_id
+        try:
+            if isinstance(result, str):
+                result_dict = json.loads(result)
+            else:
+                result_dict = result
+            
+            # Extract first test run ID from the test_runs list
+            test_runs = result_dict.get("test_runs", [])
+            if test_runs and len(test_runs) > 0:
+                test_run_id = test_runs[0].get("Id")
+        except Exception as e:
+            pass
+        
+        if not test_run_id:
+            # Skip test if no test runs found
+            result_preview = str(result)[:200] if result else "empty"
+            raise Exception(f"No test runs found for test case. Result preview: {result_preview}")
+        
+        {"test_run_id": test_run_id}
+    input:
+      - test_runs_result
+    output:
+      - test_run_id
+    structured_output: true
+    transition: find_defects
+
+  - id: find_defects
+    type: toolkit
+    input:
+      - test_run_id
+    input_mapping:
+      test_run_id:
+        type: variable
+        value: test_run_id
+    output:
+      - find_defects_result
+    structured_output: false
+    tool: find_defects_by_test_run_id
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - find_defects_result
+      - test_run_id
+      - test_case_id
+      - expected_success_indicators
+      - error_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: you are a strict quality assurance validator. only return valid json.
+      task:
+        type: fstring
+        value: |
+          analyze the output from the find_defects_by_test_run_id tool execution.
+
+          find defects result: {find_defects_result}
+          test run id: {test_run_id}
+          test case id: {test_case_id}
+          expected success indicators: {expected_success_indicators}
+          error indicators: {error_indicators}
+
+          this is a positive test - tool should execute successfully whether defects exist or not.
+
+          validation criteria (all must pass for test_passed=true):
+          1. tool_executed: tool ran without throwing an exception
+          2. no_errors: output does not contain error indicators
+          3. valid_response: response is structured properly (may be empty list if no defects)
+          4. has_context: response includes test run id context
+
+          important: an empty defects list is a valid success - not all test runs have defects.
+
+          return json test_results:
+          {{
+            "test_passed": boolean (true only if all criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "valid_response": boolean,
+            "has_context": boolean,
+            "test_run_id": "{test_run_id}",
+            "test_case_id": "{test_case_id}",
+            "defects_found": boolean,
+            "error_indicator_found": "which error indicator was found or none",
+            "error": string | null
+          }}
+
+          return only the json object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: end
+
+  - id: end
+    type: end
+

@@ -1,0 +1,122 @@
+name: "QT18 - find_entity_by_id: Handle invalid entity ID (Negative Test)"
+description: |
+  Verify the QTest 'find_entity_by_id' tool properly handles invalid entity ID formats.
+
+  Objective: Test error handling for malformed or non-existent entity IDs
+
+  Expected Behavior (NEGATIVE TEST):
+  - Tool returns error for invalid entity ID format
+  - Error message indicates format problem
+  - Proper error handling without crashing
+  - No entity data is returned
+
+toolkits:
+  - id: ${QTEST_TOOLKIT_ID}
+    name: ${QTEST_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: int
+    value: ${QTEST_PROJECT_ID}
+  invalid_entity_id:
+    type: str
+    value: "INVALID-999999"
+  lookup_result:
+    type: str
+  expected_error_indicators:
+    type: list
+    value: ["Invalid entity", "not found", "error", "format", "Expected prefix"]
+  unexpected_success_indicators:
+    type: list
+    value: ["QTest Id", "Name", "Description", "successfully"]
+  test_results:
+    type: dict
+
+entry_point: lookup_invalid_entity
+
+nodes:
+  - id: lookup_invalid_entity
+    type: toolkit
+    input:
+      - invalid_entity_id
+    input_mapping:
+      entity_id:
+        type: variable
+        value: invalid_entity_id
+    output:
+      - lookup_result
+    structured_output: false
+    tool: find_entity_by_id
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    transition: validate_error_handling
+
+  - id: validate_error_handling
+    type: llm
+    input:
+      - lookup_result
+      - invalid_entity_id
+      - expected_error_indicators
+      - unexpected_success_indicators
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: you are a strict quality assurance validator. only return valid json.
+      task:
+        type: fstring
+        value: |
+          analyze the output from the find_entity_by_id tool execution with invalid entity id.
+          
+          this is a negative test - we expect an error for invalid entity id format.
+
+          lookup result: {lookup_result}
+          invalid entity id used: {invalid_entity_id}
+          expected error indicators: {expected_error_indicators}
+          unexpected success indicators: {unexpected_success_indicators}
+
+          validation criteria (all must pass for test_passed=true):
+          1. tool_executed: tool was called (even if it returned an error)
+          2. returned_error: output contains error message
+          3. correct_error_type: error mentions invalid format or prefix issue
+          4. no_entity_data: response does not contain successful entity lookup data
+          5. error_is_clear: error message helps user understand the problem
+
+          perform the following checks:
+          1. confirm the tool executed (result is not empty or null).
+          2. examine any error message for specific meaning. valid error patterns for invalid entity ids include:
+             - invalid entity id format
+             - expected prefix to be one of tc rq tr df ts cl rl bl
+             - entity not found
+             - format errors
+          3. determine if the error is about the invalid entity id itself. 
+             errors mentioning format problems or prefix issues are expected and correct.
+             system errors unrelated to the id format are failures.
+
+          return a json object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (true if error occurred as expected),
+            "tool_executed": boolean,
+            "returned_error": boolean,
+            "correct_error_type": boolean,
+            "no_entity_data": boolean,
+            "error_is_clear": boolean,
+            "invalid_entity_id": "{invalid_entity_id}",
+            "error_pattern_found": "which error pattern was found or none",
+            "summary": "brief description of outcome",
+            "error": "error details if test failed, null if passed"
+          }}
+
+          return only the json object. no markdown formatting, no additional text.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: end
+
+  - id: end
+    type: end
+
