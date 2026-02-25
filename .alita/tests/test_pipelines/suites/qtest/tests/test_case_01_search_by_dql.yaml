@@ -17,9 +17,10 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID:1}
+    value: ${QTEST_PROJECT_ID}
   dql_query:
     type: str
+    value: "Status = 'New' or Status = 'Active'"
   search_result:
     type: str
   expected_success_indicators:
@@ -31,25 +32,8 @@ state:
   test_results:
     type: dict
 
-entry_point: prepare_dql_query
+entry_point: execute_search
 nodes:
-  - id: prepare_dql_query
-    type: code
-    code:
-      type: fixed
-      value: |
-        # Prepare a simple DQL query to search for test cases
-        # Search for test cases with Status = 'New' or 'Active'
-        dql_query = "Status = 'New' or Status = 'Active'"
-        
-        {"dql_query": dql_query}
-    input:
-      - project_id
-    output:
-      - dql_query
-    structured_output: true
-    transition: execute_search
-
   - id: execute_search
     type: toolkit
     input:
@@ -104,26 +88,7 @@ nodes:
           }}
     output:
       - test_results
-    structured_output: true
+    structured_output_dict:
+      test_results: "dict"
     model: ${DEFAULT_LLM_MODEL}
-    transition: check_test_status
-
-  - id: check_test_status
-    type: code
-    code:
-      type: fixed
-      value: |
-        test_results = alita_state.get("test_results", {})
-        test_passed = test_results.get("test_passed", False)
-        
-        if not test_passed:
-            reason = test_results.get("reason", "Unknown failure")
-            raise Exception(f"Test QT01 FAILED: {reason}")
-        
-        {"status": "Test QT01 PASSED", "details": test_results}
-    input:
-      - test_results
-    output:
-      - status
-    structured_output: true
     transition: END

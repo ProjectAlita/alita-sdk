@@ -50,6 +50,14 @@ from pattern_matcher import matches_any_pattern
 import requests
 import yaml
 
+# Force UTF-8 encoding for Windows compatibility
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass  # Python < 3.7
+os.environ.setdefault('PYTHONIOENCODING', 'utf-8')
+
 # Import from run_pipeline module
 from run_pipeline import (
     get_auth_headers,
@@ -67,6 +75,7 @@ from utils_common import (
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
+    apply_session_to_pipeline_name,
 )
 
 from logger import TestLogger
@@ -413,7 +422,8 @@ def get_pipelines_from_folder(
         project_id: int,
         folder_name: str,
         headers: dict,
-        pipeline_file: str | None = None
+        pipeline_file: str | None = None,
+        session_id: str | None = None,
 ) -> List[dict]:
     """Get pipelines that match the folder's test case names.
 
@@ -423,6 +433,7 @@ def get_pipelines_from_folder(
         folder_name: Name of the suite folder
         headers: Auth headers
         pipeline_file: Optional specific pipeline config file (e.g., 'pipeline_validation.yaml')
+        session_id: Session ID for parallel execution isolation (matches prefixed names)
     """
     # Read YAML files to get pipeline names
     # Go up from scripts/ to test_pipelines/ directory
@@ -471,7 +482,8 @@ def get_pipelines_from_folder(
             with open(yaml_file) as f:
                 data = yaml.safe_load(f)
                 if data and "name" in data:
-                    pipeline_names.append(data["name"])
+                    # Apply session prefix to match session-scoped pipelines on platform
+                    pipeline_names.append(apply_session_to_pipeline_name(data["name"], session_id))
         except Exception:
             continue
 
@@ -597,8 +609,12 @@ def run_suite(
 
     if parallel > 1:
         # Parallel execution (hooks not supported during parallel execution yet)
+        if logger:
+            logger.info(f"Starting parallel execution with {parallel} workers...")
         with ThreadPoolExecutor(max_workers=parallel) as executor:
             futures = {executor.submit(execute_one, p): p for p in pipelines}
+            if logger:
+                logger.info(f"Submitted {len(futures)} tests to thread pool")
             for future in as_completed(futures):
                 try:
                     result = future.result()
@@ -759,6 +775,7 @@ def run_suite_local(
         suite_name: str = "Local",
         input_message: str = "",
         timeout: int = 120,
+        parallel: int = 1,
         logger: Optional[TestLogger] = None,
         sdk_log_level: str = 'error',
 ) -> SuiteResult:
@@ -775,6 +792,7 @@ def run_suite_local(
         suite_name: Name for the suite
         input_message: Input message for pipelines
         timeout: Execution timeout per pipeline
+        parallel: Number of parallel executions
         logger: Optional TestLogger instance for logging
         sdk_log_level: Log level for alita_sdk loggers (debug, info, warning, error)
 
@@ -812,6 +830,14 @@ def run_suite_local(
         dry_run=False,
         logger=logger,  # Pass logger for proper output routing
     )
+
+    # Load env_mapping values before setup
+    if config:
+        for key, value in config.get("env_mapping", {}).items():
+            resolved_value = resolve_env_value(value, ctx.env_vars, env_loader=load_from_env)
+            ctx.env_vars[key] = resolved_value
+            if logger:
+                logger.debug(f"Loaded env_mapping: {key}={resolved_value}")
 
     # Execute setup steps using local strategy
     # Logger will route output based on verbose flag (verbose=True shows progress)
@@ -869,44 +895,108 @@ def run_suite_local(
         sdk_log_level=sdk_log_level,  # Control alita_sdk logging verbosity
     )
 
-    # Run all tests
-    for test_file in test_files:
-        if logger:
-            logger.separator()
-            logger.info(f"Running: {test_file.name}")
-            logger.separator()
-
+    # Define test execution function for both sequential and parallel modes
+    def execute_one_local(test_file: Path) -> dict:
+        """Execute a single test and return result dict."""
         result = runner.run_test(
             test_yaml_path=str(test_file),
             input_message=input_message or 'execute',
             timeout=timeout,
             dry_run=False,
         )
+        return result.to_dict()
 
-        # Use PipelineResult.to_dict() directly
-        suite.results.append(result.to_dict())
+    # Run all tests (sequential or parallel)
+    if parallel > 1:
+        # Parallel execution
+        if logger:
+            logger.info(f"Starting parallel execution with {parallel} workers...")
+        
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=parallel) as executor:
+            futures = {executor.submit(execute_one_local, tf): tf for tf in test_files}
+            if logger:
+                logger.debug(f"Submitted {len(futures)} tests to thread pool")
+            
+            for future in as_completed(futures):
+                test_file = futures[future]
+                try:
+                    result_dict = future.result()
+                    suite.results.append(result_dict)
+                    
+                    # Update counters based on result
+                    if result_dict.get('error') or not result_dict.get('success'):
+                        suite.errors += 1
+                        if logger and logger.verbose:
+                            logger.error(f"[ERROR] {test_file.name}: {result_dict.get('error', 'Unknown error')}")
+                        elif logger and not logger.quiet:
+                            print(f"\033[91m✗\033[0m {test_file.name}", flush=True)
+                    elif result_dict.get('test_passed') is False:
+                        suite.failed += 1
+                        if logger and logger.verbose:
+                            logger.error(f"[FAIL] {test_file.name}")
+                        elif logger and not logger.quiet:
+                            print(f"\033[91m✗\033[0m {test_file.name}", flush=True)
+                    elif result_dict.get('test_passed') is True:
+                        suite.passed += 1
+                        if logger and logger.verbose:
+                            logger.success(f"[PASS] {test_file.name}")
+                        elif logger and not logger.quiet:
+                            print(f"\033[92m✓\033[0m {test_file.name}", flush=True)
+                    else:
+                        suite.skipped += 1
+                        if logger and logger.verbose:
+                            logger.info(f"[SKIP] {test_file.name}")
+                
+                except Exception as e:
+                    suite.errors += 1
+                    suite.results.append({
+                        'success': False,
+                        'error': str(e),
+                        'test_passed': None,
+                        'pipeline_name': test_file.name,
+                    })
+                    if logger:
+                        logger.error(f"[ERROR] {test_file.name}: {str(e)}")
+    else:
+        # Sequential execution
+        for test_file in test_files:
+            if logger:
+                logger.separator()
+                logger.info(f"Running: {test_file.name}")
+                logger.separator()
 
-        # Update counters
-        if result.error or not result.success:
-            suite.errors += 1
-            if logger:
-                logger.error(f"EXECUTION ERROR: {result.error}")
-        elif result.test_passed is False:
-            suite.failed += 1
-            if logger:
-                logger.error("TEST FAILED")
-        elif result.test_passed is True:
-            suite.passed += 1
-            if logger:
-                logger.success("TEST PASSED")
-        else:
-            # success=True but test_passed=None means result cannot be evaluated, mark as skipped
-            suite.skipped += 1
-            if logger:
-                logger.info("TEST SKIPPED (result indeterminate)")
+            result = runner.run_test(
+                test_yaml_path=str(test_file),
+                input_message=input_message or 'execute',
+                timeout=timeout,
+                dry_run=False,
+            )
 
-        if logger and result.execution_time > 0:
-            logger.info(f"Execution time: {result.execution_time:.2f}s")
+            # Use PipelineResult.to_dict() directly
+            suite.results.append(result.to_dict())
+
+            # Update counters
+            if result.error or not result.success:
+                suite.errors += 1
+                if logger:
+                    logger.error(f"EXECUTION ERROR: {result.error}")
+            elif result.test_passed is False:
+                suite.failed += 1
+                if logger:
+                    logger.error("TEST FAILED")
+            elif result.test_passed is True:
+                suite.passed += 1
+                if logger:
+                    logger.success("TEST PASSED")
+            else:
+                # success=True but test_passed=None means result cannot be evaluated, mark as skipped
+                suite.skipped += 1
+                if logger:
+                    logger.info("TEST SKIPPED (result indeterminate)")
+
+            if logger and result.execution_time > 0:
+                logger.info(f"Execution time: {result.execution_time:.2f}s")
 
     suite.execution_time = time.time() - start_time
     return suite
@@ -926,7 +1016,8 @@ def main():
     parser.add_argument("--input", "-i", type=str, default="", help="Input message for pipelines")
     parser.add_argument("--timeout", "-t", type=int, default=None,
                         help="Execution timeout per pipeline (default: from config or 120)")
-    parser.add_argument("--parallel", type=int, default=1, help="Number of parallel executions")
+    parser.add_argument("--parallel", type=int, default=0,
+                        help="Number of parallel executions (0=use config, 1=sequential, >1=parallel workers)")
     parser.add_argument("--output-json", help="Save JSON results to file")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--fail-fast", action="store_true", help="Stop on first failure")
@@ -938,8 +1029,13 @@ def main():
                              "Optional: set alita_sdk log level (debug|info|warning|error, default: error)")
     parser.add_argument("--wildcards", "-w", action="store_true",
                         help="Use shell-style wildcards in patterns (*, ?)")
+    parser.add_argument("--session-id", "--sid",
+                        help="Session ID for parallel execution isolation (matches session-scoped resources)")
 
     args = parser.parse_args()
+
+    # Load session ID from arg or environment
+    session_id = args.session_id or load_from_env("SESSION_ID")
 
     # Load environment file if provided
     if args.env_file:
@@ -965,6 +1061,7 @@ def main():
     suite_name = "Custom"
     pipelines = []  # For remote mode
     test_files = []  # For local mode
+    patterns = args.pattern if args.pattern else ["*"]
 
     # Remote mode variables (initialized here to avoid warnings)
     base_url = None
@@ -999,31 +1096,7 @@ def main():
         if not args.folder:
             parser.error("--local mode requires a folder argument")
 
-        # Get all test files, then filter by pattern if specified
-        all_test_files = find_tests_in_suite(folder_path, "*", config)
-        
-        if args.pattern:
-            # Filter by patterns (same logic as remote mode)
-            filtered_files = []
-            for test_file in all_test_files:
-                # Load test name from YAML
-                try:
-                    with open(test_file) as f:
-                        import yaml
-                        data = yaml.safe_load(f)
-                        test_name = data.get('name', '')
-                        # Match against filename or test name
-                        if matches_any_pattern(test_file.name, args.pattern, args.wildcards) or \
-                           matches_any_pattern(test_name, args.pattern, args.wildcards):
-                            filtered_files.append(test_file)
-                except Exception:
-                    # If can't load, match by filename only
-                    if matches_any_pattern(test_file.name, args.pattern, args.wildcards):
-                        filtered_files.append(test_file)
-            pipelines = filtered_files
-            suite_name = f"{suite_name} (filtered: {', '.join(args.pattern)})"
-        else:
-            pipelines = all_test_files
+        pipelines = find_tests_in_suite(folder_path, patterns, config, args.wildcards)
     else:
         # REMOTE: Get pipelines from folder and match with backend
         base_url = args.base_url or load_from_env("BASE_URL") or load_from_env(
@@ -1036,7 +1109,7 @@ def main():
             sys.exit(1)
 
         if args.folder:
-            pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file)
+            pipelines = get_pipelines_from_folder(base_url, project_id, folder_name, headers, pipeline_file, session_id=session_id)
             if not pipelines:
                 # Try to get by pattern matching folder name prefix
                 if folder_path.exists():
@@ -1053,7 +1126,8 @@ def main():
                             with open(yaml_file) as f:
                                 data = yaml.safe_load(f)
                                 if data and "name" in data:
-                                    names.append(data["name"])
+                                    # Apply session prefix to match session-scoped pipelines
+                                    names.append(apply_session_to_pipeline_name(data["name"], session_id))
                         except Exception:
                             continue
 
@@ -1122,7 +1196,8 @@ def main():
     # VALIDATE: Common for both modes
     # ========================================
     if not pipelines:
-        error_msg = f"No pipelines found matching pattern '{pattern}'" if args.local else "No pipelines found matching criteria"
+        pattern_display = ', '.join(patterns) if patterns != ['*'] else '*'
+        error_msg = f"No pipelines found matching pattern(s) '{pattern_display}'" if args.local else "No pipelines found matching criteria"
         print(f"Error: {error_msg}", file=sys.stderr)
         sys.exit(1)
 
@@ -1137,6 +1212,17 @@ def main():
 
     effective_timeout = args.timeout if args.timeout is not None else config_timeout
 
+    # Determine effective parallel: CLI arg > config value > default 1
+    config_parallel = 1  # Default (sequential)
+    if config:
+        raw_parallel = config.get("execution", {}).get("settings", {}).get("parallel")
+        # Validate: must be a positive integer (not None, not blank, not zero/negative)
+        if raw_parallel is not None and isinstance(raw_parallel, int) and raw_parallel > 0:
+            config_parallel = raw_parallel
+
+    # Use CLI arg if explicitly provided (> 0), otherwise use config value
+    effective_parallel = args.parallel if args.parallel > 0 else config_parallel
+
     # Create logger instance
     # Always create logger when verbose is True, otherwise None (no console output)
     logger = TestLogger(verbose=args.verbose) if args.verbose else None
@@ -1145,6 +1231,12 @@ def main():
         logger.info(f"Found {len(pipelines)} pipeline(s) to execute")
         if args.timeout is None and config:
             logger.debug(f"Using timeout from config: {effective_timeout}s")
+        if args.parallel <= 0 and config_parallel > 1:
+            logger.info(f"Using parallel execution from config: {effective_parallel} workers")
+        elif args.parallel == 1:
+            logger.info(f"Parallel execution disabled (forced sequential)")
+        elif effective_parallel > 1:
+            logger.info(f"Using parallel execution: {effective_parallel} workers")
 
     # ========================================
     # EXECUTION: Local vs Remote
@@ -1157,6 +1249,7 @@ def main():
             suite_name=suite_name,
             input_message=args.input,
             timeout=effective_timeout,
+            parallel=effective_parallel,
             logger=logger,
             sdk_log_level=sdk_log_level or 'error',  # Pass log level, default to error
         )
@@ -1168,7 +1261,7 @@ def main():
             suite_name=suite_name,
             input_message=args.input,
             timeout=effective_timeout,
-            parallel=args.parallel,
+            parallel=effective_parallel,
             logger=logger,
             config=config,
             env_vars=env_vars,

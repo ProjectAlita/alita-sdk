@@ -122,7 +122,7 @@ nodes:
     input:
       - path
       - recursive
-      - branch
+      - test_branch_name
     input_mapping:
       path:
         type: variable
@@ -132,7 +132,7 @@ nodes:
         value: recursive
       branch:
         type: variable
-        value: branch
+        value: test_branch_name
     output:
       - tool_result
     structured_output: true
