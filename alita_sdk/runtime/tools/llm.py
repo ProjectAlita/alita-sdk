@@ -536,6 +536,56 @@ class LLMNode(BaseTool):
         # Format as numbered list
         return "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
 
+    def _apply_before_llm_middlewares(
+            self,
+            state: Union[str, dict],
+            config: Optional[RunnableConfig],
+    ) -> tuple[Union[str, dict], list, Optional[dict]]:
+        """
+        Apply before-model middleware hooks.
+
+        Args:
+            state: The current state containing messages and other variables
+            config: Optional runnable config
+
+        Returns:
+            Tuple of (modified_state, middleware_updates, original_state)
+        """
+        middleware_updates = []
+        original_state = None
+
+        if self.middleware_manager is not None and isinstance(state, dict):
+            original_state = state.copy()
+            state, middleware_updates = self.middleware_manager.run_before_model(state, config or {})
+
+        return state, middleware_updates, original_state
+
+    def _apply_after_llm_middlewares(
+            self,
+            result: dict,
+            state: Union[str, dict],
+            original_state: Optional[dict],
+            config: Optional[RunnableConfig],
+    ) -> dict:
+        """
+        Apply after-model middleware hooks and add context info.
+
+        Args:
+            result: The LLM invocation result
+            state: The state used for invocation
+            original_state: The original state before middleware modifications
+            config: Optional runnable config
+
+        Returns:
+            Result dict with context_info added if middleware is present
+        """
+        if self.middleware_manager is not None and isinstance(result, dict) and 'messages' in result:
+            final_state = {**(original_state or state), 'messages': result['messages']}
+            self.middleware_manager.run_after_model(final_state, config or {})
+            result['context_info'] = self.middleware_manager.get_context_info()
+
+        return result
+
     def invoke(
             self,
             state: Union[str, dict],
@@ -553,16 +603,8 @@ class LLMNode(BaseTool):
         Returns:
             Updated state with LLM response
         """
-        middleware_mgr = self.middleware_manager
-        middleware_updates = []
-        original_state = None
+        state, middleware_updates, original_state = self._apply_before_llm_middlewares(state, config)
 
-        # Run before_model hooks (may summarize messages)
-        if middleware_mgr is not None and isinstance(state, dict):
-            original_state = state.copy()
-            state, middleware_updates = middleware_mgr.run_before_model(state, config or {})
-
-        # Do LLM invocation
         try:
             result = self._invoke_llm_internal(state, config, middleware_updates)
         except Exception as e:
@@ -572,13 +614,7 @@ class LLMNode(BaseTool):
             logger.error(f"Error type: {type(e).__name__}")
             result = {"messages": [AIMessage(content=f"Error: {e}")]}
 
-        # Run after_model hooks and add context_info
-        if middleware_mgr is not None and isinstance(result, dict) and 'messages' in result:
-            final_state = {**(original_state or state), 'messages': result['messages']}
-            middleware_mgr.run_after_model(final_state, config or {})
-            result['context_info'] = middleware_mgr.get_context_info()
-
-        return result
+        return self._apply_after_llm_middlewares(result, state, original_state, config)
 
     def _invoke_llm_internal(
             self,
