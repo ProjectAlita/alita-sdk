@@ -1,14 +1,17 @@
+import logging
 from typing import List, Literal, Optional
 
 from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import create_model, BaseModel, ConfigDict, Field
+
 from .api_wrapper import SharepointApiWrapper
 from ..base.tool import BaseAction
 from ..elitea_base import filter_missconfigured_index_tools
-from ..utils import clean_string, get_max_toolkit_length
 from ...configurations.pgvector import PgVectorConfiguration
 from ...configurations.sharepoint import SharepointConfiguration
 from ...runtime.utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
+
+logger = logging.getLogger(__name__)
 
 name = "sharepoint"
 
@@ -17,6 +20,7 @@ def get_tools(tool):
             .get_toolkit(
         selected_tools=tool['settings'].get('selected_tools', []),
         sharepoint_configuration=tool['settings']['sharepoint_configuration'],
+        tokens = tool['settings'].get('tokens', {}),
         toolkit_name=tool.get('toolkit_name'),
         llm=tool['settings'].get('llm'),
         alita=tool['settings'].get('alita', None),
@@ -62,6 +66,13 @@ class SharepointToolkit(BaseToolkit):
             **kwargs.get('sharepoint_configuration', {}),
             **(kwargs.get('pgvector_configuration') or {}),
         }
+
+        # handle OAuth flow: specific for Sharepoint (dependent on oauth_discovery_endpoint), can be extended to other tools in the future if needed
+        if kwargs.get('tokens') and kwargs['sharepoint_configuration'].get('oauth_discovery_endpoint'):
+            logger.debug(f"Sharepoint configuration includes OAuth discovery endpoint and tokens are provided. Attempting to retrieve access token.")
+            token = kwargs['tokens'].get(kwargs['sharepoint_configuration']['oauth_discovery_endpoint'])
+            wrapper_payload['token'] = token.get('access_token')
+
         sharepoint_api_wrapper = SharepointApiWrapper(**wrapper_payload)
         available_tools = sharepoint_api_wrapper.get_available_tools()
         tools = []

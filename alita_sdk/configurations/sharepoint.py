@@ -18,11 +18,11 @@ class SharepointConfiguration(BaseModel):
                         "required": True,
                         "subsections": [
                             {
-                                "name": "app_auth",
+                                "name": "App-only",
                                 "fields": []
                             },
                             {
-                                "name": "delegated",
+                                "name": "Delegated",
                                 "fields": ["oauth_discovery_endpoint", "scopes"]
                             }
                         ]
@@ -82,7 +82,9 @@ class SharepointConfiguration(BaseModel):
         """
         oauth_discovery_endpoint = settings.get("oauth_discovery_endpoint")
         if oauth_discovery_endpoint:
+            log.debug(f"Testing SharePoint connection with oauth flow")
             return SharepointConfiguration._check_connection_delegated(settings, oauth_discovery_endpoint)
+        log.debug(f'Testing SharePoint connection with App-Only flow")')
         return SharepointConfiguration._check_connection_client_credentials(settings)
 
     # ------------------------------------------------------------------
@@ -146,6 +148,7 @@ class SharepointConfiguration(BaseModel):
         so it is tried first before the standard candidates — no duplicated fetch
         logic in this file.
         """
+        log.debug(f"build_mcp_authorization_request for {message}, site_url={site_url}, oauth_discovery_endpoint={oauth_discovery_endpoint}, scopes={scopes}")
         from ..runtime.utils.mcp_oauth import (
             McpAuthorizationRequired,
             fetch_oauth_authorization_server_metadata,
@@ -164,6 +167,7 @@ class SharepointConfiguration(BaseModel):
         # resource_metadata_url points to whichever endpoint actually responded,
         # or to the v2.0 URL as a sensible default when discovery fails.
         resource_metadata_url = azure_v2_endpoint
+        log.debug(f"Fetched OpenID metadata for SharePoint OAuth discovery: {openid_meta}")
 
         authorization_endpoint = (openid_meta or {}).get(
             "authorization_endpoint",
@@ -249,6 +253,7 @@ class SharepointConfiguration(BaseModel):
         Raises:
             McpAuthorizationRequired: when the token is invalid or expired (401).
         """
+        from ..runtime.utils.mcp_oauth import McpAuthorizationRequired
         try:
             parsed = urlparse(site_url)
             hostname = parsed.netloc
@@ -282,16 +287,16 @@ class SharepointConfiguration(BaseModel):
             else:
                 return f"Microsoft Graph API request failed with status {resp.status_code}"
 
+        except McpAuthorizationRequired:
+            raise
+        except requests.exceptions.Timeout:
+            return "Connection timeout - Microsoft Graph is not responding"
+        except requests.exceptions.ConnectionError:
+            return "Connection error - unable to reach Microsoft Graph"
+        except requests.exceptions.RequestException as exc:
+            return f"Request failed: {str(exc)}"
         except Exception as exc:
-            from ..runtime.utils.mcp_oauth import McpAuthorizationRequired
-            if isinstance(exc, McpAuthorizationRequired):
-                raise
-            if isinstance(exc, requests.exceptions.Timeout):
-                return "Connection timeout - Microsoft Graph is not responding"
-            if isinstance(exc, requests.exceptions.ConnectionError):
-                return "Connection error - unable to reach Microsoft Graph"
-            if isinstance(exc, requests.exceptions.RequestException):
-                return f"Request failed: {str(exc)}"
+            log.error(f"Error calling Microsoft Graph API: {exc}")
             return f"Unexpected error: {str(exc)}"
 
     @staticmethod
@@ -467,4 +472,7 @@ class SharepointConfiguration(BaseModel):
         except requests.exceptions.RequestException as e:
             return f"Request failed: {str(e)}"
         except Exception as e:
+            from ..runtime.utils.mcp_oauth import McpAuthorizationRequired
+            if isinstance(e, McpAuthorizationRequired):
+                raise
             return f"Unexpected error: {str(e)}"

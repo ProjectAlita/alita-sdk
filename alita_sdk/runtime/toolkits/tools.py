@@ -372,6 +372,11 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
     logger.info(f"[RUNTIME_TOOLS] Community tools loaded: {len(community_loaded)} tools")
 
     # Add alita tools (only for unhandled tools)
+    # set tokens to tools in order to handle case when token is required for authentication
+    # Tool must have its own logic of handling it
+    if mcp_tokens:
+        for tool in unhandled_tools:
+            tool['settings']['tokens'] = mcp_tokens
     alita_loaded = alita_tools(unhandled_tools, alita_client, llm, memory_store)
     tools += alita_loaded
     logger.info(f"[RUNTIME_TOOLS] Alita tools loaded: {len(alita_loaded)} tools")
