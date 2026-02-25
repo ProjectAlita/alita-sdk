@@ -662,6 +662,14 @@ class AlitaClient:
         if not context_settings or not conversation_id:
             return
 
+        # Check if context management is enabled (master switch)
+        if not context_settings.get('enabled', True):
+            return
+
+        # Check if summarization specifically is enabled
+        if not context_settings.get('enable_summarization', True):
+            return
+
         max_context_tokens = context_settings.get('max_context_tokens')
         preserve_recent = context_settings.get('preserve_recent_messages', 5)
 

@@ -307,17 +307,22 @@ class MiddlewareManager:
                 logger.error(f"Middleware {type(mw).__name__} after_model failed: {e}")
         return state
 
-    def get_context_info(self) -> Optional[Dict[str, Any]]:
+    def get_context_info(self) -> Dict[str, Any]:
         """
         Get current context info (always available, not just after summarization).
 
         Returns:
-            Dict with message_count, token_count (non-system only) or None
+            Dict with message_count, token_count, summarized (always present)
         """
         for mw in self._middleware:
             if hasattr(mw, 'last_context_info') and mw.last_context_info:
                 return mw.last_context_info
-        return None
+
+        return {
+            'message_count': 0,
+            'token_count': 0,
+            'summarized': False,
+        }
 
     @staticmethod
     def _apply_message_updates(current_messages: list, updates: list) -> list:
