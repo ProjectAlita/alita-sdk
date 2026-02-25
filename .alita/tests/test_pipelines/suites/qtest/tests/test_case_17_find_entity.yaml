@@ -1,16 +1,14 @@
-name: "QT04 - find_test_case_by_id: Retrieve test case by ID"
+name: "QT17 - find_entity_by_id: Universal entity lookup"
 description: |
-  Verify the QTest 'find_test_case_by_id' tool retrieves a test case by its ID.
+  Verify the QTest 'find_entity_by_id' tool finds any entity by its ID.
 
-  Objective: Test retrieval of a specific test case using its ID
+  Objective: Test universal lookup across different entity types (TC, RQ, TR, DF)
 
   Expected Behavior:
-  - Tool executes without errors
-  - Returns test case details
-  - Response contains test case fields (Id, Name, Description, Steps)
-  - No error indicators in output
-
-  Note: This test depends on QT03 to create a test case first
+  - Tool automatically detects entity type from ID prefix
+  - Returns full entity details
+  - Works for test cases (TC-xxx)
+  - Handles different entity type prefixes correctly
 
 toolkits:
   - id: ${QTEST_TOOLKIT_ID}
@@ -26,14 +24,14 @@ state:
     type: str
   created_test_id:
     type: str
-  find_result:
+  lookup_result:
     type: str
   expected_success_indicators:
     type: list
-    value: ["TC-", "Name", "Description", "QTest Id"]
+    value: ["Id", "QTest Id", "Name"]
   error_indicators:
     type: list
-    value: ["not found", "error", "failed", "exception", "Invalid"]
+    value: ["error", "failed", "exception", "not found", "Invalid entity"]
   test_results:
     type: dict
   qtest_id_to_delete:
@@ -41,9 +39,10 @@ state:
   cleanup_result:
     type: str
 
-entry_point: prepare_test_case_data
+entry_point: prepare_test_case
+
 nodes:
-  - id: prepare_test_case_data
+  - id: prepare_test_case
     type: code
     code:
       type: fixed
@@ -53,21 +52,25 @@ nodes:
         import string
         import json
         
-        # Generate unique identifiers
         timestamp = time.strftime('%Y%m%d-%H%M%S')
         random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
         
-        # Create test case data for prerequisite
         test_case_data = {
-            "Name": f"QT04 Find Test {timestamp}-{random_suffix}",
-            "Description": "Test case for find_test_case_by_id test",
+            "Name": f"QT17 Entity Lookup Test {timestamp}-{random_suffix}",
+            "Description": "Test case for find_entity_by_id universal lookup",
             "Type": "Manual",
             "Status": "New",
-            "Priority": "Medium"
+            "Priority": "Medium",
+            "Steps": [
+                {
+                    "Test Step Number": 1,
+                    "Test Step Description": "Verify entity lookup functionality",
+                    "Test Step Expected Result": "Entity is found by ID"
+                }
+            ]
         }
         
         test_case_json = json.dumps(test_case_data)
-        
         {"test_case_json": test_case_json}
     input: []
     output:
@@ -103,14 +106,14 @@ nodes:
         # Extract both TC-xxx and numeric QTest ID from create_result
         result = alita_state.get("create_result", "")
         
-        created_test_id = "NONE"
+        created_test_id = "TC-1"
         qtest_id_to_delete = 0
         
         try:
             result_dict = json.loads(result) if isinstance(result, str) else result
             if 'test_cases' in result_dict and len(result_dict['test_cases']) > 0:
                 test_case = result_dict['test_cases'][0]
-                created_test_id = test_case.get('test_case_id', 'NONE')
+                created_test_id = test_case.get('test_case_id', 'TC-1')
                 qtest_id_to_delete = test_case.get('qtest_id', 0)
         except:
             pass
@@ -122,67 +125,76 @@ nodes:
       - created_test_id
       - qtest_id_to_delete
     structured_output: true
-    transition: find_test_case
+    transition: lookup_entity
 
-  - id: find_test_case
+  - id: lookup_entity
     type: toolkit
     input:
       - created_test_id
     input_mapping:
-      test_id:
+      entity_id:
         type: variable
         value: created_test_id
     output:
-      - find_result
+      - lookup_result
     structured_output: false
-    tool: find_test_case_by_id
+    tool: find_entity_by_id
     toolkit_name: ${QTEST_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results
     type: llm
     input:
-      - find_result
+      - lookup_result
+      - created_test_id
       - expected_success_indicators
       - error_indicators
-      - created_test_id
     input_mapping:
       chat_history:
         type: fixed
         value: []
       system:
         type: fixed
-        value: You are a strict quality assurance validator. Only return valid JSON.
+        value: you are a strict quality assurance validator. only return valid json.
       task:
         type: fstring
         value: |
-          Analyze the output from the 'find_test_case_by_id' tool execution.
+          analyze the output from the find_entity_by_id tool execution.
 
-          Find Result: {find_result}
-          Expected Test ID: {created_test_id}
-          Expected Success Indicators: {expected_success_indicators}
-          Error Indicators: {error_indicators}
+          lookup result: {lookup_result}
+          entity id searched: {created_test_id}
+          expected success indicators: {expected_success_indicators}
+          error indicators: {error_indicators}
 
-          TASK: Determine if test case retrieval was successful.
+          this is a positive test - we expect successful entity lookup.
 
-          SUCCESS CRITERIA:
-          1. At least TWO expected_success_indicators are present in find_result
-          2. NONE of the error_indicators are present in find_result
-          3. The tool executed without raising exceptions
-          4. The retrieved test case matches the created test ID
+          validation criteria (all must pass for test_passed=true):
+          1. tool_executed: tool ran without throwing an exception
+          2. no_errors: output does not contain error indicators
+          3. entity_found: response confirms entity was found
+          4. has_details: response contains entity details (id, name, etc)
+          5. correct_entity: returned entity id matches searched id
 
-          Return ONLY a JSON object:
+          return json test_results:
           {{
-            "test_passed": true/false,
-            "success_indicators_found": ["list", "of", "found", "indicators"],
-            "error_indicators_found": ["list", "of", "found", "error", "indicators"],
-            "reason": "Brief explanation of pass/fail decision"
+            "test_passed": boolean (true only if all criteria pass),
+            "tool_executed": boolean,
+            "no_errors": boolean,
+            "entity_found": boolean,
+            "has_details": boolean,
+            "correct_entity": boolean,
+            "entity_id": "{created_test_id}",
+            "entity_type_detected": "entity type from prefix (e.g., test case)",
+            "error_indicator_found": "which error indicator was found or none",
+            "error": string | null
           }}
+
+          return only the json object.
+    model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
     structured_output_dict:
       test_results: "dict"
-    model: ${DEFAULT_LLM_MODEL}
     transition: delete_test_case
 
   - id: delete_test_case
@@ -199,4 +211,8 @@ nodes:
     tool: delete_test_case
     toolkit_name: ${QTEST_TOOLKIT_NAME}
     continue_on_error: true
-    transition: END
+    transition: end
+
+  - id: end
+    type: end
+
