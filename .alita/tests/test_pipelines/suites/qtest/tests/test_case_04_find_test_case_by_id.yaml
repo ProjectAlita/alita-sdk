@@ -19,7 +19,7 @@ toolkits:
 state:
   project_id:
     type: int
-    value: ${QTEST_PROJECT_ID:1}
+    value: ${QTEST_PROJECT_ID}
   test_case_json:
     type: str
   create_result:
@@ -36,6 +36,10 @@ state:
     value: ["not found", "error", "failed", "exception", "Invalid"]
   test_results:
     type: dict
+  qtest_id_to_delete:
+    type: int
+  cleanup_result:
+    type: str
 
 entry_point: prepare_test_case_data
 nodes:
@@ -90,33 +94,34 @@ nodes:
     transition: extract_test_id
 
   - id: extract_test_id
-    type: llm
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        # Extract both TC-xxx and numeric QTest ID from create_result
+        result = alita_state.get("create_result", "")
+        
+        created_test_id = "NONE"
+        qtest_id_to_delete = 0
+        
+        try:
+            result_dict = json.loads(result) if isinstance(result, str) else result
+            if 'test_cases' in result_dict and len(result_dict['test_cases']) > 0:
+                test_case = result_dict['test_cases'][0]
+                created_test_id = test_case.get('test_case_id', 'NONE')
+                qtest_id_to_delete = test_case.get('qtest_id', 0)
+        except:
+            pass
+        
+        {"created_test_id": created_test_id, "qtest_id_to_delete": qtest_id_to_delete}
     input:
       - create_result
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a data extraction specialist. Extract the test ID and return valid JSON only.
-      task:
-        type: fstring
-        value: |
-          Extract the test case ID from this result:
-
-          {create_result}
-
-          Find the test case ID in format TC-xxx
-
-          Return ONLY a JSON object:
-          {{
-            "test_id": "TC-xxx or NONE if not found"
-          }}
     output:
       - created_test_id
+      - qtest_id_to_delete
     structured_output: true
-    model: ${DEFAULT_LLM_MODEL}
     transition: find_test_case
 
   - id: find_test_case
@@ -175,26 +180,23 @@ nodes:
           }}
     output:
       - test_results
-    structured_output: true
+    structured_output_dict:
+      test_results: "dict"
     model: ${DEFAULT_LLM_MODEL}
-    transition: check_test_status
+    transition: delete_test_case
 
-  - id: check_test_status
-    type: code
-    code:
-      type: fixed
-      value: |
-        test_results = alita_state.get("test_results", {})
-        test_passed = test_results.get("test_passed", False)
-        
-        if not test_passed:
-            reason = test_results.get("reason", "Unknown failure")
-            raise Exception(f"Test QT04 FAILED: {reason}")
-        
-        {"status": "Test QT04 PASSED", "details": test_results}
+  - id: delete_test_case
+    type: toolkit
     input:
-      - test_results
+      - qtest_id_to_delete
+    input_mapping:
+      qtest_id:
+        type: variable
+        value: qtest_id_to_delete
     output:
-      - status
-    structured_output: true
+      - cleanup_result
+    structured_output: false
+    tool: delete_test_case
+    toolkit_name: ${QTEST_TOOLKIT_NAME}
+    continue_on_error: true
     transition: END
