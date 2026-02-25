@@ -90,6 +90,24 @@ from utils_local import (
 from setup import execute_setup, SetupContext
 from setup_strategy import LocalSetupStrategy
 
+# Import ReportPortal reporter (optional)
+try:
+    from rp_reporter import create_reporter
+    RP_AVAILABLE = True
+except ImportError:
+    RP_AVAILABLE = False
+    create_reporter = None
+
+
+def load_test_description(test_file: Path) -> str:
+    """Load description from test YAML file."""
+    try:
+        with open(test_file, 'r', encoding='utf-8') as f:
+            test_data = yaml.safe_load(f)
+            return test_data.get('description', '')
+    except Exception:
+        return ''
+
 
 def evaluate_condition(condition: str, result: dict) -> bool:
     """Evaluate a hook condition against test result.
@@ -566,6 +584,7 @@ def run_suite(
         config: dict = None,
         env_vars: dict = None,
         headers: dict = None,
+        reporter = None,  # ReportPortalReporter instance
 ) -> SuiteResult:
     """Execute multiple pipelines and aggregate results.
 
@@ -581,6 +600,7 @@ def run_suite(
         config: Suite config.yaml (optional, for hooks)
         env_vars: Environment variables for hook substitution
         headers: Auth headers (for hook pipeline invocation)
+        reporter: Optional ReportPortal reporter instance
     """
     start_time = time.time()
     suite = SuiteResult(suite_name=suite_name, total=len(pipelines))
@@ -594,6 +614,9 @@ def run_suite(
         post_test_hooks = hooks.get("post_test", [])
         if post_test_hooks and logger:
             logger.debug(f"Post-test hooks configured: {len(post_test_hooks)}")
+
+    # ReportPortal: Report tests directly to launch (no suite nesting)
+    rp_suite_id = None
 
     def execute_one(pipeline: dict) -> PipelineResult:
         return execute_pipeline(
@@ -616,11 +639,29 @@ def run_suite(
             if logger:
                 logger.info(f"Submitted {len(futures)} tests to thread pool")
             for future in as_completed(futures):
+                pipeline = futures[future]
+                pipeline_name = pipeline.get('name', f"ID: {pipeline.get('id')}")
+                
+                # Start ReportPortal test
+                rp_test_id = None
+                if reporter and reporter.active:
+                    description = pipeline.get('description', '')
+                    rp_test_id = reporter.start_test(
+                        name=pipeline_name,
+                        description=description
+                    )
+                
                 try:
                     result = future.result()
                     # Convert to dict immediate and add timestamp
                     r_dict = result.to_dict()
                     r_dict['timestamp'] = datetime.now(timezone.utc).isoformat()
+                    
+                    # Report to ReportPortal
+                    if reporter and reporter.active and rp_test_id:
+                        reporter.log_result(rp_test_id, r_dict)
+                        reporter.finish_test(rp_test_id, r_dict)
+                    
                     results.append(r_dict)
 
                     if logger and logger.verbose:
@@ -630,13 +671,21 @@ def run_suite(
                         status = "\033[92m✓\033[0m" if result.test_passed else "\033[91m✗\033[0m"
                         print(f"{status} {result.pipeline_name}", flush=True)
                 except Exception as e:
-                    pipeline = futures[future]
-                    results.append(PipelineResult(
-                        success=False,
-                        pipeline_id=pipeline.get("id", 0),
-                        pipeline_name=pipeline.get("name", "Unknown"),
-                        error=str(e)
-                    ))
+                    error_result = {
+                        'success': False,
+                        'pipeline_id': pipeline.get("id", 0),
+                        'pipeline_name': pipeline_name,
+                        'error': str(e),
+                        'test_passed': False,
+                        'timestamp': datetime.now(timezone.utc).isoformat()
+                    }
+                    
+                    # Report error to ReportPortal
+                    if reporter and reporter.active and rp_test_id:
+                        reporter.log_result(rp_test_id, error_result)
+                        reporter.finish_test(rp_test_id, error_result)
+                    
+                    results.append(error_result)
     else:
         # Sequential execution
         for pipeline in pipelines:
@@ -647,6 +696,15 @@ def run_suite(
             elif logger and not logger.quiet:
                 sys.stdout.write(f"▶ {pipeline_name}...\r")
                 sys.stdout.flush()
+
+            # Start ReportPortal test
+            rp_test_id = None
+            if reporter and reporter.active:
+                description = pipeline.get('description', '')
+                rp_test_id = reporter.start_test(
+                    name=pipeline_name,
+                    description=description
+                )
 
             # 1. Execute Pipeline
             result = execute_one(pipeline)
@@ -675,6 +733,11 @@ def run_suite(
                     # Try to find RCA output. Common pattern is 'rca' key.
                     # Or check for 'hook_results' if we added that (we didn't yet).
                     pass
+
+            # Report to ReportPortal
+            if reporter and reporter.active and rp_test_id:
+                reporter.log_result(rp_test_id, result_dict)
+                reporter.finish_test(rp_test_id, result_dict)
 
             results.append(result_dict)  # Store dictionary with hook results
 
@@ -778,6 +841,7 @@ def run_suite_local(
         parallel: int = 1,
         logger: Optional[TestLogger] = None,
         sdk_log_level: str = 'error',
+        reporter = None,  # ReportPortalReporter instance
 ) -> SuiteResult:
     """
     Run a suite of pipelines locally without backend.
@@ -795,6 +859,7 @@ def run_suite_local(
         parallel: Number of parallel executions
         logger: Optional TestLogger instance for logging
         sdk_log_level: Log level for alita_sdk loggers (debug, info, warning, error)
+        reporter: Optional ReportPortal reporter instance
 
     Returns:
         SuiteResult with aggregated results
@@ -804,6 +869,9 @@ def run_suite_local(
         suite_name=suite_name,
         total=len(test_files),
     )
+    
+    # ReportPortal: Report tests directly to launch (no suite nesting)
+    rp_suite_id = None
 
     # Configure file logging for DEBUG-level trace
     # Log file goes to test_results/suites/<suite_name>/run.log
@@ -920,8 +988,24 @@ def run_suite_local(
             
             for future in as_completed(futures):
                 test_file = futures[future]
+                
+                # Start ReportPortal test
+                rp_test_id = None
+                if reporter and reporter.active:
+                    description = load_test_description(test_file)
+                    rp_test_id = reporter.start_test(
+                        name=test_file.stem,
+                        description=description
+                    )
+                
                 try:
                     result_dict = future.result()
+                    
+                    # Report to ReportPortal
+                    if reporter and reporter.active and rp_test_id:
+                        reporter.log_result(rp_test_id, result_dict)
+                        reporter.finish_test(rp_test_id, result_dict)
+                    
                     suite.results.append(result_dict)
                     
                     # Update counters based on result
@@ -950,12 +1034,19 @@ def run_suite_local(
                 
                 except Exception as e:
                     suite.errors += 1
-                    suite.results.append({
+                    error_result = {
                         'success': False,
                         'error': str(e),
-                        'test_passed': None,
+                        'test_passed': False,
                         'pipeline_name': test_file.name,
-                    })
+                    }
+                    
+                    # Report error to ReportPortal
+                    if reporter and reporter.active and rp_test_id:
+                        reporter.log_result(rp_test_id, error_result)
+                        reporter.finish_test(rp_test_id, error_result)
+                    
+                    suite.results.append(error_result)
                     if logger:
                         logger.error(f"[ERROR] {test_file.name}: {str(e)}")
     else:
@@ -966,6 +1057,15 @@ def run_suite_local(
                 logger.info(f"Running: {test_file.name}")
                 logger.separator()
 
+            # Start ReportPortal test
+            rp_test_id = None
+            if reporter and reporter.active:
+                description = load_test_description(test_file)
+                rp_test_id = reporter.start_test(
+                    name=test_file.stem,
+                    description=description
+                )
+
             result = runner.run_test(
                 test_yaml_path=str(test_file),
                 input_message=input_message or 'execute',
@@ -973,8 +1073,14 @@ def run_suite_local(
                 dry_run=False,
             )
 
+            # Report to ReportPortal
+            result_dict = result.to_dict()
+            if reporter and reporter.active and rp_test_id:
+                reporter.log_result(rp_test_id, result_dict)
+                reporter.finish_test(rp_test_id, result_dict)
+
             # Use PipelineResult.to_dict() directly
-            suite.results.append(result.to_dict())
+            suite.results.append(result_dict)
 
             # Update counters
             if result.error or not result.success:
@@ -1239,34 +1345,81 @@ def main():
             logger.info(f"Using parallel execution: {effective_parallel} workers")
 
     # ========================================
+    # REPORTPORTAL SETUP
+    # ========================================
+    # Create ReportPortal reporter if enabled
+    reporter = None
+    if RP_AVAILABLE and create_reporter:
+        reporter = create_reporter(logger)
+        if reporter and reporter.active and logger:
+            logger.info("ReportPortal reporting enabled")
+
+    # ========================================
     # EXECUTION: Local vs Remote
     # ========================================
-    if is_local:
-        result = run_suite_local(
-            suite_folder=folder_path,
-            config=config,
-            test_files=pipelines,  # pipelines contains test file paths in local mode
-            suite_name=suite_name,
-            input_message=args.input,
-            timeout=effective_timeout,
-            parallel=effective_parallel,
-            logger=logger,
-            sdk_log_level=sdk_log_level or 'error',  # Pass log level, default to error
-        )
+    # Wrap execution with ReportPortal launch context
+    launch_name = f"Alita SDK - {suite_name}"
+    launch_description = f"Test suite execution: {len(pipelines)} test(s)"
+    
+    # Execute with or without ReportPortal
+    if reporter and reporter.active:
+        with reporter.launch(launch_name, description=launch_description):
+            if is_local:
+                result = run_suite_local(
+                    suite_folder=folder_path,
+                    config=config,
+                    test_files=pipelines,  # pipelines contains test file paths in local mode
+                    suite_name=suite_name,
+                    input_message=args.input,
+                    timeout=effective_timeout,
+                    parallel=effective_parallel,
+                    logger=logger,
+                    sdk_log_level=sdk_log_level or 'error',  # Pass log level, default to error
+                    reporter=reporter,
+                )
+            else:
+                result = run_suite(
+                    base_url=base_url,
+                    project_id=project_id,
+                    pipelines=pipelines,
+                    suite_name=suite_name,
+                    input_message=args.input,
+                    timeout=effective_timeout,
+                    parallel=effective_parallel,
+                    logger=logger,
+                    config=config,
+                    env_vars=env_vars,
+                    headers=headers,
+                    reporter=reporter,
+                )
     else:
-        result = run_suite(
-            base_url=base_url,
-            project_id=project_id,
-            pipelines=pipelines,
-            suite_name=suite_name,
-            input_message=args.input,
-            timeout=effective_timeout,
-            parallel=effective_parallel,
-            logger=logger,
-            config=config,
-            env_vars=env_vars,
-            headers=headers,
-        )
+        # Execute without ReportPortal
+        if is_local:
+            result = run_suite_local(
+                suite_folder=folder_path,
+                config=config,
+                test_files=pipelines,  # pipelines contains test file paths in local mode
+                suite_name=suite_name,
+                input_message=args.input,
+                timeout=effective_timeout,
+                parallel=effective_parallel,
+                logger=logger,
+                sdk_log_level=sdk_log_level or 'error',  # Pass log level, default to error
+            )
+        else:
+            result = run_suite(
+                base_url=base_url,
+                project_id=project_id,
+                pipelines=pipelines,
+                suite_name=suite_name,
+                input_message=args.input,
+                timeout=effective_timeout,
+                parallel=effective_parallel,
+                logger=logger,
+                config=config,
+                env_vars=env_vars,
+                headers=headers,
+            )
 
     # Output results
     # Save JSON results to file if --output-json specified
