@@ -24,13 +24,13 @@ nodes:
         current_date = datetime.now()
         current_time = datetime.now()
 
-        output_string = f"11\n\n Test comment {current_date}{current_time}"
+        output_string = f"11\\n\\n Test comment {current_date}{current_time}"
         
         # Validation checks
         checks = {
-            "has_prefix": output_string.startswith("11\n\n Test comment"),
-            "contains_newlines": "\n\n" in output_string,
-            "has_datetime": len(output_string) > len("11\n\n Test comment"),
+            "has_prefix": output_string.startswith("11\\n\\n Test comment"),
+            "contains_newlines": "\\n\\n" in output_string,
+            "has_datetime": len(output_string) > len("11\\n\\n Test comment"),
             "is_string": isinstance(output_string, str),
             "not_empty": len(output_string) > 0
         }
@@ -39,9 +39,12 @@ nodes:
         
         {
             "test_passed": all_passed,
-            "formatted_message": output_string,
-            "checks": checks,
-            "message_length": len(output_string)
+            "test_results": {
+                "test_passed": all_passed,
+                "formatted_message": output_string,
+                "checks": checks,
+                "message_length": len(output_string)
+            }
         }
     input: []
     output:
