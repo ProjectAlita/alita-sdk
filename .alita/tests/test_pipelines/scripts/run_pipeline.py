@@ -342,6 +342,13 @@ def process_pipeline_result(
                                 tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
                                 error_msg = parsed_output["error"]
                                 
+                                # Skip Python warnings - they are not actual errors
+                                # Common warning patterns: DeprecationWarning, FutureWarning, UserWarning, RequestsDependencyWarning
+                                if "Warning:" in error_msg or "warnings.warn" in error_msg:
+                                    if logger:
+                                        logger.debug(f"Skipping Python warning in tool '{tool_name}' output: {error_msg[:100]}...")
+                                    continue  # Skip this warning, don't treat as error
+                                
                                 # Extract meaningful error from tracebacks
                                 if "Traceback" in error_msg:
                                     # Get last line of traceback (usually the actual error)
