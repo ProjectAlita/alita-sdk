@@ -512,6 +512,76 @@ class ReportPortalClient:
         return self.finish_item(item_id, status, **kwargs)
 
     # -------------------------------------------------------------------------
+    # Markdown Formatting Helpers
+    # -------------------------------------------------------------------------
+
+    # Special prefix that tells ReportPortal to render content as Markdown
+    MARKDOWN_MODE = "!!!MARKDOWN_MODE!!!"
+
+    @staticmethod
+    def as_markdown(message: str) -> str:
+        """
+        Format message as Markdown for ReportPortal.
+
+        ReportPortal will render the content with Markdown formatting
+        (headers, bold, italic, code blocks, tables, etc.)
+
+        Args:
+            message: The message content with Markdown syntax
+
+        Returns:
+            Message prefixed with Markdown mode indicator
+        """
+        return ReportPortalClient.MARKDOWN_MODE + message
+
+    @staticmethod
+    def as_code(code: str, language: str = "") -> str:
+        """
+        Format code/text as a syntax-highlighted code block.
+
+        Args:
+            code: The code or text to format
+            language: Optional language for syntax highlighting
+                     (e.g., "python", "json", "bash", "javascript")
+
+        Returns:
+            Markdown-formatted code block
+        """
+        return ReportPortalClient.as_markdown(f"```{language}\n{code}\n```")
+
+    @staticmethod
+    def as_json(data: Any, indent: int = 2) -> str:
+        """
+        Format data as a syntax-highlighted JSON code block.
+
+        Args:
+            data: Any JSON-serializable data (dict, list, etc.)
+            indent: Indentation level for pretty printing
+
+        Returns:
+            Markdown-formatted JSON code block
+        """
+        json_str = json.dumps(data, indent=indent, default=str, ensure_ascii=False)
+        return ReportPortalClient.as_code(json_str, "json")
+
+    @staticmethod
+    def as_two_parts(first: str, second: str) -> str:
+        """
+        Join two message parts with a visual separator (horizontal rule).
+
+        Useful for separating different sections of a failure report.
+
+        Args:
+            first: First part of the message
+            second: Second part of the message
+
+        Returns:
+            Combined message with separator
+        """
+        separator = "\n\n---\n\n"
+        return first + separator + second
+
+    # -------------------------------------------------------------------------
     # Logging
     # -------------------------------------------------------------------------
 
@@ -527,7 +597,7 @@ class ReportPortalClient:
 
         Args:
             item_id: Item UUID to log to
-            message: Log message
+            message: Log message (can include Markdown if prefixed with !!!MARKDOWN_MODE!!!)
             level: Log level (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)
             attachment: Optional attachment - can be:
                 - dict with {"name": str, "data": bytes, "mime": str}
@@ -577,6 +647,141 @@ class ReportPortalClient:
 
         # Simple log without attachment
         return self._request("POST", "/log", json_data=log_entry)
+
+    def log_markdown(self, item_id: str, message: str, level: str = "INFO", **kwargs) -> dict:
+        """
+        Log a Markdown-formatted message.
+
+        Args:
+            item_id: Item UUID to log to
+            message: Markdown-formatted message
+            level: Log level
+
+        Returns:
+            API response
+        """
+        return self.log(item_id, self.as_markdown(message), level=level, **kwargs)
+
+    def log_json(
+        self,
+        item_id: str,
+        data: Any,
+        title: str = "",
+        level: str = "INFO",
+        indent: int = 2,
+        **kwargs,
+    ) -> dict:
+        """
+        Log JSON data with syntax highlighting.
+
+        The JSON will be displayed as a formatted, syntax-highlighted code block
+        in the ReportPortal UI.
+
+        Args:
+            item_id: Item UUID to log to
+            data: Any JSON-serializable data (dict, list, etc.)
+            title: Optional title/description above the JSON
+            level: Log level
+            indent: JSON indentation level
+
+        Returns:
+            API response
+        """
+        json_block = self.as_json(data, indent=indent)
+        if title:
+            message = self.as_markdown(f"**{title}**\n\n") + json_block
+        else:
+            message = json_block
+        return self.log(item_id, message, level=level, **kwargs)
+
+    def log_code(
+        self,
+        item_id: str,
+        code: str,
+        language: str = "",
+        title: str = "",
+        level: str = "INFO",
+        **kwargs,
+    ) -> dict:
+        """
+        Log code with syntax highlighting.
+
+        Args:
+            item_id: Item UUID to log to
+            code: The code to log
+            language: Language for syntax highlighting (python, bash, json, etc.)
+            title: Optional title above the code block
+            level: Log level
+
+        Returns:
+            API response
+        """
+        code_block = self.as_code(code, language)
+        if title:
+            message = self.as_markdown(f"**{title}**\n\n") + code_block
+        else:
+            message = code_block
+        return self.log(item_id, message, level=level, **kwargs)
+
+    def log_failure(
+        self,
+        item_id: str,
+        error_message: str,
+        traceback: str = "",
+        expected: Any = None,
+        actual: Any = None,
+        details: Optional[dict] = None,
+        **kwargs,
+    ) -> dict:
+        """
+        Log a detailed failure report with structured formatting.
+
+        Creates a well-formatted failure report with:
+        - Error message header
+        - Expected vs Actual comparison (if provided)
+        - Traceback (if provided)
+        - Additional details as JSON (if provided)
+
+        Args:
+            item_id: Item UUID to log to
+            error_message: Main error message
+            traceback: Optional traceback string
+            expected: Optional expected value (any JSON-serializable type)
+            actual: Optional actual value (any JSON-serializable type)
+            details: Optional dict with additional failure details
+
+        Returns:
+            API response
+        """
+        parts = []
+
+        # Error message header
+        parts.append(f"## {error_message}")
+
+        # Expected vs Actual comparison
+        if expected is not None or actual is not None:
+            comparison = "\n### Expected vs Actual\n\n"
+            comparison += "| | Value |\n|---|---|\n"
+            if expected is not None:
+                exp_str = json.dumps(expected, default=str) if not isinstance(expected, str) else expected
+                comparison += f"| **Expected** | `{exp_str}` |\n"
+            if actual is not None:
+                act_str = json.dumps(actual, default=str) if not isinstance(actual, str) else actual
+                comparison += f"| **Actual** | `{act_str}` |\n"
+            parts.append(comparison)
+
+        # Traceback
+        if traceback:
+            parts.append("\n### Traceback\n")
+            parts.append(f"```python\n{traceback}\n```")
+
+        # Additional details as JSON
+        if details:
+            parts.append("\n### Details\n")
+            parts.append(f"```json\n{json.dumps(details, indent=2, default=str)}\n```")
+
+        message = self.as_markdown("\n".join(parts))
+        return self.log(item_id, message, level="ERROR", **kwargs)
 
     def log_error(self, item_id: str, message: str, **kwargs) -> dict:
         """Log an error message."""

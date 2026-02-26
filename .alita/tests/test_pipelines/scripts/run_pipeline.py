@@ -277,9 +277,145 @@ def process_pipeline_result(
     if nodes_with_continue_on_error and logger:
         logger.debug(f"Loaded {len(nodes_with_continue_on_error)} nodes with continue_on_error: {nodes_with_continue_on_error}")
 
-    # CRITICAL: Check for tool execution errors FIRST (before checking test_passed from LLM)
+    # PRIORITY 1: Comprehensive chat_history scan (validation + errors + nested structures)
+    # This single pass checks for:
+    # 1. Explicit test_passed from validation nodes (highest priority)
+    # 2. Plain-text errors and HTML error pages (fail immediately if no validation)
+    # 3. All nested JSON structures with test_passed
+    # This must be checked FIRST, as negative tests expect errors but should still pass (via validation)
+    if isinstance(result_data, dict) and "chat_history" in result_data:
+        chat_history = result_data.get("chat_history", [])
+        for msg in chat_history:
+            if isinstance(msg, dict):
+                content = msg.get("content", "")
+                
+                # Check for [Errno 7] error that indicates content too large
+                if isinstance(content, str) and ("Error executing code: [Errno 7]" in content or "[Errno 7] Argument list too long" in content):
+                    test_passed = False
+                    detected_error = "Content too large: The data payload exceeded system limits. Consider reducing the amount of data being processed."
+                    output = {"error": detected_error, "raw_content": content}
+                    break
+                
+                # Strip markdown code fences if present for JSON parsing
+                json_content = content
+                if isinstance(content, str):
+                    stripped = content.strip()
+                    if stripped.startswith("```"):
+                        lines = stripped.split("\n")
+                        if lines[0].startswith("```"):
+                            lines = lines[1:]  # Remove first line
+                        if lines and lines[-1].strip() == "```":
+                            lines = lines[:-1]  # Remove last line
+                        json_content = "\n".join(lines).strip()
+                
+                # Try to parse JSON content for test_passed in various structures
+                if isinstance(json_content, str) and json_content.startswith("{"):
+                    try:
+                        parsed_content = json.loads(json_content)
+                        if isinstance(parsed_content, dict):
+                            # Check for explicit test_passed from validation node (top priority)
+                            if "test_passed" in parsed_content:
+                                test_passed = parsed_content["test_passed"]
+                                if isinstance(output, dict):
+                                    output["result"] = parsed_content
+                                else:
+                                    output = parsed_content
+                                if logger:
+                                    logger.debug(f"Found explicit test_passed={test_passed} from validation node")
+                                # Don't break - continue to find the latest test_passed value
+                            # Check for test_results at top level (common in validation nodes)
+                            elif "test_results" in parsed_content:
+                                test_results = parsed_content.get("test_results", {})
+                                if isinstance(test_results, dict) and "test_passed" in test_results:
+                                    test_passed = test_results.get("test_passed")
+                                    if isinstance(output, dict):
+                                        output["result"] = test_results
+                                    else:
+                                        output = test_results
+                                    if logger:
+                                        logger.debug(f"Found test_passed={test_passed} in test_results")
+                                    # Don't break - continue to find the latest test_passed value
+                            # Check for nested structures: result.test_passed or result.test_results.test_passed
+                            elif "result" in parsed_content:
+                                nested = parsed_content.get("result", {})
+                                if isinstance(nested, dict):
+                                    if "test_passed" in nested:
+                                        test_passed = nested.get("test_passed")
+                                        if isinstance(output, dict):
+                                            output["result"] = nested
+                                        else:
+                                            output = nested
+                                        if logger:
+                                            logger.debug(f"Found test_passed={test_passed} in result")
+                                        # Don't break - continue to find the latest test_passed value
+                                    # Nested in result.test_results (pyodide sandbox output)
+                                    elif "test_results" in nested:
+                                        test_results = nested.get("test_results", {})
+                                        if isinstance(test_results, dict) and "test_passed" in test_results:
+                                            test_passed = test_results.get("test_passed")
+                                            if isinstance(output, dict):
+                                                output["result"] = test_results
+                                            else:
+                                                output = test_results
+                                            if logger:
+                                                logger.debug(f"Found test_passed={test_passed} in result.test_results")
+                                            # Don't break - continue to find the latest test_passed value
+                    except json.JSONDecodeError:
+                        pass
+                
+                # Check for plain-text errors WITHOUT test_passed (unvalidated failures)
+                # Only check if test_passed hasn't been set by validation
+                if test_passed is None and isinstance(content, str) and content.strip():
+                    content_stripped = content.strip()
+                    content_lower = content.lower()
+                    
+                    # Detect errors that start with "Error:" (like "Error: <html..." from access denied pages)
+                    if content_stripped.startswith("Error:"):
+                        error_preview = content[:200] + "..." if len(content) > 200 else content
+                        detected_error = f"Chat history contains error: {error_preview}"
+                        test_passed = False
+                        
+                        if logger:
+                            logger.error(f"Unhandled error in chat_history: {detected_error}")
+                        
+                        break
+                    
+                    # Detect HTML error pages (access denied, 404, 500, etc.)
+                    elif content_stripped.startswith("<html") or content_stripped.startswith("<!DOCTYPE"):
+                        # Check if it's an error page
+                        if any(pattern in content_lower for pattern in [
+                            "access denied",
+                            "not available",
+                            "404",
+                            "500",
+                            "error",
+                            "unauthorized",
+                            "forbidden"
+                        ]):
+                            # Extract title or first error message
+                            error_summary = "HTML error page"
+                            if "<title>" in content:
+                                try:
+                                    title_start = content.find("<title>") + 7
+                                    title_end = content.find("</title>", title_start)
+                                    if title_end > title_start:
+                                        error_summary = content[title_start:title_end].strip()
+                                except:
+                                    pass
+                            
+                            detected_error = f"Received HTML error page: {error_summary}"
+                            test_passed = False
+                            
+                            if logger:
+                                logger.error(f"Unhandled HTML error in chat_history: {detected_error}")
+                                logger.debug(f"Full HTML content: {content[:500]}...")
+                            
+                            break
+    
+    # PRIORITY 2: Check for tool execution errors (only if test_passed not already determined)
     # This prevents false positives where LLM says "test passed" but a tool actually failed
-    if isinstance(result_data, dict) and "tool_calls_dict" in result_data:
+    # However, for negative tests, validation nodes set test_passed first, so we skip error detection
+    if test_passed is None and isinstance(result_data, dict) and "tool_calls_dict" in result_data:
         tool_calls = result_data.get("tool_calls_dict", {})
         if isinstance(tool_calls, dict):
             for tool_call_id, tool_call in tool_calls.items():
@@ -386,7 +522,46 @@ def process_pipeline_result(
                                 
                                 break
                     except json.JSONDecodeError:
-                        pass
+                        # Tool output is not JSON - check for error patterns in the plain text
+                        if any(error_pattern in tool_output for error_pattern in [
+                            "ToolException",
+                            "Error Type:",
+                            "Traceback (most recent call last)",
+                            "Tool '",
+                            "failed",
+                        ]):
+                            # Extract tool name and error message
+                            tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                            
+                            # Try to extract a meaningful error summary
+                            error_summary = tool_output
+                            
+                            # If there's a traceback, get the last line (the actual error)
+                            if "Traceback" in tool_output:
+                                lines = tool_output.strip().split('\n')
+                                # Find the last non-empty line
+                                for line in reversed(lines):
+                                    if line.strip() and not line.strip().startswith("^"):
+                                        error_summary = line.strip()
+                                        break
+                            
+                            # If tool output starts with "Tool 'X' failed", extract that
+                            elif tool_output.strip().startswith("Tool '"):
+                                lines = tool_output.strip().split('\n')
+                                error_summary = lines[0] if lines else tool_output
+                            
+                            # Otherwise use first 200 chars
+                            else:
+                                error_summary = tool_output[:200] + "..." if len(tool_output) > 200 else tool_output
+                            
+                            detected_error = f"Tool '{tool_name}' failed: {error_summary}"
+                            test_passed = False
+                            
+                            if logger:
+                                logger.error(f"Tool output error detected (plain text): {detected_error}")
+                                logger.debug(f"Full tool output: {tool_output}")
+                            
+                            break
 
     # Check for errors in direct result field (e.g., from local execution or chat_history parsing)
     if test_passed is None and isinstance(result_data, dict):
@@ -427,7 +602,7 @@ def process_pipeline_result(
                         logger.error(f"Execution failure in result: {detected_error}")
                         logger.debug(f"Full error: {error_msg}")
     
-    # Check for errors in chat_history messages (before checking test_passed)
+    # Check for errors in chat_history messages (only if test_passed not already set by validation)
     if test_passed is None and isinstance(result_data, dict) and "chat_history" in result_data:
         chat_history = result_data.get("chat_history", [])
         tool_calls_dict = result_data.get("tool_calls_dict", {})
@@ -440,18 +615,7 @@ def process_pipeline_result(
                     try:
                         parsed_content = json.loads(content)
                         if isinstance(parsed_content, dict):
-                            # IMPORTANT: Check for explicit test_passed field first
-                            # For negative tests, LLM validation may include both 'error' (documenting expected error)
-                            # and 'test_passed': true (indicating test passed because expected error occurred)
-                            if "test_passed" in parsed_content:
-                                # Explicit test_passed takes precedence - this is the validation result
-                                test_passed = parsed_content["test_passed"]
-                                if logger:
-                                    logger.debug(f"Found explicit test_passed={test_passed} in chat history")
-                                # Don't break - continue checking for other messages
-                                continue
-                            
-                            # Check for error field (only if test_passed wasn't explicitly set above)
+                            # Check for error field
                             if "error" in parsed_content and parsed_content["error"]:
                                 error_msg = parsed_content["error"]
                                 
@@ -502,6 +666,7 @@ def process_pipeline_result(
                                 break
                     except json.JSONDecodeError:
                         pass
+                    # Note: Plain-text errors ("Error: ...") and HTML error pages are handled in PRIORITY 1
 
     # Check various result structures for test_passed (only if not already set by error checks)
     if test_passed is None and isinstance(result_data, dict):
@@ -560,75 +725,8 @@ def process_pipeline_result(
                         except json.JSONDecodeError:
                             pass
         
-        # Check in chat_history (pipeline response format)
-        if test_passed is None and "chat_history" in result_data:
-            chat_history = result_data.get("chat_history", [])
-            for msg in chat_history:
-                if isinstance(msg, dict):
-                    content = msg.get("content", "")
-                    # Check for tool call error in content that indicates failure
-                    if isinstance(content, str) and ("Error executing code: [Errno 7]" in content or "[Errno 7] Argument list too long" in content):
-                         test_passed = False
-                         detected_error = "Content too large: The data payload exceeded system limits. Consider reducing the amount of data being processed."
-                         output = {"error": detected_error, "raw_content": content}
-                         break
-
-                    # Strip markdown code fences if present
-                    json_content = content
-                    if isinstance(content, str):
-                        # Remove markdown code fences (```json ... ``` or ``` ... ```)
-                        stripped = content.strip()
-                        if stripped.startswith("```"):
-                            lines = stripped.split("\n")
-                            if lines[0].startswith("```"):
-                                lines = lines[1:]  # Remove first line
-                            if lines and lines[-1].strip() == "```":
-                                lines = lines[:-1]  # Remove last line
-                            json_content = "\n".join(lines).strip()
-
-                    if isinstance(json_content, str) and json_content.startswith("{"):
-                        try:
-                            parsed = json.loads(json_content)
-                            if isinstance(parsed, dict):
-                                if "test_passed" in parsed:
-                                    test_passed = parsed.get("test_passed")
-                                    if isinstance(output, dict):
-                                        output["result"] = parsed
-                                    else:
-                                        output = parsed
-                                    break
-                                # Check for test_results at top level (common in validation nodes)
-                                elif "test_results" in parsed:
-                                    test_results = parsed.get("test_results", {})
-                                    if isinstance(test_results, dict) and "test_passed" in test_results:
-                                        test_passed = test_results.get("test_passed")
-                                        if isinstance(output, dict):
-                                            output["result"] = test_results
-                                        else:
-                                            output = test_results
-                                        break
-                                elif "result" in parsed:
-                                    nested = parsed.get("result", {})
-                                    if isinstance(nested, dict):
-                                        if "test_passed" in nested:
-                                            test_passed = nested.get("test_passed")
-                                            if isinstance(output, dict):
-                                                output["result"] = nested
-                                            else:
-                                                output = nested
-                                            break
-                                        # Nested in result.test_results (pyodide sandbox output)
-                                        elif "test_results" in nested:
-                                            test_results = nested.get("test_results", {})
-                                            if isinstance(test_results, dict) and "test_passed" in test_results:
-                                                test_passed = test_results.get("test_passed")
-                                                if isinstance(output, dict):
-                                                    output["result"] = test_results
-                                                else:
-                                                    output = test_results
-                                                break
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+        # Note: chat_history scan is now consolidated in PRIORITY 1 section above
+        # This eliminates duplicate scanning and improves performance
         # Check in tool_calls_dict (pipeline tool execution results)
         if test_passed is None and "tool_calls_dict" in result_data:
             tool_calls = result_data.get("tool_calls_dict", {})

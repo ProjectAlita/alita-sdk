@@ -387,6 +387,178 @@ class ReportPortalReporter:
                 self.logger.error(f"Error logging to {item_id}: {e}")
             return False
     
+    def log_markdown(self, item_id: Optional[str], message: str, level: str = "INFO") -> bool:
+        """
+        Log a Markdown-formatted message to a test item.
+        
+        Args:
+            item_id: Test/suite item ID
+            message: Markdown-formatted message
+            level: Log level
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_markdown(item_id, message, level=level)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging markdown to {item_id}: {e}")
+            return False
+    
+    def log_json(self, item_id: Optional[str], data: Any, title: str = "", 
+                 level: str = "INFO", indent: int = 2) -> bool:
+        """
+        Log JSON data with syntax highlighting to a test item.
+        
+        Args:
+            item_id: Test/suite item ID
+            data: Any JSON-serializable data
+            title: Optional title above the JSON
+            level: Log level
+            indent: JSON indentation level
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_json(item_id, data, title=title, level=level, indent=indent)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging JSON to {item_id}: {e}")
+            return False
+    
+    def log_code(self, item_id: Optional[str], code: str, language: str = "", 
+                 title: str = "", level: str = "INFO") -> bool:
+        """
+        Log code with syntax highlighting to a test item.
+        
+        Args:
+            item_id: Test/suite item ID
+            code: Code to log
+            language: Programming language for syntax highlighting
+            title: Optional title above the code block
+            level: Log level
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_code(item_id, code, language=language, title=title, level=level)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging code to {item_id}: {e}")
+            return False
+    
+    def log_failure(self, item_id: Optional[str], error_message: str, 
+                    traceback: str = "", expected: Any = None, actual: Any = None,
+                    details: Optional[Dict] = None) -> bool:
+        """
+        Log a detailed failure report with structured formatting.
+        
+        Args:
+            item_id: Test/suite item ID
+            error_message: Main error message
+            traceback: Optional traceback string
+            expected: Optional expected value
+            actual: Optional actual value
+            details: Optional dict with additional failure details
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_failure(
+                item_id, 
+                error_message, 
+                traceback=traceback,
+                expected=expected, 
+                actual=actual,
+                details=details
+            )
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging failure to {item_id}: {e}")
+            return False
+    
+    def log_error(self, item_id: Optional[str], message: str) -> bool:
+        """Log an error message to a test item."""
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_error(item_id, message)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging error to {item_id}: {e}")
+            return False
+    
+    def log_warning(self, item_id: Optional[str], message: str) -> bool:
+        """Log a warning message to a test item."""
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_warning(item_id, message)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging warning to {item_id}: {e}")
+            return False
+    
+    def log_debug(self, item_id: Optional[str], message: str) -> bool:
+        """Log a debug message to a test item."""
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.log_debug(item_id, message)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error logging debug to {item_id}: {e}")
+            return False
+    
+    def attach_file(self, item_id: Optional[str], file_path: str, message: str = "") -> bool:
+        """
+        Attach a file to a test item.
+        
+        Args:
+            item_id: Test/suite item ID
+            file_path: Path to file to attach
+            message: Optional message to accompany the attachment
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.active or not item_id:
+            return False
+        
+        try:
+            self.client.attach_file(item_id, file_path, message=message)
+            return True
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Error attaching file to {item_id}: {e}")
+            return False
+    
     def log_result(self, test_id: Optional[str], result: Dict[str, Any]) -> bool:
         """
         Log test result details.
@@ -404,43 +576,51 @@ class ReportPortalReporter:
         try:
             # Log execution time
             exec_time = result.get("execution_time", 0)
-            self.log(test_id, f"Execution time: {exec_time:.2f}s", level="INFO")
+            self.log(test_id, f"⏱️ Execution time: {exec_time:.2f}s", level="INFO")
             
-            # Log output (if present)
+            # Log output as JSON if it's a dict/list, otherwise as text
             output = result.get("output")
             if output:
-                output_str = str(output)
-                # Truncate very long outputs
-                if len(output_str) > 5000:
-                    output_str = output_str[:5000] + "\n... (truncated)"
-                self.log(test_id, f"Output:\n{output_str}", level="DEBUG")
+                if isinstance(output, (dict, list)):
+                    # Use structured JSON logging for dict/list outputs
+                    self.log_json(test_id, output, title="Test Output", level="DEBUG")
+                else:
+                    output_str = str(output)
+                    # Truncate very long outputs
+                    if len(output_str) > 5000:
+                        output_str = output_str[:5000] + "\n... (truncated)"
+                    self.log(test_id, f"Output:\n{output_str}", level="DEBUG")
             
-            # Log error and stack trace (if present)
+            # Log error using structured failure reporting
             error = result.get("error")
             if error:
                 # Extract failure message (first line or summary)
                 error_lines = str(error).strip().split('\n')
                 failure_message = error_lines[0] if error_lines else str(error)
                 
-                # Check if we have a full stack trace in the error
+                # Check if we have a full stack trace
                 if len(error_lines) > 1 or 'Traceback' in str(error):
-                    # Full stack trace available
+                    # Use structured failure logging with traceback
                     failure_stacktrace = str(error)
-                    self.log(test_id, f"❌ Failure: {failure_message}", level="ERROR")
-                    self.log(test_id, f"Stack Trace:\n{failure_stacktrace}", level="ERROR")
+                    self.log_failure(
+                        test_id,
+                        error_message=failure_message,
+                        traceback=failure_stacktrace,
+                        details={"result_keys": list(result.keys())}
+                    )
                 else:
-                    # Just an error message, no stack trace
-                    self.log(test_id, f"❌ Error: {failure_message}", level="ERROR")
+                    # Simple error without traceback
+                    self.log_error(test_id, f"❌ Error: {failure_message}")
             
             # Log test status
             test_passed = result.get("test_passed")
             if test_passed is True:
                 self.log(test_id, "✅ Test PASSED", level="INFO")
             elif test_passed is False:
-                self.log(test_id, "❌ Test FAILED", level="ERROR")
+                self.log_error(test_id, "❌ Test FAILED")
                 # If we haven't logged a failure message yet, log generic failure
                 if not error:
-                    self.log(test_id, "Test assertions failed", level="ERROR")
+                    self.log_error(test_id, "Test assertions failed")
             
             return True
         except Exception as e:

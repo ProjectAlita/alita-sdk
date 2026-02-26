@@ -365,13 +365,14 @@ class LocalSetupStrategy(SetupStrategy):
             return None
     
     def _create_llm(self) -> Optional[Any]:
+        from utils_common import load_from_env
         """Create LLM instance for toolkits that need it (e.g., image processing)."""
         if self._alita_client is None:
             return None
         
         try:
             llm = self._alita_client.get_llm(
-                model_name='gpt-4o-2024-11-20',
+                model_name=load_from_env('DEFAULT_LLM_MODEL') or 'gpt-5-mini',
                 model_config={
                     'temperature': 0.0,
                     'max_tokens': 4096,

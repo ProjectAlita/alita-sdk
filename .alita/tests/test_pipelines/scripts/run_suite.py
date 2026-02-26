@@ -790,7 +790,8 @@ def run_suite(
         elif r.get('test_passed') is False:
             suite.failed += 1
         else:
-            suite.skipped += 1
+            # test_passed is None - mark as failed since we cannot verify the test passed
+            suite.failed += 1
 
     suite.execution_time = time.time() - start_time
     return suite
@@ -1028,9 +1029,12 @@ def run_suite_local(
                         elif logger and not logger.quiet:
                             print(f"\033[92m✓\033[0m {test_file.name}", flush=True)
                     else:
-                        suite.skipped += 1
+                        # test_passed is None - mark as failed since we cannot verify the test passed
+                        suite.failed += 1
                         if logger and logger.verbose:
-                            logger.info(f"[SKIP] {test_file.name}")
+                            logger.error(f"[FAIL] {test_file.name} (result indeterminate)")
+                        elif logger and not logger.quiet:
+                            print(f"\033[91m✗\033[0m {test_file.name}", flush=True)
                 
                 except Exception as e:
                     suite.errors += 1
@@ -1096,10 +1100,11 @@ def run_suite_local(
                 if logger:
                     logger.success("TEST PASSED")
             else:
-                # success=True but test_passed=None means result cannot be evaluated, mark as skipped
-                suite.skipped += 1
+                # success=True but test_passed=None means result cannot be evaluated
+                # Mark as FAILED since we cannot verify the test passed
+                suite.failed += 1
                 if logger:
-                    logger.info("TEST SKIPPED (result indeterminate)")
+                    logger.error("TEST FAILED (result indeterminate - test_passed is null)")
 
             if logger and result.execution_time > 0:
                 logger.info(f"Execution time: {result.execution_time:.2f}s")

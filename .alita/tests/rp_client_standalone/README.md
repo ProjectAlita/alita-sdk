@@ -132,6 +132,74 @@ rp.log(test_id, "Screenshot", attachment="screenshot.png")
 rp.attach_file(test_id, "output.log", message="Test output")
 ```
 
+## Markdown & JSON Formatting
+
+ReportPortal supports Markdown formatting for rich log messages. The client provides helper methods:
+
+### Logging JSON Data
+
+```python
+# JSON will be syntax-highlighted in the UI
+data = {"status": "error", "code": 500, "details": {"msg": "Failed"}}
+rp.log_json(test_id, data, title="API Response")
+```
+
+### Logging Code Blocks
+
+```python
+# Code with syntax highlighting
+rp.log_code(test_id, "def foo(): pass", language="python", title="Function")
+
+# Bash command output
+rp.log_code(test_id, "$ curl http://...\nHTTP 200 OK", language="bash")
+```
+
+### Logging Structured Failures
+
+```python
+# Rich failure report with expected/actual, traceback, and details
+rp.log_failure(
+    test_id,
+    error_message="Assertion failed: Status mismatch",
+    expected=200,
+    actual=500,
+    traceback="Traceback (most recent call last):\n  ...",
+    details={"url": "/api/users", "method": "POST"}
+)
+```
+
+### Raw Markdown
+
+```python
+# Any markdown content
+markdown = """
+## Summary
+| Test | Result |
+|------|--------|
+| API  | PASS   |
+| UI   | FAIL   |
+"""
+rp.log_markdown(test_id, markdown)
+```
+
+### Static Formatting Helpers
+
+```python
+from rp_client import ReportPortalClient as RP
+
+# Format as markdown (adds !!!MARKDOWN_MODE!!! prefix)
+msg = RP.as_markdown("**Bold** and *italic*")
+
+# Format as code block
+msg = RP.as_code("print('hello')", language="python")
+
+# Format dict/list as JSON code block
+msg = RP.as_json({"key": "value"})
+
+# Join two sections with separator
+msg = RP.as_two_parts(part1, part2)
+```
+
 ## Example Script
 
 See `example_test.sh` for a complete bash integration example.

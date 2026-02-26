@@ -859,8 +859,8 @@ def main():
     )
     parser.add_argument(
         "--model-name",
-        default="gpt-4o-2024-11-20",
-        help="LLM model name (default: gpt-4o-2024-11-20)",
+        default=load_from_env("DEFAULT_LLM_MODEL") or "gpt-5-mini",
+        help="LLM model name (default: gpt-5-mini)",
     )
     parser.add_argument(
         "--temperature",
