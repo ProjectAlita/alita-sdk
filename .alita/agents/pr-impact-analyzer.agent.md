@@ -59,8 +59,8 @@ Your **ONLY** output must be a valid JSON object that GitHub Actions can consume
   "reason": "string explaining why these tests were selected",
   "matrix": [
     {
-      "suite": "github",
-      "tests_to_run": ["GH01", "GH03", "GH05"],
+      "suite": "xray",
+      "tests_to_run": ["XR01", "XR03", "XR05"],
       "run_all_tests": false
     },
     {
@@ -70,7 +70,7 @@ Your **ONLY** output must be a valid JSON object that GitHub Actions can consume
     }
   ],
   "impact_summary": {
-    "toolkits_changed": ["github", "jira"],
+    "toolkits_changed": ["xray", "jira"],
     "runtime_changed": false,
     "core_changed": false,
     "test_framework_changed": false,
@@ -87,8 +87,8 @@ Your **ONLY** output must be a valid JSON object that GitHub Actions can consume
 | `skip_tests` | boolean | `true` if no tests needed (docs-only, configs, etc.) |
 | `reason` | string | Human-readable explanation of test selection |
 | `matrix` | array | Array of suite objects with test specifications |
-| `matrix[].suite` | string | Suite name (e.g., `"github"`, `"jira"`) |
-| `matrix[].tests_to_run` | array | Specific test IDs to run (e.g., `["GH01", "GH03"]`). Empty if `run_all_tests: true` |
+| `matrix[].suite` | string | Suite name (e.g., `"xray"`, `"jira"`) |
+| `matrix[].tests_to_run` | array | Specific test IDs to run (e.g., `["XR01", "XR03"]`). Empty if `run_all_tests: true` |
 | `matrix[].run_all_tests` | boolean | `true` to run entire suite, `false` to run only `tests_to_run` |
 
 ---
@@ -105,9 +105,9 @@ Your **ONLY** output must be a valid JSON object that GitHub Actions can consume
 
 ```
 BaseToolApiWrapper (elitea_base.py)
-├── BaseCodeToolApiWrapper → github, gitlab, bitbucket, ado (repos)
+├── BaseCodeToolApiWrapper → xray, gitlab, bitbucket, ado (repos)
 ├── BaseIndexerToolkit
-│   ├── CodeIndexerToolkit → github, gitlab, bitbucket (indexing)
+│   ├── CodeIndexerToolkit → xray, gitlab, bitbucket (indexing)
 │   └── NonCodeIndexerToolkit → jira, confluence, qtest, xray, zephyr_essential
 └── Simple Toolkits → artifact, postman, figma
 ```
@@ -118,7 +118,7 @@ BaseToolApiWrapper (elitea_base.py)
 
 | Category | Representative Suite | Purpose |
 |----------|---------------------|---------|
-| Code Repository | `github` | Tests BaseCodeToolApiWrapper |
+| Code Repository | `xray` | Tests BaseCodeToolApiWrapper |
 | Issue Tracking | `jira` | Tests NonCodeIndexerToolkit |
 | Documentation | `confluence` | Tests content indexing |
 | Framework | `state_retrieval` | Tests pipeline state/execution |
@@ -136,7 +136,7 @@ Instead of running ALL tests, analyze WHAT changed and select representatives:
 {
   "run_all": false,
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true},
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true},
     {"suite": "jira", "tests_to_run": [], "run_all_tests": true},
     {"suite": "confluence", "tests_to_run": [], "run_all_tests": true},
     {"suite": "state_retrieval", "tests_to_run": [], "run_all_tests": true},
@@ -151,7 +151,7 @@ Instead of running ALL tests, analyze WHAT changed and select representatives:
 ```json
 {
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true},
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true},
     {"suite": "gitlab", "tests_to_run": [], "run_all_tests": true},
     {"suite": "bitbucket", "tests_to_run": [], "run_all_tests": true}
   ],
@@ -179,7 +179,7 @@ Instead of running ALL tests, analyze WHAT changed and select representatives:
   "matrix": [
     {"suite": "state_retrieval", "tests_to_run": [], "run_all_tests": true},
     {"suite": "structured_output", "tests_to_run": [], "run_all_tests": true},
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true}
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true}
   ],
   "reason": "Rule 1d: Runtime changed - framework tests + 1 representative"
 }
@@ -200,7 +200,7 @@ These paths trigger Rule 1 analysis (categorize by sub-rule):
 # 1a: Base wrapper (all toolkits representative)
 alita_sdk/tools/elitea_base.py
 
-# 1b: Code indexing (github, gitlab, bitbucket)
+# 1b: Code indexing (xray, gitlab, bitbucket)
 alita_sdk/tools/code_indexer_toolkit.py
 alita_sdk/tools/base_indexer_toolkit.py  # if code-related methods
 
@@ -256,7 +256,7 @@ When you can identify specific changed tools within a toolkit:
 
 | Toolkit Directory | Suite Name |
 |------------------|------------|
-| `alita_sdk/tools/github/` | `github` |
+| `alita_sdk/tools/xray/` | `xray` |
 | `alita_sdk/tools/jira/` | `jira` |
 | `alita_sdk/tools/ado/` | `ado` |
 | `alita_sdk/tools/gitlab/` | `gitlab` |
@@ -309,8 +309,8 @@ rule_1b_files: []        # code_indexer_toolkit.py, base_indexer_toolkit.py
 rule_1c_files: []        # non_code_indexer_toolkit.py
 rule_1d_files: []        # runtime/langchain/*, runtime/clients/*
 rule_1e_files: []        # pyproject.toml, setup.py, __init__.py, tools.py
-layer_2_toolkits: {}     # { "github": ["api_wrapper.py"], "jira": [...] }
-test_files: {}           # { "github": ["test_case_01.yaml"], ... }
+layer_2_toolkits: {}     # { "xray": ["api_wrapper.py"], "jira": [...] }
+test_files: {}           # { "xray": ["test_case_01.yaml"], ... }
 docs_files: []           # *.md, docs/**
 config_files: []         # .env, *.json configs
 ```
@@ -368,7 +368,7 @@ For each affected toolkit, try to identify specific tests:
   "base_branch": "main",
   "changed_files": [
     {
-      "path": "alita_sdk/tools/github/api_wrapper.py",
+      "path": "alita_sdk/tools/xray/api_wrapper.py",
       "status": "modified",
       "additions": 15,
       "deletions": 5,
@@ -376,14 +376,14 @@ For each affected toolkit, try to identify specific tests:
     }
   ],
   "changed_sdk_files": [
-    "alita_sdk/tools/github/api_wrapper.py",
-    "alita_sdk/tools/github/__init__.py"
+    "alita_sdk/tools/xray/api_wrapper.py",
+    "alita_sdk/tools/xray/__init__.py"
   ],
   "changed_methods_by_file": {
-    "alita_sdk/tools/github/api_wrapper.py": ["create_issue", "list_issues"]
+    "alita_sdk/tools/xray/api_wrapper.py": ["create_issue", "list_issues"]
   },
   "impact_categories": {
-    "toolkits_changed": ["github"],
+    "toolkits_changed": ["xray"],
     "runtime_changed": false,
     "core_changed": false,
     "rule_applied": "Rule 2"
@@ -414,8 +414,8 @@ For each affected toolkit, try to identify specific tests:
 ### Example 1: Layer 2 Toolkit Change (🟢 Low Risk)
 ```
 Changed files:
-- alita_sdk/tools/github/api_wrapper.py (modified)
-- alita_sdk/tools/github/__init__.py (modified)
+- alita_sdk/tools/xray/api_wrapper.py (modified)
+- alita_sdk/tools/xray/__init__.py (modified)
 
 Rule Applied: Rule 2 (Layer 2 toolkit → suite only)
 
@@ -423,12 +423,12 @@ Output:
 {
   "run_all": false,
   "skip_tests": false,
-  "reason": "Rule 2: Layer 2 toolkit change (github) - isolated impact",
+  "reason": "Rule 2: Layer 2 toolkit change (xray) - isolated impact",
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true}
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true}
   ],
   "impact_summary": {
-    "toolkits_changed": ["github"],
+    "toolkits_changed": ["xray"],
     "runtime_changed": false,
     "core_changed": false,
     "test_framework_changed": false,
@@ -449,9 +449,9 @@ Output:
 {
   "run_all": false,
   "skip_tests": false,
-  "reason": "Rule 1a: BaseToolApiWrapper changed - representative coverage (github=code, jira=issue, confluence=doc, framework)",
+  "reason": "Rule 1a: BaseToolApiWrapper changed - representative coverage (xray=code, jira=issue, confluence=doc, framework)",
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true},
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true},
     {"suite": "jira", "tests_to_run": [], "run_all_tests": true},
     {"suite": "confluence", "tests_to_run": [], "run_all_tests": true},
     {"suite": "state_retrieval", "tests_to_run": [], "run_all_tests": true},
@@ -483,7 +483,7 @@ Output:
   "matrix": [
     {"suite": "state_retrieval", "tests_to_run": [], "run_all_tests": true},
     {"suite": "structured_output", "tests_to_run": [], "run_all_tests": true},
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true}
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true}
   ],
   "impact_summary": {
     "toolkits_changed": [],
@@ -509,7 +509,7 @@ Output:
   "skip_tests": false,
   "reason": "Rule 1b: CodeIndexerToolkit changed - code repository toolkits only",
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true},
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true},
     {"suite": "gitlab", "tests_to_run": [], "run_all_tests": true},
     {"suite": "bitbucket", "tests_to_run": [], "run_all_tests": true}
   ],
@@ -538,7 +538,7 @@ Output:
   "skip_tests": false,
   "reason": "Rule 1e: Package config changed (pyproject.toml + __init__.py) - full regression required",
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true},
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true},
     {"suite": "jira", "tests_to_run": [], "run_all_tests": true},
     {"suite": "ado", "tests_to_run": [], "run_all_tests": true},
     {"suite": "gitlab", "tests_to_run": [], "run_all_tests": true},
@@ -584,7 +584,7 @@ Output:
 ### Example 7: Specific Tool Change (targeted tests)
 ```
 Changed files:
-- alita_sdk/tools/github/api_wrapper.py (only create_issue method changed)
+- alita_sdk/tools/xray/api_wrapper.py (only create_issue method changed)
 
 Rule Applied: Rule 5 (specific tool → targeted tests)
 Analysis: test_case_03_issue_workflow.yaml uses tool: create_issue
@@ -595,10 +595,10 @@ Output:
   "skip_tests": false,
   "reason": "Rule 5: Specific tool change (create_issue) - targeted tests",
   "matrix": [
-    {"suite": "github", "tests_to_run": ["GH03"], "run_all_tests": false}
+    {"suite": "xray", "tests_to_run": ["XR03"], "run_all_tests": false}
   ],
   "impact_summary": {
-    "toolkits_changed": ["github"],
+    "toolkits_changed": ["xray"],
     "runtime_changed": false,
     "core_changed": false,
     "test_framework_changed": false,
@@ -610,7 +610,7 @@ Output:
 ### Example 8: Multiple Toolkits Changed
 ```
 Changed files:
-- alita_sdk/tools/github/api_wrapper.py (modified)
+- alita_sdk/tools/xray/api_wrapper.py (modified)
 - alita_sdk/tools/jira/api_wrapper.py (modified)
 
 Rule Applied: Rule 2 (multiple toolkit changes → multiple suites)
@@ -619,13 +619,13 @@ Output:
 {
   "run_all": false,
   "skip_tests": false,
-  "reason": "Rule 2: Multiple toolkit changes (github, jira) - isolated to suites",
+  "reason": "Rule 2: Multiple toolkit changes (xray, jira) - isolated to suites",
   "matrix": [
-    {"suite": "github", "tests_to_run": [], "run_all_tests": true},
+    {"suite": "xray", "tests_to_run": [], "run_all_tests": true},
     {"suite": "jira", "tests_to_run": [], "run_all_tests": true}
   ],
   "impact_summary": {
-    "toolkits_changed": ["github", "jira"],
+    "toolkits_changed": ["xray", "jira"],
     "runtime_changed": false,
     "core_changed": false,
     "test_framework_changed": false,
@@ -648,6 +648,6 @@ If you cannot fetch PR data or encounter errors:
 ## Final Notes
 
 - Always output valid JSON that can be parsed by `jq` or `JSON.parse()`
-- The `tests_to_run` field uses test ID prefixes (GH01, JR02) NOT full filenames
+- The `tests_to_run` field uses test ID prefixes (XR01, JR02) NOT full filenames
 - When in doubt, err on the side of running MORE tests (safer)
 - Print the final JSON to stdout AND write to file

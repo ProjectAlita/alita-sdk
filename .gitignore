@@ -181,3 +181,4 @@ node_modules/
 .alita/**/test_results
 alita_sdk/docs/
 .playwright-mcp
+.claude
