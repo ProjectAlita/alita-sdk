@@ -37,14 +37,16 @@ nodes:
         
         all_passed = all(checks.values())
         
-        {
+        result = {
             "test_passed": all_passed,
             "formatted_message": output_string,
             "checks": checks,
             "message_length": len(output_string)
         }
+        test_results = result
+        test_results
     input: []
     output:
-      - test_results
-    structured_output: true
+      - messages
+    structured_output: false
     transition: END
