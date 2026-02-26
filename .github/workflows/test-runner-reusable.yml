@@ -899,12 +899,6 @@ jobs:
 
           echo "AI verdict → fixed=$FIXED  flaky=$FLAKY  blocked=$BLOCKED  committed=$COMMITTED"
 
-          # Flaky tests → fail (intermittent = unreliable infrastructure)
-          if [ "$FLAKY" -gt 0 ]; then
-            echo "::error::$FLAKY flaky test(s) detected – job fails (intermittent failures must be investigated)"
-            exit 0
-          fi
-
           # SDK bugs blocking tests → fail
           if [ "$BLOCKED" -gt 0 ]; then
             echo "::error::$BLOCKED test(s) blocked by SDK bugs – job fails (see AI analysis summary)"
@@ -914,6 +908,12 @@ jobs:
           # All failures were test-code issues that AI fixed and committed → pass
           if [ "$FIXED" -gt 0 ] && [ "$COMMITTED" = "true" ]; then
             echo "✅ All $FIXED failing test(s) were fixed by AI and committed – job passes"
+            exit 0
+          fi
+
+          # Flaky tests → fail (intermittent = unreliable infrastructure)
+          if [ "$FLAKY" -gt 0 ]; then
+            echo "::error::$FLAKY flaky test(s) detected – job fails (intermittent failures must be investigated)"
             exit 0
           fi
 
