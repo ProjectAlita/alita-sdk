@@ -34,8 +34,7 @@ setup:
       toolkit_type: qtest
       toolkit_name: ${QTEST_TOOLKIT_NAME:qtest-testing}
       overrides:
-        qtest_configuration:
-          qtest_project_id: ${QTEST_PROJECT_ID:154314}
+        qtest_project_id: ${QTEST_PROJECT_ID:154314}
     save_to_env:
       - key: QTEST_TOOLKIT_ID
         value: $.id
