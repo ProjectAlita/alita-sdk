@@ -97,7 +97,7 @@ jobs:
         id: set-api-key
         run: |
           if [ "${{ inputs.environment }}" = "local" ]; then
-            ENV_UPPER="DEV"
+            ENV_UPPER="STAGE"
           else
             ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
           fi
