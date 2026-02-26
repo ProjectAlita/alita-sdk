@@ -43,7 +43,7 @@ nodes:
       - files_in_branch
     structured_output: true
     tool: list_files_in_main_branch
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_branch_files
   - id: validate_branch_files
     type: llm
@@ -101,7 +101,7 @@ nodes:
       - files_in_directory
     structured_output: true
     tool: get_files_from_directory
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_directory_files
   - id: validate_directory_files
     type: llm
@@ -170,7 +170,7 @@ nodes:
       - file_content
     structured_output: true
     tool: read_file
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_known_file
   - id: validate_known_file
     type: llm
@@ -238,7 +238,7 @@ nodes:
       - file_content
     structured_output: true
     tool: read_file
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: process_results
   - id: process_results
     type: llm
