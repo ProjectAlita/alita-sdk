@@ -62,9 +62,9 @@ from logger import TestLogger
 DEFAULT_BASE_URL = "http://192.168.68.115"
 DEFAULT_PROJECT_ID = 2
 DEFAULT_LLM_SETTINGS = {
-    "model_name": "gpt-4o-2024-11-20",
-    "temperature": 0.5,
-    "max_tokens": 4096,
+    "model_name": "gpt-5-mini",
+    "temperature": 0.2,
+    "max_tokens": 16000,
 }
 
 
