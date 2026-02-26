@@ -35,7 +35,9 @@ setup:
       toolkit_name: ${QTEST_TOOLKIT_NAME:qtest-testing}
       overrides:
         qtest_configuration:
-          qtest_project_id: ${QTEST_PROJECT_ID:154314}
+          private: false
+          alita_title: ${QTEST_SECRET_NAME:qtest}
+        qtest_project_id: ${QTEST_PROJECT_ID:154314}
     save_to_env:
       - key: QTEST_TOOLKIT_ID
         value: $.id
@@ -55,7 +57,7 @@ execution:
     QTEST_PROJECT_ID: ${QTEST_PROJECT_ID:154314}
     QTEST_REQUIREMENT_ID: ${QTEST_REQUIREMENT_ID:RQ-1}
     TIMESTAMP: ${TIMESTAMP}
-    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-5-mini}
 
   settings:
     timeout: 180
