@@ -28,7 +28,7 @@ state:
     value: ["Extracted tests", "issueId", "jira"]
   error_indicators:
     type: list
-    value: ["Unable to get tests", "error", "failed", "exception"]
+    value: ["Unable to get tests", "Tool execution error", "failed to", "exception occurred"]
   test_results:
     type: dict
 
@@ -77,7 +77,7 @@ nodes:
 
           Validation Criteria (ALL must pass for test_passed=true):
           1. tool_executed: Tool ran without throwing an exception
-          2. no_errors: Output does NOT contain error indicators
+          2. no_errors: Output does NOT contain TOOL error indicators (e.g., "Tool execution error", "failed to", "exception occurred"). Ignore the word "error" if it appears in test content like summaries or descriptions.
           3. has_extracted_tests: Response indicates "Extracted tests" with count
           4. has_test_data: Response contains test details (issueId, jira fields)
 
