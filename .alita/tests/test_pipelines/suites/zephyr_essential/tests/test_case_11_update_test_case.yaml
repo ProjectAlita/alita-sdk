@@ -240,14 +240,16 @@ nodes:
           This is a POSITIVE test - we expect successful test case creation, update, and retrieval.
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. tool_executed: All three tools ran and returned results
+          1. tool_executed: Create and get tools returned results (update_result may be empty string which is valid for update operations)
           2. no_errors: Output does NOT contain any error indicators
           3. testcase_created: Test case was created successfully in AI tests folder (ID: 32965916)
-          4. testcase_updated: Test case was updated successfully
+          4. testcase_updated: Test case was updated successfully (verified by get result showing updated name)
           5. testcase_retrieved: Test case details were retrieved after update
           6. name_changed: Test case name in get result matches new updated name
           7. different_from_original: Updated name is different from original name
           8. correct_key: Test case key matches across all operations
+          
+          Note: update_result may be empty string - this is valid. Verify update success by checking get_result contains updated name.
 
           Return JSON test_results:
           {{
