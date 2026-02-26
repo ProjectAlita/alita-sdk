@@ -1,6 +1,6 @@
 {
   "postman_configuration": {
-    "private": true,
+    "private": false,
     "alita_title": "postman"
   },
   "collection_id": "${POSTMAN_COLLECTION_ID:52159169-cd51d7b0-55f2-4355-8684-427e5e2fe2e0}",

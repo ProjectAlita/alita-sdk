@@ -179,7 +179,7 @@ Located at `.alita/tests/test_pipelines/configs/ado-config.json`:
   "id": 1,
   "ado_configuration": {
     "alita_title": "ado",
-    "private": true,
+    "private": false,
     "organization_url": "https://dev.azure.com/${ADO_ORG}",
     "project": "${ADO_PROJECT}",
     "token": "${ADO_TOKEN}"

@@ -33,7 +33,7 @@ setup:
       toolkit_type: xray_cloud
       overrides:
         xray_configuration:
-          private: true
+          private: false
           alita_title: ${XRAY_SECRET_NAME:xray_cloud}
       toolkit_name: ${XRAY_TOOLKIT_NAME:xray-testing}
     save_to_env:

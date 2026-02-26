@@ -4,7 +4,7 @@
   "id": 1,
   "bitbucket_configuration": {
     "alita_title": "bitbucket",
-    "private": true
+    "private": false
   },
   "project": "${BITBUCKET_PROJECT:alita-automation}",
   "repository": "${BITBUCKET_REPOSITORY:automation}",
