@@ -17,12 +17,19 @@ Comprehensive test suite for the artifact toolkit (`alita_sdk/runtime/tools/arti
 | AT11 | `deleteFile` | test_case_11_delete_file_happy_path.yaml | High | File deletion and removal verification |
 | AT12 | `read_multiple_files` | test_case_12_read_multiple_files_happy_path.yaml | High | Batch file retrieval |
 | AT13 | `get_file_type` | test_case_13_get_file_type_happy_path.yaml | High | File type detection from content |
+| AT14 | `add_file_to_page` (Confluence) | test_case_14_confluence_add_file_to_page_append.yaml | Critical | Add file from artifact to Confluence page (append) |
+| AT15 | `add_file_to_page` (Confluence) | test_case_15_confluence_add_file_to_page_prepend.yaml | High | Add file from artifact to Confluence page (prepend) |
 | AT16 | `edit_file` | test_case_16_edit_empty_file_edge_case.yaml | High | Empty file edit behavior validation |
 | AT17 | `deleteFile` | test_case_17_delete_nonexistent_file_error.yaml | High | Error handling for non-existent file deletion |
+| AT18 | `upload_file` (SharePoint) | test_case_18_sharepoint_upload_file_from_artifact.yaml | Critical | Upload file from artifact to SharePoint |
+| AT19 | `upload_file` (SharePoint) | test_case_19_sharepoint_upload_file_replace.yaml | High | Upload file with replace option |
+| AT20 | `add_attachment_to_list_item` (SharePoint) | test_case_20_sharepoint_add_attachment_from_artifact.yaml | Critical | Add attachment from artifact to SharePoint list item |
+| AT21 | `add_attachment_to_list_item` (SharePoint) | test_case_21_sharepoint_add_attachment_replace.yaml | High | Add attachment with replace option |
+| AT22 | `add_file_to_case` (TestRail) | test_case_22_testrail_add_file_to_case.yaml | Critical | Attach file from artifact to TestRail test case |
 
-**Total Test Cases: 13**
-- Critical: 4 tests (core functionality)
-- High: 9 tests (variations and edge cases)
+**Total Test Cases: 19**
+- Critical: 8 tests (core artifact operations + integrations)
+- High: 11 tests (variations, edge cases, and integration scenarios)
 
 ## Artifact Toolkit Features
 
@@ -79,11 +86,22 @@ OPENAI_API_KEY=sk-...
 # Optional: Artifact configuration
 ARTIFACT_TOOLKIT_ID=auto-created-by-setup
 TEST_BUCKET=auto-created-by-setup
+
+# For integration tests (Confluence, SharePoint, TestRail)
+CONFLUENCE_API_KEY=your_confluence_api_key
+CONFLUENCE_USERNAME=your_username
+SHAREPOINT_CLIENT_SECRET=your_sharepoint_secret
+TESTRAIL_USERNAME=your_testrail_username
+TESTRAIL_PASSWORD=your_testrail_password
 ```
 
 2. **Setup artifacts** (created automatically by pipeline):
    - Artifact toolkit instance
    - Test bucket with expiration settings
+   - Confluence toolkit (for AT14-AT15)
+   - SharePoint toolkit (for AT18-AT21)
+   - TestRail toolkit (for AT22)
+   - Test artifact files for integration tests
 
 ### Running Tests
 
@@ -211,17 +229,38 @@ Each test file follows the standard 2-node pattern:
 
 ### Issue: Search Returns No Matches
 - **Cause**: Pattern case sensitivity or regex escaping
-- **Solution**: Use literal search first; verify pattern matches file content
+- *Integration Tests
 
-## Performance Characteristics
+### Confluence Integration (AT14-AT15)
+Tests artifact → Confluence workflow using `add_file_to_page` tool:
+- Upload file from artifact storage to Confluence
+- Validate file attachment and page content update
+- Test append and prepend positioning options
 
-- **Bucket Creation**: ~100ms
-- **File Creation**: ~200ms (varies by size)
-- **File Read**: ~150ms (varies by size)
-- **File Search**: ~300ms (varies by file size and pattern complexity)
-- **Batch Read (3 files)**: ~450ms
-- **Total Suite Execution**: ~30-45 seconds
+### SharePoint Integration (AT18-AT21)
+Tests artifact → SharePoint workflow using `upload_file` and `add_attachment_to_list_item` tools:
+- Upload files from artifact to SharePoint document library
+- Attach files from artifact to SharePoint list items
+- Test replace/overwrite scenarios
 
+### TestRail Integration (AT22)
+Tests artifact → TestRail workflow using `add_file_to_case` tool:
+- Attach files from artifact storage to TestRail test cases
+- Self-contained test with case creation and cleanup
+- Validates end-to-end file attachment flow
+
+## Future Extensions
+
+Potential test additions:
+- File copy operations (binary preservation)
+- Excel sheet filtering
+- CSV parsing with headers
+- Large file handling (>10MB)
+- Concurrent operations
+- Permission/access control
+- Bucket expiration cleanup
+- File versioning/history
+- Additional integration tests (JIRA, GitLab, etc.)
 ## Future Extensions
 
 Potential test additions:

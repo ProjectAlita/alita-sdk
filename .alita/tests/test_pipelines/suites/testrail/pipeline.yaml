@@ -1,0 +1,120 @@
+# TestRail Toolkit Test Suite Configuration
+# This file defines setup, execution, and cleanup for the test suite
+
+name: testrail_toolkit
+description: TestRail toolkit integration tests
+
+# Setup steps executed before running tests
+# Steps are executed in order; if a step fails, setup stops
+setup:
+  # Step 1: Ensure TestRail credentials configuration exists
+  - name: Setup TestRail Configuration
+    type: configuration
+    config:
+      config_type: testrail
+      alita_title: ${TESTRAIL_SECRET_NAME:testrail}
+      data:
+        url: ${TESTRAIL_URL:https://epamelitea.testrail.io}
+        email: ${TESTRAIL_EMAIL:liana_gevorgyan@epam.com}
+        password: ${TESTRAIL_PASSWORD}
+
+  # Step 2: Create or update the TestRail toolkit on the platform
+  - name: Create TestRail Toolkit
+    type: toolkit
+    action: create_or_update
+    config:
+      # Load base config from shared testrail-config.json
+      config_file: ../../configs/testrail-config.json
+      toolkit_type: testrail
+      # Override/substitute values from environment
+      overrides:
+        # Credentials must use secret reference format (platform requirement)
+        testrail_configuration:
+          private: true
+          alita_title: ${TESTRAIL_SECRET_NAME:testrail}
+      # Name for the toolkit on platform
+      toolkit_name: ${TESTRAIL_TOOLKIT_NAME:testrail-testing}
+    # Save created toolkit ID to environment for pipeline substitution
+    save_to_env:
+      - key: TESTRAIL_TOOLKIT_ID
+        value: $.id
+      - key: TESTRAIL_TOOLKIT_NAME
+        value: $.name
+
+# Composable pipelines - seeded first, used by hooks and other pipelines
+# These are reusable pipeline components that can be invoked conditionally
+composable_pipelines: []
+
+# Test execution configuration
+execution:
+  # Order of test execution (by file pattern or explicit list)
+  # Tests are located in tests/ subdirectory
+  test_directory: tests
+  order:
+    - test_case_01_*.yaml  # TR01 - Get Case Happy Path
+    - test_case_02_*.yaml  # TR02 - Get Case Error Handling
+    - test_case_03_*.yaml  # TR03 - Get Cases Happy Path
+    - test_case_04_*.yaml  # TR04 - Get Cases Output Formats
+    - test_case_05_*.yaml  # TR05 - Get Cases By Filter Happy Path
+    - test_case_06_*.yaml  # TR06 - Get Cases By Filter With Keys
+    - test_case_07_*.yaml  # TR07 - Add Case Happy Path
+    - test_case_08_*.yaml  # TR08 - Add Case With Custom Fields
+    - test_case_09_*.yaml  # TR09 - Add Cases Happy Path
+    - test_case_10_*.yaml  # TR10 - Add Cases Multiple
+    - test_case_11_*.yaml  # TR11 - Update Case Happy Path
+    - test_case_12_*.yaml  # TR12 - Update Case Partial
+    - test_case_13_*.yaml  # TR13 - Add File To Case Happy Path
+    - test_case_14_*.yaml  # TR14 - Add File To Case Error Handling
+    - test_case_15_*.yaml  # TR15 - Get Suites Happy Path
+    - test_case_16_*.yaml  # TR16 - Get Suites Output Formats
+
+  # Variables to substitute in test YAML files
+  substitutions:
+    TESTRAIL_TOOLKIT_ID: ${TESTRAIL_TOOLKIT_ID}
+    TESTRAIL_TOOLKIT_NAME: ${TESTRAIL_TOOLKIT_NAME}
+    TESTRAIL_PROJECT_ID: ${TESTRAIL_PROJECT_ID:"10"}
+    TESTRAIL_SECTION_ID: ${TESTRAIL_SECTION_ID:"652"}
+    # TESTRAIL_TEST_CASE_ID: ${TESTRAIL_TEST_CASE_ID}
+    # TIMESTAMP: ${TIMESTAMP}
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
+
+  # Execution settings
+  settings:
+    timeout: 300
+    parallel: 5  # Sequential for dependent tests
+    stop_on_failure: false
+
+# Cleanup steps executed after tests complete
+# Steps are executed in order; failures are logged but don't stop cleanup
+cleanup:
+  # Step 1: Delete seeded pipelines
+  - name: Delete Test Pipelines
+    type: pipeline
+    config:
+      pattern: "TR*"  # All TestRail test pipelines
+    continue_on_error: true
+
+  # Step 2: Delete the test toolkit
+  - name: Delete Test Toolkit
+    type: toolkit
+    config:
+      toolkit_id: ${TESTRAIL_TOOLKIT_ID}
+    enabled: true
+    continue_on_error: true
+
+# Hooks for custom actions
+hooks:
+  # Run before any setup steps
+  pre_setup: []
+
+  # Run after all setup steps complete
+  post_setup: []
+
+  # Run after each test - e.g., RCA on failure
+  post_test: []
+  
+  # Run before cleanup starts
+  pre_cleanup: []
+
+  # Run after cleanup completes
+  post_cleanup: []

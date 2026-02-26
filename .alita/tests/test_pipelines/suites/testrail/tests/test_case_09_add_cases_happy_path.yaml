@@ -1,0 +1,153 @@
+name: "TR09 add cases bulk"
+priority: Critical
+description: |
+  Verify the add_cases tool creates multiple test cases in a single operation.
+  
+  Objective: Test bulk test case creation.
+  
+  Expected Behavior:
+  - Tool executes successfully with list of case data
+  - Creates all specified test cases
+  - Returns array of created case IDs
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+
+state:
+  add_test_cases_data:
+    type: str
+    value: '[{"section_id": ${TESTRAIL_SECTION_ID}, "title": "Bulk Test Case 1 - ${TIMESTAMP}", "case_properties": {"template_id": 1, "type_id": 1, "priority_id": 2, "custom_preconds": "Bulk test 1 preconditions", "custom_steps": "Bulk test 1 steps", "custom_expected": "Bulk test 1 expected"}}, {"section_id": ${TESTRAIL_SECTION_ID}, "title": "Bulk Test Case 2 - ${TIMESTAMP}", "case_properties": {"template_id": 1, "type_id": 1, "priority_id": 3, "custom_preconds": "Bulk test 2 preconditions", "custom_steps": "Bulk test 2 steps", "custom_expected": "Bulk test 2 expected"}}]'
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  created_case_ids:
+    type: str
+
+entry_point: invoke_add_cases
+
+nodes:
+  - id: invoke_add_cases
+    type: toolkit
+    tool: add_cases
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - add_test_cases_data
+    input_mapping:
+      add_test_cases_data:
+        type: variable
+        value: add_test_cases_data
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_case_ids
+
+  - id: extract_case_ids
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a JSON data extractor."
+      task:
+        type: fstring
+        value: |
+          Extract all test case IDs from the bulk creation result.
+          
+          Tool Result: {tool_result}
+          
+          Find and extract all case IDs created. The result may contain multiple cases.
+          Return the case IDs as a comma-separated string with no spaces.
+          
+          Example: If 2 cases were created with IDs 12345 and 12346, return: 12345,12346
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - created_case_ids
+    structured_output: true
+    transition: cleanup_delete_cases
+
+  - id: cleanup_delete_cases
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - created_case_ids
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a cleanup orchestrator for TestRail test cases."
+      task:
+        type: fstring
+        value: |
+          You need to delete the following test case IDs: {created_case_ids}
+          
+          Split the comma-separated IDs and call delete_case for each one.
+          Use soft_delete=true for all deletions.
+          
+          Return a summary of all deletions performed.
+      chat_history:
+        type: fixed
+        value: []
+    tools:
+      - type: toolkit
+        toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+        selected_tools:
+          - delete_case
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - cleanup_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete test workflow results.
+
+          Creation Result: {tool_result}
+          Cleanup Result: {cleanup_result}
+
+          Expected behavior:
+          - Tool executed successfully
+          - Created multiple test cases
+          - Result contains array of created case confirmations
+          - Cleanup deleted the created test cases
+          - No errors or exceptions in creation
+
+          Evaluate:
+          1. Did the add_cases tool execute successfully?
+          2. Are there any errors in the creation result?
+          3. Does the output confirm multiple case creations?
+          4. Was cleanup successful (can ignore cleanup errors)?
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Note: test_passed should be based ONLY on creation success, not cleanup.
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

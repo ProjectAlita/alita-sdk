@@ -1,0 +1,188 @@
+name: "ART22 - TestRail Add File to Case from Artifact"
+priority: Critical
+description: |
+  Verify the TestRail 'add_file_to_case' tool attaches a file from artifact storage to a test case.
+  Self-contained test that creates its own test case before adding attachment.
+  
+  Objective: Test file attachment functionality with filepath parameter from artifact storage
+  
+  Expected Behavior:
+  - Test case is created successfully
+  - File is attached to the test case from artifact storage
+  - Returns attachment confirmation
+  - Test case is cleaned up after test
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+  - id: ${ARTIFACT_TOOLKIT_ID}
+    name: ${ARTIFACT_TOOLKIT_NAME}
+
+state:
+  section_id:
+    type: str
+    value: ${TESTRAIL_SECTION_ID}
+  filepath:
+    type: str
+    value: ${TESTRAIL_TEST_ARTIFACT_ID}
+  filename:
+    type: str
+    value: "testrail_test_attachment.txt"
+  tool_result:
+    type: dict
+  created_case_id:
+    type: str
+  attachment_result:
+    type: str
+  test_results:
+    type: dict
+  cleanup_result:
+    type: str
+
+entry_point: create_testcase
+
+nodes:
+  - id: create_testcase
+    type: toolkit
+    tool: add_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - section_id
+    input_mapping:
+      section_id:
+        type: variable
+        value: section_id
+      title:
+        type: fixed
+        value: "[Auto] ART22 Test Case - File Attachment Test"
+      case_properties:
+        type: fixed
+        value:
+          template_id: 1
+          type_id: 1
+          priority_id: 2
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_case_id
+
+  - id: extract_case_id
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a JSON data extractor."
+      task:
+        type: fstring
+        value: |
+          Extract the test case ID from the tool result.
+          
+          Tool Result: {tool_result}
+          
+          Find and extract the case ID (it may be in fields like 'id', 'case_id', or within the result text).
+          Return ONLY the numeric case ID as a plain string with no additional text or formatting.
+          
+          Example: If the result contains "Test case #12345", return: 12345
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - created_case_id
+    structured_output: true
+    transition: add_file_to_case
+
+  - id: add_file_to_case
+    type: toolkit
+    tool: add_file_to_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+      - filepath
+      - filename
+    input_mapping:
+      case_id:
+        type: variable
+        value: created_case_id
+      filepath:
+        type: variable
+        value: filepath
+      filename:
+        type: variable
+        value: filename
+    output:
+      - attachment_result
+    structured_output: true
+    transition: delete_testcase
+
+  - id: delete_testcase
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+    input_mapping:
+      case_id:
+        type: variable
+        value: created_case_id
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - created_case_id
+      - attachment_result
+      - filename
+      - cleanup_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete test workflow results.
+
+          Test Case ID: {created_case_id}
+          Filename: {filename}
+          Attachment Result: {attachment_result}
+          Cleanup Result: {cleanup_result}
+
+          Expected behavior:
+          - Test case was created successfully (has valid case ID)
+          - File was attached to the test case from artifact storage
+          - Returns confirmation message about attachment
+          - Cleanup deleted the test case
+          - No errors in attachment operation
+
+          Evaluate:
+          1. Was the test case created successfully (case ID is not empty)?
+          2. Did the file attachment succeed?
+          3. Are there any error messages in the attachment result?
+          4. Does the result indicate successful attachment?
+          5. Did cleanup execute? (don't fail test if cleanup errors)
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Note: test_passed should be based ONLY on attachment success, not cleanup.
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

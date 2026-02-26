@@ -1,0 +1,159 @@
+name: "TR07 add case happy path"
+priority: Critical
+description: |
+  Verify the add_case tool creates a new test case with basic properties.
+  
+  Objective: Test creating a new test case.
+  
+  Expected Behavior:
+  - Tool executes successfully with valid parameters
+  - Creates new test case in specified section
+  - Returns created case ID and timestamp
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+
+state:
+  section_id:
+    type: str
+    value: ${TESTRAIL_SECTION_ID}
+  title:
+    type: str
+    value: "Automated Test Case - TR07 - ${TIMESTAMP}"
+  case_properties:
+    type: dict
+    value:
+      template_id: 1
+      type_id: 1
+      priority_id: 2
+      custom_preconds: "Test preconditions"
+      custom_steps: "Test steps"
+      custom_expected: "Expected result"
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  created_case_id:
+    type: str
+
+entry_point: invoke_add_case
+
+nodes:
+  - id: invoke_add_case
+    type: toolkit
+    tool: add_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - section_id
+      - title
+      - case_properties
+    input_mapping:
+      section_id:
+        type: variable
+        value: section_id
+      title:
+        type: variable
+        value: title
+      case_properties:
+        type: variable
+        value: case_properties
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_case_id
+
+  - id: extract_case_id
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a JSON data extractor."
+      task:
+        type: fstring
+        value: |
+          Extract the test case ID from the tool result.
+          
+          Tool Result: {tool_result}
+          
+          Find and extract the case ID (it may be in fields like 'id', 'case_id', or within the result text).
+          Return ONLY the numeric case ID as a plain string with no additional text or formatting.
+          
+          Example: If the result contains "Test case #12345", return: 12345
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - created_case_id
+    structured_output: true
+    transition: cleanup_delete_case
+
+  - id: cleanup_delete_case
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+    input_mapping:
+      case_id:
+        type: variable
+        value: created_case_id
+      soft_delete:
+        type: fixed
+        value: true
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - cleanup_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the complete test workflow results.
+
+          Creation Result: {tool_result}
+          Cleanup Result: {cleanup_result}
+
+          Expected behavior:
+          - Tool executed successfully and created new test case
+          - Result contains case id and created timestamp
+          - Cleanup deleted the created test case
+          - No errors or exceptions in creation
+
+          Evaluate:
+          1. Did the add_case tool execute successfully?
+          2. Are there any errors in the creation result?
+          3. Does the output confirm case creation with id?
+          4. Was cleanup successful (can ignore cleanup errors)?
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Note: test_passed should be based ONLY on creation success, not cleanup.
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

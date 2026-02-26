@@ -1,0 +1,161 @@
+name: "TR01 get case happy path"
+priority: Critical
+description: |
+  Verify the get_case tool retrieves information about a single test case from TestRail.
+  
+  Objective: Test basic retrieval of test case details by ID.
+  
+  Expected Behavior:
+  - Tool executes successfully with valid case ID
+  - Returns test case information including id, title, and other fields
+  - No errors or exceptions
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+
+state:
+  section_id:
+    type: str
+    value: ${TESTRAIL_SECTION_ID}
+  testcase_id:
+    type: str
+  created_case_id:
+    type: str
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  cleanup_result:
+    type: str
+
+entry_point: create_testcase
+
+nodes:
+  - id: create_testcase
+    type: toolkit
+    tool: add_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - section_id
+    input_mapping:
+      section_id:
+        type: variable
+        value: section_id
+      title:
+        type: fixed
+        value: "[Auto] Test Case for TR01 - Get Case Test"
+      case_properties:
+        type: fixed
+        value:
+          template_id: 1
+          type_id: 1
+          priority_id: 2
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_case_id
+
+  - id: extract_case_id
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a JSON data extractor."
+      task:
+        type: fstring
+        value: |
+          Extract the test case ID from the tool result.
+          
+          Tool Result: {tool_result}
+          
+          Find and extract the case ID (it may be in fields like 'id', 'case_id', or within the result text).
+          Return ONLY the numeric case ID as a plain string with no additional text or formatting.
+          
+          Example: If the result contains "Test case #12345", return: 12345
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - created_case_id
+    structured_output: true
+    transition: invoke_get_case
+
+  - id: invoke_get_case
+    type: toolkit
+    tool: get_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+    input_mapping:
+      testcase_id:
+        type: variable
+        value: created_case_id
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the tool execution results and determine if the test passed.
+
+          tool executed: get_case
+          results: {tool_result}
+
+          expected behavior:
+          - tool executed successfully
+          - returned test case information
+          - result contains extracted test case data
+          - no errors or exceptions
+
+          Evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain test case information?
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: delete_testcase
+
+  - id: delete_testcase
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - created_case_id
+    input_mapping:
+      case_id:
+        type: variable
+        value: created_case_id
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true
+    transition: END

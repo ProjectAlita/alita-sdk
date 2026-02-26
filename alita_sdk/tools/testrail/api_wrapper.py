@@ -180,7 +180,7 @@ getCasesByFilter = create_model(
     output_format=(
         str,
         Field(
-            default="json",
+
             description="Desired output format. Supported values: 'json', 'csv', 'markdown'. Defaults to 'json'.",
         ),
     ),
@@ -306,6 +306,12 @@ updateCase = create_model(
             default={},
         ),
     ),
+)
+
+deleteCase = create_model(
+    "deleteCase",
+    case_id=(str, Field(description="The ID of the test case to delete")),
+    soft_delete=(bool, Field(default=True, description="If True, marks the case as deleted (soft delete). If False, permanently deletes the case. Default is True.")),
 )
 
 getSuites = create_model(
@@ -643,6 +649,46 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
         )
 
+    def delete_case(self, case_id: str, soft_delete: bool = True) -> str:
+        """Deletes an existing test case.
+        
+        Args:
+            case_id: The ID of the test case to delete
+            soft_delete: If True, marks the case as deleted (soft delete, default).
+                        If False, permanently deletes the case from TestRail.
+        
+        Returns:
+            Confirmation message of the deletion
+        
+        Raises:
+            ToolException: If the deletion fails
+        """
+        try:
+            self._log_tool_event(
+                message=f"Deleting test case #{case_id} (soft_delete={soft_delete})",
+                tool_name='delete_case'
+            )
+            
+            # TestRail API delete_case endpoint
+            # soft=1 for soft delete (marks as deleted), soft=0 for hard delete
+            self._client.cases.delete_case(
+                case_id=case_id,
+                soft=1 if soft_delete else 0
+            )
+            
+            self._log_tool_event(
+                message=f"Test case #{case_id} deleted successfully",
+                tool_name='delete_case'
+            )
+            
+            delete_type = "soft deleted (marked as deleted)" if soft_delete else "permanently deleted"
+            return f"Test case #{case_id} has been {delete_type} successfully."
+            
+        except StatusCodeError as e:
+            raise ToolException(f"Unable to delete test case #{case_id}: {e}")
+        except Exception as e:
+            raise ToolException(f"Error deleting test case #{case_id}: {str(e)}")
+
     def add_file_to_case(self, case_id: str, filepath: str, filename: str = None) -> str:
         """Upload file from artifact and attach to TestRail test case."""
         try:
@@ -934,6 +980,12 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 "ref": self.update_case,
                 "description": self.update_case.__doc__,
                 "args_schema": updateCase,
+            },
+            {
+                "name": "delete_case",
+                "ref": self.delete_case,
+                "description": self.delete_case.__doc__,
+                "args_schema": deleteCase,
             },
             {
                 "name": "add_file_to_case",

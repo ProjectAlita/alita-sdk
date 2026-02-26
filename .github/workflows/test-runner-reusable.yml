@@ -125,6 +125,7 @@ jobs:
           export POSTMAN_API_KEY="${{ secrets.POSTMAN_API_KEY }}"
           export SHAREPOINT_CLIENT_SECRET="${{ secrets.SHAREPOINT_CLIENT_SECRET }}"
           export QTEST_API_TOKEN="${{ secrets.QTEST_API_TOKEN }}"
+          export TESTRAIL_PASSWORD="${{ secrets.TESTRAIL_PASSWORD }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"

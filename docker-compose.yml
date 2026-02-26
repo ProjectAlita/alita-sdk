@@ -29,6 +29,7 @@ services:
       - POSTMAN_API_KEY=${POSTMAN_API_KEY:-}
       - SHAREPOINT_CLIENT_SECRET=${SHAREPOINT_CLIENT_SECRET:-}
       - QTEST_API_TOKEN=${QTEST_API_TOKEN:-}
+      - TESTRAIL_PASSWORD=${TESTRAIL_PASSWORD:-}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
       - DEFAULT_LLM_MODEL=gpt-4o-2024-11-20
       - SANDBOX_BASE=/app/

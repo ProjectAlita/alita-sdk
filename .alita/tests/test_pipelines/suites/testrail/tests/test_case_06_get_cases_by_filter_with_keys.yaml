@@ -1,0 +1,107 @@
+name: "TR06 filter with keys"
+priority: High
+description: |
+  Verify the get_cases_by_filter tool supports custom field selection with keys parameter.
+  
+  Objective: Test filtering with specific field keys returned.
+  
+  Expected Behavior:
+  - Tool executes successfully with keys parameter
+  - Returns only specified fields in results
+  - Data is properly filtered and formatted
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+
+state:
+  project_id:
+    type: str
+    value: ${TESTRAIL_PROJECT_ID}
+  json_case_arguments:
+    type: str
+    value: '{"priority_id": 2}'
+  output_format:
+    type: str
+    value: "json"
+  keys:
+    type: list
+    value: ["id", "title", "priority_id"]
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_cases_by_filter
+
+nodes:
+  - id: invoke_get_cases_by_filter
+    type: toolkit
+    tool: get_cases_by_filter
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - project_id
+      - json_case_arguments
+      - output_format
+      - keys
+    input_mapping:
+      project_id:
+        type: variable
+        value: project_id
+      json_case_arguments:
+        type: variable
+        value: json_case_arguments
+      output_format:
+        type: variable
+        value: output_format
+      keys:
+        type: variable
+        value: keys
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the tool execution results and determine if the test passed.
+
+          tool executed: get_cases_by_filter
+          results: {tool_result}
+
+          expected behavior:
+          - tool executed successfully with keys parameter
+          - returned filtered test cases with only specified fields
+          - no errors or exceptions
+
+          Evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain filtered data with specified keys?
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
