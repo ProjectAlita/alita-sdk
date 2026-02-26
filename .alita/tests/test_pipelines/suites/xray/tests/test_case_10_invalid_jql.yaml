@@ -23,6 +23,8 @@ state:
     value: "project = AND testType INVALID SYNTAX ((("
   get_tests_result:
     type: str
+  trimmed_error:
+    type: str
   expected_error_indicators:
     type: list
     value: ["Unable to get tests", "error", "failed", "exception", "syntax", "parse"]
@@ -48,12 +50,46 @@ nodes:
     tool: get_tests
     toolkit_name: ${XRAY_TOOLKIT_NAME}
     continue_on_error: true
+    transition: trim_error_output
+
+  - id: trim_error_output
+    type: code
+    code:
+      type: fixed
+      value: |
+        # Extract only the error message line, not the full stack trace
+        # This prevents LLM token overflow
+        result = alita_state.get('get_tests_result', '')
+        
+        # Extract just the error message (first 300 chars)
+        if 'Error Message:' in result:
+            # Find the error message line
+            lines = result.split('\n')
+            error_msg = ''
+            for i, line in enumerate(lines):
+                if 'Error Message:' in line:
+                    # Get this line and maybe next line
+                    error_msg = line
+                    if i + 1 < len(lines) and lines[i + 1].strip():
+                        error_msg += ' ' + lines[i + 1].strip()
+                    break
+            trimmed_error = error_msg[:300] if error_msg else result[:300]
+        else:
+            # Fallback: just take first 300 chars
+            trimmed_error = result[:300]
+        
+        {"trimmed_error": trimmed_error}
+    input:
+      - get_tests_result
+    output:
+      - trimmed_error
+    structured_output: true
     transition: validate_error_handling
 
   - id: validate_error_handling
     type: llm
     input:
-      - get_tests_result
+      - trimmed_error
       - invalid_jql_query
       - expected_error_indicators
       - unexpected_success_indicators
@@ -74,7 +110,7 @@ nodes:
           - For this NEGATIVE test, we expect the tool to reject malformed JQL
           - Evidence: Either error message present OR no successful test data returned
           
-          Get Tests Result: {get_tests_result}
+          Get Tests Result: {trimmed_error}
           Invalid JQL Query Used: {invalid_jql_query}
           Expected Error Indicators: {expected_error_indicators}
           Unexpected Success Indicators: {unexpected_success_indicators}
