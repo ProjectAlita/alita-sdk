@@ -80,11 +80,12 @@ class SharepointConfiguration(BaseModel):
                 ``access_token`` has been provided yet, or when the provided token
                 is invalid / expired.
         """
+        log.debug(f"Checking SharePoint connection with settings: {settings}")
         oauth_discovery_endpoint = settings.get("oauth_discovery_endpoint")
         if oauth_discovery_endpoint:
-            log.debug(f"Testing SharePoint connection with oauth flow")
+            log.info(f"Using OAuth discovery endpoint: {oauth_discovery_endpoint}")
             return SharepointConfiguration._check_connection_delegated(settings, oauth_discovery_endpoint)
-        log.debug(f'Testing SharePoint connection with App-Only flow")')
+        log.info("Using legacy SharePoint ACS endpoint")
         return SharepointConfiguration._check_connection_client_credentials(settings)
 
     # ------------------------------------------------------------------
@@ -307,11 +308,9 @@ class SharepointConfiguration(BaseModel):
         via the legacy client-credentials grant are SharePoint tokens (not Graph
         tokens) and must be verified against the SharePoint REST endpoint.
 
-        On HTTP 401 the response body is parsed and ``McpAuthorizationRequired``
-        is raised so the caller is notified of the invalid token.
+        On HTTP 401 a plain error string is returned — this flow does not use
+        delegated OAuth, so ``McpAuthorizationRequired`` is never raised here.
         """
-        from ..runtime.utils.mcp_oauth import McpAuthorizationRequired
-
         try:
             resp = requests.get(
                 f"{site_url}/_api/web",
@@ -322,13 +321,9 @@ class SharepointConfiguration(BaseModel):
                 return None
             elif resp.status_code == 401:
                 api_message = SharepointConfiguration._extract_api_error_message(resp)
-                raise McpAuthorizationRequired(
-                    message=(
-                        f"SharePoint access token is invalid or expired: {api_message}. "
-                        "Please re-authorize to obtain a fresh access token."
-                    ),
-                    server_url=site_url,
-                    status=401,
+                return (
+                    f"SharePoint access token is invalid or expired: {api_message}. "
+                    "Please check your client credentials and try again."
                 )
             elif resp.status_code == 403:
                 return "Access forbidden - client may lack required permissions for this site"
@@ -336,8 +331,6 @@ class SharepointConfiguration(BaseModel):
                 return f"Site not found or not accessible: {site_url}"
             else:
                 return f"SharePoint API request failed with status {resp.status_code}"
-        except McpAuthorizationRequired:
-            raise
         except requests.exceptions.Timeout:
             return "Connection timeout - SharePoint is not responding"
         except requests.exceptions.ConnectionError:
@@ -472,7 +465,4 @@ class SharepointConfiguration(BaseModel):
         except requests.exceptions.RequestException as e:
             return f"Request failed: {str(e)}"
         except Exception as e:
-            from ..runtime.utils.mcp_oauth import McpAuthorizationRequired
-            if isinstance(e, McpAuthorizationRequired):
-                raise
             return f"Unexpected error: {str(e)}"
