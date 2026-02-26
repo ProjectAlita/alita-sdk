@@ -718,7 +718,7 @@ class LLMNode(BaseTool):
             else:
                 logger.warning("No tools to bind to LLM")
 
-        if self.structured_output and self.output_variables:
+        if self.structured_output_dict and self.output_variables:
             # Handle structured output
             struct_params = self._prepare_structured_output_params()
             struct_model = create_pydantic_model(f"LLMOutput", struct_params)
