@@ -41,7 +41,7 @@ setup:
       overrides:
         # Credentials must use secret reference format (platform requirement)
         figma_configuration:
-          private: true
+          private: false
           alita_title: ${FIGMA_SECRET_NAME:figma}
       # Name for the toolkit on platform
       toolkit_name: ${FIGMA_TOOLKIT_NAME:figma-testing}

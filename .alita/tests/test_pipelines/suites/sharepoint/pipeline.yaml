@@ -35,7 +35,7 @@ setup:
       toolkit_type: sharepoint
       overrides:
         sharepoint_configuration:
-          private: true
+          private: false
           alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
       toolkit_name: ${SHAREPOINT_TOOLKIT_NAME:sharepoint-testing}
     save_to_env:

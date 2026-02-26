@@ -42,7 +42,7 @@ setup:
       overrides:
         # Credentials must use secret reference format (platform requirement)
         confluence_configuration:
-          private: true
+          private: false
           alita_title: ${CONFLUENCE_SECRET_NAME:confluence}
         space: ${CONFLUENCE_SPACE:AT}
         cloud: true

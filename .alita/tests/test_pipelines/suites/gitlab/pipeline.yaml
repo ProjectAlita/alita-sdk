@@ -33,7 +33,7 @@ setup:
       toolkit_type: gitlab
       overrides:
         gitlab_configuration:
-          private: true
+          private: false
           alita_title: ${GITLAB_SECRET_NAME:gitlab}
         repository: ${GITLAB_TEST_REPO:Aliaksei_Breilian/alita-automation}
         branch: ${GITLAB_BASE_BRANCH:main}

@@ -40,7 +40,7 @@ setup:
       overrides:
         # Credentials must use secret reference format (platform requirement)
         github_configuration:
-          private: true
+          private: false
           alita_title: ${GITHUB_SECRET_NAME:github}
         repository: ${GITHUB_TEST_REPO:ProjectAlita/elitea-testing}
         active_branch: ${GITHUB_BASE_BRANCH:main}

@@ -46,7 +46,7 @@ setup:
       toolkit_type: confluence
       overrides:
         confluence_configuration:
-          private: true
+          private: false
           alita_title: ${CONFLUENCE_SECRET_NAME:confluence}
         space: ${CONFLUENCE_SPACE:AT}
         cloud: true
@@ -77,7 +77,7 @@ setup:
       toolkit_type: sharepoint
       overrides:
         sharepoint_configuration:
-          private: true
+          private: false
           alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
       toolkit_name: ${SHAREPOINT_TOOLKIT_NAME:sharepoint-testing}
     save_to_env:
@@ -107,7 +107,7 @@ setup:
       overrides:
         # Credentials must use secret reference format (platform requirement)
         testrail_configuration:
-          private: true
+          private: false
           alita_title: ${TESTRAIL_SECRET_NAME:testrail}
     save_to_env:
       - key: TESTRAIL_TOOLKIT_ID
