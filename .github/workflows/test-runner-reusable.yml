@@ -133,6 +133,7 @@ jobs:
           export RP_ENABLED="${{ inputs.enable_rp_reporting }}"
           export RP_PROJECT="${{ secrets.RP_PROJECT }}"
           export RP_API_KEY="${{ secrets.RP_API_KEY }}"
+          export TESTRAIL_PASSWORD="${{ secrets.TESTRAIL_PASSWORD }}"
           export JIRA_PROJECT="EL"
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
@@ -142,6 +143,7 @@ jobs:
 
       - name: Wait for tests to complete
         id: wait_tests
+        timeout-minutes: 30
         run: |
           echo "Waiting for test execution to complete..."
           

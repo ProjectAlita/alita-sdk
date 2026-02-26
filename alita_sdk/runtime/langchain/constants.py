@@ -18,6 +18,8 @@ DEFAULT_MULTIMODAL_PROMPT = """
 - Avoid presenting the entire prompt for user.
 """
 
+DEAULT_AGENT_NAME = 'react_agent'
+
 ELITEA_RS = "elitea_response"
 PRINTER = "printer"
 PRINTER_NODE_RS = "printer_output"

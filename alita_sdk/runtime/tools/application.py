@@ -2,12 +2,13 @@ import json
 
 from ..utils.utils import clean_string
 from langchain_core.tools import BaseTool, ToolException
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, ToolMessage
 from typing import Any, Type, Optional
 from pydantic import create_model, model_validator, BaseModel
 from pydantic.fields import FieldInfo
 from ..langchain.mixedAgentRenderes import convert_message_to_json
 from logging import getLogger
+
 logger = getLogger(__name__)
 
 applicationToolSchema = create_model(
@@ -15,6 +16,7 @@ applicationToolSchema = create_model(
     task = (str, FieldInfo(description="Task for Application")), 
     chat_history = (Optional[list[BaseMessage]], FieldInfo(description="Chat History relevant for Application", default=[]))
 )
+
 
 def formulate_query(kwargs, is_subgraph=False):
     chat_history = []
@@ -72,6 +74,17 @@ class Application(BaseTool):
 
     def invoke(self, input: Any, config: Optional[dict] = None, **kwargs: Any) -> Any:
         """Override default invoke to preserve all fields, not just args_schema"""
+        # Handle ToolCall format: {"name": ..., "args": {...}, "id": ..., "type": "tool_call"}
+        # LangGraph's ToolNode passes the full ToolCall dict directly; BaseTool.invoke() normally
+        # extracts input["args"] via _prep_run_args, but our override bypasses that logic.
+        #
+        # LangGraph's ToolNode (newer versions) requires tools to return ToolMessage or Command —
+        # not a plain str. When called via ToolNode (type=="tool_call"), capture the tool_call_id
+        # so we can wrap the result in a ToolMessage before returning.
+        tool_call_id = None
+        if isinstance(input, dict) and input.get("type") == "tool_call":
+            tool_call_id = input.get("id")
+            input = input["args"]
         schema_values = self.args_schema(**input).model_dump() if self.args_schema else {}
         extras = {k: v for k, v in input.items() if k not in schema_values}
         all_kwargs = {**kwargs, **extras, **schema_values}
@@ -88,7 +101,31 @@ class Application(BaseTool):
                 if key not in config['metadata']:
                     config['metadata'][key] = value
 
-        return self._run(*config, **all_kwargs)
+        result = self._run(*config, **all_kwargs)
+
+        # When invoked from LangGraph's ToolNode, wrap plain str/dict results in a ToolMessage.
+        # ToolNode (langgraph >= 0.3) rejects any return type that is not ToolMessage or Command,
+        # raising: TypeError: Tool <name> returned unexpected type: <class 'str'>
+        if tool_call_id is not None:
+            if isinstance(result, ToolMessage):
+                # Already a ToolMessage (e.g. is_subgraph path); ensure tool_call_id is set
+                if not result.tool_call_id:
+                    result.tool_call_id = tool_call_id
+                return result
+            # Convert str / dict / other to ToolMessage content
+            if isinstance(result, str):
+                content = result
+            elif isinstance(result, dict):
+                content = result.get("output", str(result))
+            else:
+                content = str(result)
+            return ToolMessage(
+                content=content,
+                name=self.name,
+                tool_call_id=tool_call_id,
+            )
+
+        return result
 
     def _run(self, *args, **kwargs):
         if self.client and self.args_runnable:

@@ -79,7 +79,7 @@ def extract_resource_metadata_url(www_authenticate: Optional[str], server_url: O
     # or using well-known OAuth discovery endpoints directly
     return None
 
-def fetch_oauth_authorization_server_metadata(url: str, timeout: int = 10) -> Optional[Dict[str, Any]]:
+def fetch_oauth_authorization_server_metadata(url: str, timeout: int = 10, extra_endpoints: Optional[list] = None) -> Optional[Dict[str, Any]]:
     """
     Fetch OAuth authorization server metadata from well-known endpoints.
     
@@ -87,7 +87,11 @@ def fetch_oauth_authorization_server_metadata(url: str, timeout: int = 10) -> Op
         url: Either a full well-known URL (e.g., https://api.figma.com/.well-known/oauth-authorization-server)
              or a base URL (e.g., https://api.figma.com) where we'll try discovery endpoints.
         timeout: Request timeout in seconds.
-    
+        extra_endpoints: Additional well-known URLs to try before the standard ones.
+            Useful for providers that use non-standard discovery paths, e.g. Azure AD v2.0:
+            ``["{base}/v2.0/.well-known/openid-configuration"]``.
+            Only used when *url* does not already contain ``/.well-known/``.
+
     Returns:
         OAuth authorization server metadata dict, or None if not found.
     """
@@ -102,8 +106,8 @@ def fetch_oauth_authorization_server_metadata(url: str, timeout: int = 10) -> Op
         # If direct fetch failed, don't try other endpoints
         return None
     
-    # Otherwise, try standard discovery endpoints
-    discovery_endpoints = [
+    # Otherwise, try extra endpoints first, then standard discovery endpoints
+    discovery_endpoints = list(extra_endpoints or []) + [
         f"{url}/.well-known/oauth-authorization-server",
         f"{url}/.well-known/openid-configuration",
     ]
@@ -358,4 +362,3 @@ def refresh_oauth_token(
         error_msg = token_data.get("error_description") or token_data.get("error") or response.text
         logger.error(f"MCP OAuth: token refresh failed - {response.status_code}: {error_msg}")
         raise ValueError(f"Token refresh failed: {error_msg}")
-

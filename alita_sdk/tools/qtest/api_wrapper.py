@@ -157,7 +157,8 @@ QtestDataQuerySearch = create_model(
     "QtestDataQuerySearch",
     dql=(str, Field(description="Qtest Data Query Language (DQL) query string")),
     extract_images=(Optional[bool], Field(description="Should images be processed by llm", default=False)),
-    prompt=(Optional[str], Field(description="Prompt for image processing", default=None))
+    prompt=(Optional[str], Field(description="Prompt for image processing", default=None)),
+    max_results=(Optional[int], Field(description="Maximum total results to fetch across all pages. Set to 0 or negative for unlimited. Default: 20", default=20))
 )
 
 QtestCreateTestCase = create_model(
@@ -1024,21 +1025,46 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
         content = html.unescape(content)
         return content
 
-    def __perform_search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None) -> list:
+    def __perform_search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None, max_results: int=None) -> list:
+        """Perform DQL search with pagination control.
+        
+        Args:
+            dql: Data Query Language query string
+            extract_images: Whether to extract images from test cases
+            prompt: Optional prompt for image processing
+            max_results: Maximum total results to fetch. If None, defaults to 20.
+                        Set to 0 or negative for unlimited (fetch all pages).
+        
+        Returns:
+            List of parsed test case data, limited to max_results if specified
+        """
         search_instance: SearchApi = swagger_client.SearchApi(self._client)
         body = swagger_client.ArtifactSearchParams(object_type='test-cases', fields=['*'],
                                                    query=dql)
         append_test_steps = 'true'
         include_external_properties = 'true'
         parsed_data = []
+        
+        # Determine effective max_results (default to 20 if not specified)
+        effective_max = max_results if max_results is not None else 20
+        unlimited = effective_max <= 0
+        
         try:
             api_response = search_instance.search_artifact(self.qtest_project_id, body, append_test_steps=append_test_steps,
                                                            include_external_properties=include_external_properties,
                                                            page_size=self.no_of_items_per_page, page=self.page)
             self.__parse_data(api_response, parsed_data, extract_images, prompt)
+            
+            # Check if we've reached the limit after first page
+            if not unlimited and len(parsed_data) >= effective_max:
+                return parsed_data[:effective_max]
 
             if api_response['links']:
                 while api_response['links'][0]['rel'] == 'next':
+                    # Safety check: stop if limit reached
+                    if not unlimited and len(parsed_data) >= effective_max:
+                        break
+                    
                     next_page = self.page + 1
                     api_response = search_instance.search_artifact(self.qtest_project_id, body,
                                                                    append_test_steps=append_test_steps,
@@ -1051,7 +1077,9 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
             raise ToolException(
                 f"""Unable to get the test cases by dql: {dql} from following qTest project - {self.qtest_project_id}.
                     Exception: \n{stacktrace}""")
-        return parsed_data
+        
+        # Trim to max_results if specified
+        return parsed_data[:effective_max] if not unlimited else parsed_data
 
     def __find_qtest_id_by_test_id(self, test_id: str) -> int:
         """ Search for a qtest id using the test id. Test id should be in format TC-123. """
@@ -1705,9 +1733,20 @@ class QtestApiWrapper(NonCodeIndexerToolkit):
                 f"in project {self.qtest_project_id}. Exception: \n{stacktrace}"
             ) from e
 
-    def search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None):
-        """Search for the test cases in qTest using Data Query Language """
-        parsed_data = self.__perform_search_by_dql(dql, extract_images, prompt)
+    def search_by_dql(self, dql: str, extract_images:bool=False, prompt: str=None, max_results: int=None):
+        """Search for the test cases in qTest using Data Query Language.
+        
+        Args:
+            dql: Data Query Language query string
+            extract_images: Whether to extract images from test cases
+            prompt: Optional prompt for image processing
+            max_results: Maximum total results to fetch. If None, defaults to 20.
+                        Set to 0 or negative for unlimited (fetch all pages).
+        
+        Returns:
+            String with search results summary and first no_of_tests_shown_in_dql_search items
+        """
+        parsed_data = self.__perform_search_by_dql(dql, extract_images, prompt, max_results)
         return "Found " + str(
             len(parsed_data)) + f" Qtest test cases:\n" + str(parsed_data[:self.no_of_tests_shown_in_dql_search])
 

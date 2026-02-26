@@ -1,0 +1,89 @@
+name: "TR02 get case error handling"
+priority: High
+description: |
+  Verify the get_case tool handles invalid test case IDs gracefully.
+  
+  Objective: Test error handling for non-existent test case.
+  
+  Expected Behavior:
+  - Tool executes without crashing
+  - Returns appropriate error message for invalid case ID
+  - Error indicates case not found or cannot be accessed
+
+toolkits:
+  - id: ${TESTRAIL_TOOLKIT_ID}
+    name: ${TESTRAIL_TOOLKIT_NAME}
+
+state:
+  testcase_id:
+    type: str
+    value: "999999999"
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_case
+
+nodes:
+  - id: invoke_get_case
+    type: toolkit
+    tool: get_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - testcase_id
+    input_mapping:
+      testcase_id:
+        type: variable
+        value: testcase_id
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the get_case tool with invalid case ID.
+
+          Tool Result: {tool_result}
+
+          This test validates error handling for non-existent test case.
+
+          Perform the following checks:
+          1. Confirm the tool executed (result is not empty or null).
+          2. Examine any error message for specific meaning. Valid error patterns for invalid case ID include:
+             - case does not exist or is invalid
+             - case not found or cannot be accessed
+             - test case id is invalid
+             - http error codes 404 (not found) or 400 (bad request)
+          3. Determine if the error is about the invalid case ID itself.
+             Errors like "case 999999999 does not exist" are expected and correct.
+             System errors unrelated to the invalid case ID are failures.
+
+          Return a JSON object named test_results with the following structure:
+
+          {{
+            "test_passed": boolean (TRUE if error occurred as expected),
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

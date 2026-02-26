@@ -29,7 +29,7 @@ on:
           # - figma
           - gitlab
           - jira
-          # - qtest
+          - qtest
           - zephyr_essential
           - xray
           - sharepoint
