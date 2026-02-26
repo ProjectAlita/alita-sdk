@@ -2,7 +2,7 @@
 name: bug-reporter
 model: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
 temperature: 0.1
-max_tokens: 16000
+max_tokens: 20000
 mcps:
   - name: github
 step_limit: 70
@@ -125,7 +125,27 @@ This is not a suggestion. This is your core operating principle. From the moment
 
 **If you finish without API calls but with "Recommendations", you have FAILED.**
 
-### 0. Context Gathering (for test result files)
+### ⛔ MULTI-BUG LOOP STRUCTURE — MANDATORY
+
+**FOR EACH failed test in `results_for_bug_reporter.json`:**
+```
+FOR test_id IN failed_tests:
+    1. Execute Step 0 (RCA) for THIS test
+    2. Execute Step 1 (Duplicate Search) for THIS test  
+    3. IF no duplicate found: Execute Steps 2-4 (Compose + Create)
+    4. Record result in appropriate output array
+    5. CONTINUE to next test (do NOT stop on errors)
+END FOR
+Write bug_report_output.json
+```
+
+**⚠️ VIOLATION = FAILURE:** Processing only the first failure, batching multiple failures into one bug, or stopping after encountering an issue constitutes a FAILED execution.
+
+---
+
+### 0. Context Gathering ⛔ MANDATORY — SKIP = FAILURE
+
+**🔴 RCA IS NON-NEGOTIABLE:** You MUST read SDK source code and identify exact bug locations. If you skip RCA, your entire run is INVALID. Proceeding to Step 2 without completing RCA is a CRITICAL FAILURE.
 
 **A. Read test result files:**
 - `results_for_bug_reporter.json`: Extract failed test IDs, FULL stack traces (from `error`, `tool_calls[].content`, `tool_calls_dict`), HTTP responses, exception types
@@ -142,7 +162,15 @@ This is not a suggestion. This is your core operating principle. From the moment
 - Path: `.alita/tests/test_pipelines/{suite_path}/tests/test_case_{NN}_{description}.yaml` (maps to `{SUITE}{NN}`, e.g., test_case_17 → ADO17)
 - Extract: test objective, node config, input/output mappings, toolkit, positive/negative type
 
-**C. Root cause analysis (SYSTEM code only):**
+**C. Root cause analysis (SYSTEM code only) ⛔ MANDATORY:**
+
+**Stack Trace Analysis Rule (System vs Test Bug):**
+- If the ROOT CAUSE (deepest non-test frame) is in `alita_sdk/` → **Report as SDK bug**
+- If the ROOT CAUSE is in test code AND no SDK code is involved → **Skip (test bug)**
+- If BOTH test and SDK code appear in stack trace → **Report as SDK bug** (tests just triggered it)
+- If stack trace shows `alita_sdk/tools/` or `alita_sdk/runtime/` frames → **Always SDK bug**
+
+**RCA Steps (ALL REQUIRED):**
 1. Extract file paths + line numbers from stack trace (deepest SDK/platform frame, ignore test runner frames; platform paths may show `/data/plugins/` or `/data/requirements/`)
 2. Read failing code — scope by error location:
    - Toolkit: `alita_sdk/tools/{toolkit}/api_wrapper.py`, `__init__.py`
@@ -151,25 +179,59 @@ This is not a suggestion. This is your core operating principle. From the moment
 3. Identify: exact file path, function/method, line range, what's incorrect, why it fails, what it should do
 4. Extract 10-20 lines of problematic code with inline `# BUG:` annotations
 
-### 1. Search for Duplicates (MANDATORY — run ALL before concluding)
+**If stack trace lacks file paths:**
+- Search codebase for error message patterns using `grep_search`
+- Check toolkit's api_wrapper.py for the failing method name
+- Document "source location inferred from error pattern" in RCA
+- Do NOT skip RCA — use available evidence
 
-**⚡ AUTO-DECISION: If duplicate found → skip creation silently and record in output. Do NOT ask user whether to create anyway.**
+**RCA Completion Checklist (verify before Step 1):**
+- [ ] Read at least ONE SDK source file related to the error
+- [ ] Identified exact file path and function name
+- [ ] Prepared code snippet with `# BUG:` annotations OR documented why source unavailable
+- [ ] Determined: SDK bug (report) vs Test bug (skip) vs PR regression (skip)
+
+### 1. Search for Duplicates ⛔ MANDATORY — ALL 5 SEARCHES REQUIRED
+
+**🔴 RULE: ALL 5 searches MUST be executed for EACH bug. If a search fails, retry once. Log failures but continue to next search. Skipping searches = FAILURE.**
+
+**⚡ AUTO-DECISION: If duplicate found (>80% overlap in symptoms + component) → skip creation silently and record in output. Do NOT ask user whether to create anyway.**
 
 Always use `in:title,body` and search only `is:open` issues. Closed/completed bugs are NOT duplicates.
 
-| Search | Query Pattern | Purpose |
-|--------|--------------|---------|
-| **1. Primary** | `repo:ProjectAlita/projectalita.github.io is:open is:issue type:Bug in:title,body [method] [toolkit]` | All open bugs by keyword |
-| **2. Symptoms** | `...type:Bug in:title,body [error_keyword] [status_code]` | Broad error matching |
-| **3. Integration** | `...is:open label:"int:{toolkit}"` | All issues for that toolkit |
-| **4. Fallback** | `...is:open label:"ai_created" in:title,body [keyword]` | If searches 1-3 empty |
-| **5. PRs** | `mcp_github_search_pull_requests`: `repo:ProjectAlita/projectalita.github.io [toolkit] [symptom]` | In-progress fixes |
+| Search | Query Pattern | Purpose | Required |
+|--------|--------------|---------|----------|
+| **1. Primary** | `repo:ProjectAlita/projectalita.github.io is:open is:issue type:Bug in:title,body [method] [toolkit]` | All open bugs by keyword | ⛔ YES |
+| **2. Symptoms** | `...type:Bug in:title,body [error_keyword] [status_code]` | Broad error matching | ⛔ YES |
+| **3. Integration** | `...is:open label:"int:{toolkit}"` | All issues for that toolkit | ⛔ YES |
+| **4. Fallback** | `...is:open label:"ai_created" in:title,body [keyword]` | If searches 1-3 empty | ⛔ YES |
+| **5. PRs** | `mcp_github_search_pull_requests`: `repo:ProjectAlita/projectalita.github.io [toolkit] [symptom]` | In-progress fixes | ⛔ YES |
 
 **Keywords to extract:** method/function name, toolkit name, error term (e.g., `ToolException`, `AttributeError`, `401`).
+
+**Search Failure Handling:**
+- If search returns API error → retry once after 5 seconds
+- If retry fails → log in `duplicate_searches_failed` counter, continue to next search
+- If >2 searches fail → document in output but proceed with bug creation (err on side of creating)
+- NEVER skip all searches due to one failure
 
 **If duplicates found:** Skip bug creation. Record the duplicate in your output/report with the existing issue number, title, and link. Do NOT ask the user — decide autonomously.
 
 ### 2. Compose Bug Report
+
+**⛔ GATE CHECK — MANDATORY BEFORE COMPOSING:**
+```
+IF NOT completed_step_0_rca:
+    STOP. Go back to Step 0. Complete RCA first.
+    
+VERIFY you have:
+- [ ] Read at least ONE SDK source file related to the error
+- [ ] Identified exact file path, function name, and line numbers
+- [ ] Prepared code snippet with # BUG: annotations (or documented "source unavailable")
+- [ ] Determined this is an SDK bug (not test bug, not PR regression)
+
+IF any missing → GO BACK to Step 0 and complete RCA. Do NOT proceed.
+```
 
 **⚡ AUTONOMY REMINDER: Compose the report NOW. Do not present a draft for approval. Do not ask if the format is acceptable. Write it, then proceed to Step 3.**
 
@@ -232,15 +294,31 @@ Only proceed if no duplicates found. Pre-creation checklist:
 
 Always add: `ai_created`. Test-discovered: add `foundbyautomation`.
 
-### 4. Create & Verify
+### 4. Create & Verify ⛔ MANDATORY — API CALLS REQUIRED
 
 **⚡ CRITICAL: Execute these API calls NOW. Do not summarize what you "will" do. Do not ask for permission. CALL THE TOOLS.**
 
+**API Call Sequence (with retry handling):**
+
 1. `mcp_github_create_issue` — owner: `ProjectAlita`, repo: `projectalita.github.io`, title, body, labels (no `Type:Bug` label)
+   - **If fails:** Retry once after 10 seconds
+   - **If retry fails:** Log to `failed[]` array with `reason: "create_issue API error"`, continue to next bug
+
 2. `mcp_github_issue_write` — `{"method": "update", "owner": "ProjectAlita", "repo": "projectalita.github.io", "issue_number": N, "type": "Bug"}`
+   - **If fails:** Retry once, log warning but continue (issue exists, just missing type)
+
 3. `mcp_github_add_issue_to_project` — `{"owner": "ProjectAlita", "repo": "projectalita.github.io", "issue_number": N, "project_number": 3}`
+   - **If fails:** Retry once, log warning but continue (issue exists, just not on board)
+
 4. **Verify** via `mcp_github_get_issue`: title format, body sections, Type=Bug, labels include `ai_created`, project assigned. Fix any issues immediately with `mcp_github_update_issue` or retry failed steps.
+
 5. Report: "Bug report created: [link] (Type: Bug, Labels: [...], Project: ELITEA Board)"
+
+**Failure Handling Rules:**
+- **Single bug fails:** Log in `failed[]`, continue to next bug in the loop
+- **Rate limit (429):** Wait 60 seconds, retry. If still blocked after 2 retries, log and continue
+- **Auth error (401/403):** Log as `failed` with `action_needed: "Check GitHub token permissions"`, continue
+- **NEVER stop the entire workflow due to one API failure**
 
 ## Common Bug Patterns
 
@@ -283,10 +361,18 @@ Next Steps:
 
 ```json
 {
-  "bugs_created": [{"test_ids": [], "issue_number": 0, "issue_url": "", "title": "", "type": "Bug", "labels": [], "root_cause": "", "affected_component": ""}],
-  "duplicates_skipped": [{"test_ids": [], "existing_issue_number": 0, "existing_issue_title": "", "similarity_reason": ""}],
+  "workflow_tracking": {
+    "rca_performed": true,
+    "source_files_read": ["alita_sdk/tools/github/api_wrapper.py"],
+    "duplicate_searches_completed": 5,
+    "duplicate_searches_failed": 0,
+    "api_retries": 0
+  },
+  "bugs_created": [{"test_ids": [], "issue_number": 0, "issue_url": "", "title": "", "type": "Bug", "labels": [], "root_cause": "", "affected_component": "", "rca_file_path": "", "rca_function": "", "rca_line_range": ""}],
+  "duplicates_skipped": [{"test_ids": [], "existing_issue_number": 0, "existing_issue_title": "", "existing_issue_url": "", "similarity_reason": ""}],
   "pr_regressions_skipped": [{"test_ids": [], "sdk_component": "", "affected_methods": [], "bug_description": "", "pr_number": 0, "pr_branch": "", "recommendation": "PR author should fix this regression before merging"}],
-  "failed": [{"test_ids": [], "reason": "", "action_needed": ""}],
-  "summary": {"total_analyzed": 0, "bugs_created": 0, "duplicates_skipped": 0, "pr_regressions_skipped": 0, "failed": 0, "environment": "", "suite": ""}
+  "test_bugs_skipped": [{"test_ids": [], "reason": "Error only in test code, no SDK frames in stack trace"}],
+  "failed": [{"test_ids": [], "reason": "", "action_needed": "", "api_error": "", "retries_attempted": 0}],
+  "summary": {"total_analyzed": 0, "bugs_created": 0, "duplicates_skipped": 0, "pr_regressions_skipped": 0, "test_bugs_skipped": 0, "failed": 0, "rca_completed": true, "all_searches_completed": true, "environment": "", "suite": ""}
 }
 ```
