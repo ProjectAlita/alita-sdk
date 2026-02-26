@@ -68,8 +68,8 @@ nodes:
 
           Perform the following checks:
           1. Confirm the tool executed successfully (result is not empty, null, or error message).
-          2. Verify the output contains update statuses for all pages.
-          3. Check that single content value was applied to all pages.
+          2. Verify the output is a string representation of a list containing update statuses.
+          3. Check that the number of successful update statuses matches the number of input page IDs.
 
           Return a JSON object named test_results with the following structure:
 
