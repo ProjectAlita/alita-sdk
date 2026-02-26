@@ -1,0 +1,16 @@
+{
+  "type": "testrail",
+  "toolkit_name": "testrail",
+  "id": 1,
+  "selected_tools": [
+    "get_case",
+    "get_cases",
+    "get_cases_by_filter",
+    "add_case",
+    "add_cases",
+    "update_case",
+    "add_file_to_case",
+    "get_suites",
+    "delete_case"
+  ]
+}

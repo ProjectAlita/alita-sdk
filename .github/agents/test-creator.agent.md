@@ -174,10 +174,19 @@ Test pipelines are AI agents composed of different node types. Understanding thi
 - ❌ Be used in intermediate steps
 - ❌ Make multiple sequential LLM calls
 
-**Standard Test Pattern**:
+**Standard Test Patterns**:
+
+**Read-Only Tests** (list, get, find, search):
 ```
-Toolkit Node(s) → [Optional Code Node(s)] → Final LLM Validation Node → END
+Toolkit Node → LLM Validation Node → END
 ```
+
+**Create/Update Tests** (create, update, add, link):
+```
+Toolkit Node → LLM Validation Node → Code Node (Extract ID) → Toolkit Node (Delete) → END
+```
+
+See "Test Cleanup Pattern" section for detailed cleanup implementation.
 
 ---
 
@@ -333,7 +342,9 @@ Examples:
   - Be meaningful and based on the tool name and scenario.
   - Respect word boundaries (do not cut words in the middle; drop trailing words instead to stay within the limit).
 
-### Standard Pattern (2 nodes)
+### Standard Pattern (2 nodes for read-only tests, 4 nodes for create/update tests)
+
+**For Read-Only Tests** (list, get, find, search):
 
 ```yaml
 name: <tool_name>: <business-friendly scenario title>
@@ -384,7 +395,7 @@ nodes:
     structured_output: true
     transition: validate_result
 
-  # Node 2: LLM validation (MUST be final node)
+  # Node 2: LLM validation (MUST be final node for read-only tests)
   - id: validate_result
     type: llm
     model: gpt-4o-2024-11-20
@@ -398,6 +409,40 @@ nodes:
         type: fstring
         value: |
           Analyze the tool execution results and determine if the test passed.
+
+          tool executed: <tool_name>
+          results: {tool_result}
+
+          expected behavior:
+          - <Expectation 1>
+          - <Expectation 2>
+
+          Evaluate:
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output match expected behavior?
+
+          Return a JSON object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
+```
+
+**For Create/Update Tests** (create, update, add, link):
+
+Follow the same pattern above, but add cleanup nodes after validation. See the "Test Cleanup Pattern" section for complete 4-node pattern with cleanup.
 
           tool executed: <tool_name>
           results: {tool_result}
@@ -508,6 +553,336 @@ nodes:
 - ❌ Depend on execution order
 - ❌ Share state with other tests
 - ❌ Assume artifacts exist without setup creating them
+
+---
+
+## Test Cleanup Pattern (for Create/Update Tests)
+
+**When to Use**: Tests that create or modify resources (test cases, issues, branches, files, etc.) MUST include cleanup nodes to remove created resources.
+
+**Why**: Tests should be self-contained and leave the system in its original state. Cleanup prevents resource accumulation and ensures test isolation.
+
+### Cleanup Decision Matrix
+
+| Test Type | Example Tools | Cleanup Required? |
+|-----------|---------------|-------------------|
+| **Read-Only** | list_*, get_*, find_*, search_* | ❌ No cleanup needed |
+| **Create/Modify** | create_*, update_*, add_*, link_* | ✅ Cleanup required |
+| **Delete** | delete_*, remove_* | ❌ No cleanup needed (already deletes) |
+
+### Standard Cleanup Flow Pattern
+
+**For Read-Only Tests** (no cleanup):
+```
+Toolkit Node → LLM Validation → END
+```
+
+**For Create/Update Tests** (cleanup required):
+```
+Toolkit Node → LLM Validation → Extract ID → Delete Resource → END
+```
+
+### Implementation Pattern
+
+#### 1. Add Cleanup State Variables
+
+Add to the `state:` section:
+
+```yaml
+state:
+  # ... existing tool inputs ...
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  
+  # Cleanup variables (add these for create/update tests)
+  resource_id_to_delete:
+    type: int  # or str, depending on ID type
+  cleanup_result:
+    type: str
+```
+
+**Naming Convention**: Use `<resource>_id_to_delete` (e.g., `qtest_id_to_delete`, `branch_name_to_delete`, `issue_id_to_delete`)
+
+#### 2. Extract Resource ID Node
+
+Add after validation node to extract the created resource ID from the creation result:
+
+```yaml
+  - id: extract_resource_id_for_cleanup
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        # Extract resource ID from creation result
+        tool_result = alita_state.get("tool_result", "")
+        resource_id = 0  # or "" for string IDs
+        
+        try:
+            result_dict = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+            # Adapt this path to match your tool's response structure
+            if 'items' in result_dict and len(result_dict['items']) > 0:
+                resource_id = result_dict['items'][0].get('id', 0)
+        except:
+            pass
+        
+        {"resource_id_to_delete": resource_id}
+    input:
+      - tool_result
+    output:
+      - resource_id_to_delete
+    structured_output: true
+    transition: delete_resource
+```
+
+**Adaptation Required**: Modify the extraction logic based on your tool's actual response structure. Inspect the tool's return statement in the codebase to determine the correct path.
+
+**Common Response Patterns**:
+- QTest: `result_dict['test_cases'][0].get('qtest_id')`
+- GitHub: `result_dict.get('number')` or `result_dict.get('name')`
+- JIRA: `result_dict.get('key')` or `result_dict.get('id')`
+
+#### 3. Delete Resource Node
+
+Add cleanup node that calls the appropriate delete/remove tool:
+
+```yaml
+  - id: delete_resource
+    type: toolkit
+    tool: delete_<resource>  # Use toolkit-specific delete tool
+    toolkit_name: ${TOOLKIT_NAME}
+    input:
+      - resource_id_to_delete
+    input_mapping:
+      <id_param_name>:  # Match exact parameter name from delete tool's args_schema
+        type: variable
+        value: resource_id_to_delete
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true  # CRITICAL - must be true
+    transition: validate_result
+```
+
+**CRITICAL**: 
+- `continue_on_error: true` is MANDATORY for cleanup nodes. This ensures cleanup failures don't mask the actual test result.
+- Cleanup node outputs `cleanup_result` and transitions to the final validation node.
+- Cleanup happens BEFORE final validation (Pattern 4 - Confluence pattern).
+
+#### 4. Update Initial Validation Node
+
+Change the initial validation node to transition to resource ID extraction:
+
+```yaml
+  - id: validate_creation
+    type: llm
+    # ... validation config ...
+    output:
+      - validation_result  # Intermediate validation (optional)
+    transition: extract_resource_id_for_cleanup  # Extract ID for cleanup
+```
+
+#### 5. Add Final Validation Node
+
+Add a final validation node AFTER cleanup that outputs `test_results`:
+
+```yaml
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - cleanup_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the tool execution and cleanup results.
+          
+          Creation Result: {tool_result}
+          Cleanup Result: {cleanup_result}
+          
+          Return JSON based ONLY on creation success (ignore cleanup errors):
+          {{
+            "test_passed": true/false,
+            "summary": "outcome description",
+            "error": null
+          }}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
+```
+
+**CRITICAL**:
+- Final validation receives BOTH `tool_result` (creation) and `cleanup_result` (cleanup)
+- Test pass/fail determined ONLY by creation success, not cleanup
+- This node MUST be last and MUST output `test_results`
+
+### Complete Example (Pattern 4 - TestRail add_case)
+
+This example demonstrates the correct pattern: create → extract ID → cleanup → final validation.
+
+```yaml
+state:
+  tool_result:
+    type: dict
+  test_results:
+    type: dict
+  case_id:
+    type: int
+  cleanup_result:
+    type: str
+
+entry_point: invoke_add_case
+
+nodes:
+  - id: invoke_add_case
+    type: toolkit
+    tool: add_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      section_id:
+        type: fixed
+        value: 652
+      title:
+        type: fixed
+        value: "Test Case Created by Automated Test"
+      priority_id:
+        type: fixed
+        value: 2
+      type_id:
+        type: fixed
+        value: 1
+    output:
+      - tool_result
+    structured_output: true
+    transition: extract_case_id
+
+  - id: extract_case_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        tool_result = alita_state.get("tool_result", "")
+        case_id = 0
+        
+        try:
+            result_dict = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+            case_id = result_dict.get('id', 0)
+        except:
+            pass
+        
+        {"case_id": case_id}
+    input:
+      - tool_result
+    output:
+      - case_id
+    structured_output: true
+    transition: cleanup_delete_case
+
+  - id: cleanup_delete_case
+    type: toolkit
+    tool: delete_case
+    toolkit_name: ${TESTRAIL_TOOLKIT_NAME}
+    input:
+      - case_id
+    input_mapping:
+      case_id:
+        type: variable
+        value: case_id
+      soft:
+        type: fixed
+        value: 0
+    output:
+      - cleanup_result
+    structured_output: false
+    continue_on_error: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - cleanup_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator for TestRail API testing."
+      task:
+        type: fstring
+        value: |
+          Analyze the add_case tool execution and cleanup results.
+          
+          Creation Result: {tool_result}
+          Cleanup Result: {cleanup_result}
+          
+          Validate that:
+          1. Test case was created successfully (has 'id' field)
+          2. Title matches expected value
+          3. Cleanup executed (cleanup_result present)
+          
+          Return JSON based ONLY on creation success:
+          {{
+            "test_passed": true/false,
+            "summary": "detailed outcome description",
+            "error": null or "error description"
+          }}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
+```
+
+### Toolkit-Specific Cleanup Tools
+
+Common cleanup patterns by toolkit:
+
+| Toolkit | Create Tool | Cleanup Tool | ID Parameter |
+|---------|-------------|--------------|--------------|
+| QTest | create_test_cases | delete_test_case | qtest_id (int) |
+| GitHub | create_issue | close_issue or delete_issue | issue_number (int) |
+| GitHub | create_branch | delete_branch | branch_name (str) |
+| JIRA | create_issue | delete_issue | issue_id or issue_key (str) |
+| Confluence | create_page | delete_page | page_id (int) |
+
+**Tool Discovery**: Check toolkit's `get_available_tools()` for delete/remove tools matching the resource type.
+
+### Critical Rules (Pattern 4 - Cleanup Before Validation)
+
+1. ✅ **Always use `continue_on_error: true`** on cleanup nodes
+2. ✅ **Extract resource ID from creation result** (tool_result), not from validation output
+3. ✅ **Cleanup BEFORE final validation (Pattern 4)** - Flow: create → extract ID → cleanup → validate → END
+4. ✅ **Cleanup failures don't fail the test** - test_passed is determined ONLY by creation success
+5. ✅ **Handle missing IDs gracefully** - if ID is 0/"", delete will fail but continue_on_error prevents test failure
+6. ✅ **Match exact parameter names** - use toolkit's delete tool args_schema to get correct parameter name
+7. ✅ **Code node returns dict** - ensure the final expression is the dict (see QT03 bug fix example)
+8. ✅ **CRITICAL: Final validation node outputs `test_results`** - The LAST node must be an LLM validation node that:
+   - Receives both `tool_result` (creation) and `cleanup_result` (cleanup) as input
+   - Outputs `test_results` via `structured_output_dict: {test_results: "dict"}`
+   - Evaluates test_passed based ONLY on creation success (ignores cleanup errors)
+   - Without `test_results` in final output, tests are marked SKIPPED even if validation passed
+9. ✅ **Never put cleanup as final node** - Cleanup outputs `cleanup_result`, NOT `test_results`. Final validation must come after cleanup.
+
+### When Cleanup Is Not Needed
+
+**Skip cleanup for**:
+- Read-only tests (list, get, find, search tools)
+- Delete tests (tool already removes the resource)
+- Tests using ONLY setup artifacts (not creating new resources)
+- Update tests modifying existing setup artifacts (don't delete shared resources)
 
 ---
 
