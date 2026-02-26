@@ -65,12 +65,12 @@ nodes:
 
           Perform the following checks:
           1. Confirm the tool executed (result is not empty or null).
-          2. Examine any error message for specific meaning. Valid error patterns for invalid issues include:
-             - issue key does not exist or is invalid
-             - issue not found or cannot be accessed
-             - insufficient permissions to view the issue
-             - http error codes 404 (not found) or 403 (forbidden)
-          3. Determine if the error is about the invalid issue itself. Errors like "INVALID-99999 does not exist" are expected and correct. System errors unrelated to the invalid issue key are failures.
+          2. Examine any error message for specific meaning. Valid error patterns for invalid field names include:
+             - field name does not exist or is invalid
+             - unable to find field or field is empty
+             - field not found in available fields
+             - message listing available fields
+          3. Determine if the error is about the invalid field name. Errors like "Unable to find field 'invalid_field_xyz'" are expected and correct. System errors unrelated to the field validation are failures.
 
           Return a JSON object named test_results with the following structure:
 
