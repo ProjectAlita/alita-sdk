@@ -30,7 +30,7 @@ state:
     value: ["attachments", "test", "issue_id"]
   error_indicators:
     type: list
-    value: ["Failed to get", "error", "exception", "not found"]
+    value: ["Failed to get", "error", "exception", "Test not found", "does not exist"]
   test_results:
     type: dict
 
@@ -150,11 +150,32 @@ nodes:
           IMPORTANT: If the result indicates "No attachments found", this is still a PASS
           as long as there are no errors. The tool should handle tests without attachments gracefully.
 
-          Validation Criteria (ALL must pass for test_passed=true):
-          1. tool_executed: Tool ran without throwing an exception
-          2. no_errors: Output does NOT contain error indicators (except "No attachments found" which is OK)
-          3. valid_response: Response contains expected structure (test, issue_id, attachments or "No attachments")
-          4. test_id_valid: Test ID was found and used successfully
+          Validation Criteria:
+          
+          CHECK EACH CRITERION:
+          
+          1. tool_executed = true (always true if we got a response)
+          
+          2. no_errors = true IF:
+             - Response does NOT contain: "Failed to get", "error", "exception", "Test not found", "does not exist"
+             - IMPORTANT: "No attachments found" is NOT an error - it's a valid success message
+          
+          3. valid_response = true IF:
+             - Response contains "No attachments found" OR
+             - Response contains attachment data (id, filename, downloadLink)
+          
+          4. test_id_valid = true IF:
+             - Response mentions a test key (like "EL-944") OR
+             - Response says "No attachments found for test" (proves test ID was used)
+          
+          5. test_passed = true IF AND ONLY IF all 4 criteria above are true
+          
+          EXAMPLE VALID SUCCESS: "No attachments found for test EL-944"
+          - tool_executed: true (got response)
+          - no_errors: true (no error keywords)
+          - valid_response: true (contains "No attachments found")
+          - test_id_valid: true (mentions "EL-944")
+          - test_passed: TRUE
 
           Return JSON test_results:
           {{
