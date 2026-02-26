@@ -256,7 +256,15 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
                                                           variables={"jql": jql, "start": start_at,
                                                                      "limit": self.limit})['data']["getTests"]
             except Exception as e:
-                return ToolException(f"Unable to get tests due to error:\n{str(e)}")
+                raise ToolException(f"Unable to get tests due to error:\n{str(e)}")
+            
+            # Check if response is valid (None indicates invalid JQL or other GraphQL error)
+            if get_tests_response is None:
+                raise ToolException(
+                    f"Unable to get tests. The JQL query may be invalid or malformed: '{jql}'. "
+                    "Please verify the JQL syntax and try again."
+                )
+            
             # filter tests results
             tests = _parse_tests(get_tests_response["results"])
             total = get_tests_response['total']
@@ -276,7 +284,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         try:
             create_test_response = self._client.execute(query=graphql_mutation)
         except Exception as e:
-            return ToolException(f"Unable to create new test due to error:\n{str(e)}")
+            raise ToolException(f"Unable to create new test due to error:\n{str(e)}")
         return f"Created test case:\n{create_test_response}"
 
     def create_tests(self, graphql_mutations: list[str]) -> list[str]:
@@ -290,7 +298,7 @@ class XrayApiWrapper(NonCodeIndexerToolkit):
         try:
             return f"Result of graphql execution:\n{self._client.execute(query=graphql)}"
         except Exception as e:
-            return ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
+            raise ToolException(f"Unable to execute custom graphql due to error:\n{str(e)}")
 
     def _base_loader(
             self, jql: Optional[str] = None, graphql: Optional[str] = None, include_attachments: Optional[bool] = False,
