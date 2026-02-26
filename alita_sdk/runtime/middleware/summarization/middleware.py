@@ -55,8 +55,8 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
         callbacks: Optional[Dict[str, Callable]] = None,
         **kwargs
     ):
-        # Use DEFAULT_SUMMARY_PROMPT when None is passed
-        effective_summary_prompt = summary_prompt if summary_prompt is not None else DEFAULT_SUMMARY_PROMPT
+        # Use DEFAULT_SUMMARY_PROMPT when None or empty string is passed
+        effective_summary_prompt = summary_prompt if summary_prompt else DEFAULT_SUMMARY_PROMPT
 
         # Initialize LangChain's middleware
         super().__init__(
@@ -369,6 +369,7 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
                 result = response.text.strip()
             else:
                 result = str(response)
+            logger.info(f'Summary response has no content or text attribute, using {result}')
             return result
         except Exception as e:
             logger.error(f"Error generating summary: {e}")
