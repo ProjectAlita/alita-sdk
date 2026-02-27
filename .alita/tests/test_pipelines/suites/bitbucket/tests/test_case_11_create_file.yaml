@@ -166,22 +166,23 @@ nodes:
           This is a POSITIVE test - we expect successful file creation.
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. file_created: Create operation returned success indicator
+          1. file_created: Create operation returned success indicator (e.g. "has been created", "created", "success")
           2. no_errors: No error indicators in create result
           3. content_matches: Read result contains the original content
           4. special_chars_preserved: Special characters and Unicode are preserved in read result
           5. read_succeeded: File was successfully read back after creation
-          6. commit_confirmed: Create result indicates a commit was made
+
+          NOTE: commit_confirmed is NOT a required criterion. The Bitbucket create_file tool does not return a commit SHA in its output string.
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (true only if ALL criteria pass),
+            "test_passed": boolean (true only if criteria 1-5 ALL pass),
             "file_created": boolean,
             "no_errors": boolean,
             "content_matches": boolean,
             "special_chars_preserved": boolean,
             "read_succeeded": boolean,
-            "commit_confirmed": boolean,
+            "commit_confirmed": boolean (optional, does not affect test_passed),
             "content_length_original": number,
             "content_length_read": number,
             "error": string | null
