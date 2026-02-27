@@ -98,21 +98,6 @@ nodes:
     structured_output: true
     tool: create_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: switch_to_source_branch
-
-  - id: switch_to_source_branch
-    type: toolkit
-    input:
-      - source_branch
-    input_mapping:
-      branch_name:
-        type: variable
-        value: source_branch
-    output:
-      - switch_result
-    structured_output: true
-    tool: set_active_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: create_test_file
 
   - id: create_test_file
