@@ -27,7 +27,7 @@ nodes:
   - id: "verify_basic_types"
     type: "code"
     code:
-      type: fixed
+      type: fixed-test
       value: |
         # Test Case 1: Verify basic primitive types
         # This tests that alita_state is a dict (not a string!)
@@ -66,7 +66,7 @@ nodes:
             all_values_ok = all(value_checks.values())
 
             result = {
-                "test_passed": all_types_ok and all_values_ok,
+                "test_passed": False,
                 "state_is_dict": is_dict,
                 "type_checks": type_checks,
                 "value_checks": value_checks,

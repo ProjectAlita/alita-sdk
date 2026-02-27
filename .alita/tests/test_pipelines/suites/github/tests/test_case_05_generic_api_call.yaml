@@ -1,4 +1,4 @@
-name: "GH10 - Generic API Call"
+name: "GH05 - Generic API Call"
 description: "Verify generic_github_api_call tool calls supported methods like get_repo"
 
 toolkits:

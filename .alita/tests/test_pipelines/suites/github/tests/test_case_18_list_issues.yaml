@@ -1,0 +1,76 @@
+name: "GH18 - List Issues"
+description: "Test get_issues retrieves open issues from repository"
+priority: Critical
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  state:
+    type: str
+    value: "open"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_issues
+
+nodes:
+  - id: invoke_list_issues
+    type: toolkit
+    tool: get_issues
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - state
+    input_mapping:
+      state:
+        type: variable
+        value: state
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the get_issues operation results.
+
+          tool result: {tool_result}
+
+          perform the following checks:
+
+          1. verify tool executed successfully (result not empty/null)
+          2. confirm issues were found (count > 0)
+          3. check issues have proper structure (number, title fields)
+          4. extract sample of first 5 issues
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "issues_count": integer,
+            "has_proper_structure": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

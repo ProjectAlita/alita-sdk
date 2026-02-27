@@ -1,4 +1,4 @@
-name: "GH05 - List Pull Requests"
+name: "GH03 - List Pull Requests"
 description: "Verify list_pull_requests tool retrieves PR list from repository"
 
 toolkits:
@@ -13,7 +13,12 @@ state:
   pr_state:
     type: str
     value: "open"
+  max_count:
+    type: int
+    value: 50
   tool_result:
+    type: str
+  pr_163_result:
     type: str
   test_results:
     type: dict
@@ -25,10 +30,28 @@ nodes:
     type: toolkit
     tool: list_open_pull_requests
     toolkit_name: ${GITHUB_TOOLKIT_NAME}
-    input: []
-    input_mapping: {}
+    input:
+      - max_count
+    input_mapping:
+      max_count:
+        type: variable
+        value: max_count
     output:
       - tool_result
+    structured_output: true
+    transition: verify_pr_163
+
+  - id: verify_pr_163
+    type: toolkit
+    tool: get_pull_request
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      pr_number:
+        type: fixed
+        value: "163"
+    output:
+      - pr_163_result
     structured_output: true
     transition: process_results
 
@@ -37,6 +60,7 @@ nodes:
     model: gpt-4o
     input:
       - tool_result
+      - pr_163_result
     input_mapping:
       system:
         type: fixed
@@ -44,17 +68,21 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from the 'list_open_pull_requests' tool.
+          Analyze the output from two GitHub operations:
+          1. 'list_open_pull_requests' tool (limited to 50 PRs)
+          2. 'get_pull_request' for PR #163 (to verify specific PR exists)
 
-          Tool Result: {tool_result}
+          List PRs Result: {tool_result}
+          PR #163 Verification: {pr_163_result}
 
           Perform the following checks:
 
-          Confirm the tool executed successfully (the result is not empty or null).
-          Confirm pr numeber 163 is in the list.
-          Determine if any pull requests were found (PRs count >= 0).
-          Check if pull requests have proper structure with 'number' and 'title' fields.
-          Extract a sample of the first 5 pull requests with their number, title (first 50 chars), and state.
+          1. Confirm list_open_pull_requests executed successfully (result is not empty or null).
+          2. Confirm PR #163 verification succeeded (pr_163_result is not an error).
+          3. Determine if any pull requests were found (PRs count >= 0).
+          4. Check if pull requests have proper structure with 'number' and 'title' fields.
+          5. Extract a sample of the first 5 pull requests with their number, title (first 50 chars), and state.
+          
           If there is an error, return the error message in the error field.
 
           Return a JSON object named test_results with the following structure:
@@ -63,6 +91,7 @@ nodes:
           "test_passed": boolean (true if all checks pass),
           "tool_executed": boolean,
           "prs_count": integer,
+          "has_pr_163": boolean (true if PR #163 verification succeeded),
           "prs_have_numbers": boolean,
           "prs_sample": list of dicts with keys: number, title, state, head,
           "error": string | null,

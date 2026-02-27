@@ -1,0 +1,156 @@
+name: "GH16 - Create Issue"
+description: "Test create_issue creates new issue with title and body"
+priority: Critical
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  issue_title:
+    type: str
+  issue_body:
+    type: str
+  issue_number:
+    type: str
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        issue_title = f"[test] gh21 create issue - {timestamp} - {random_id}"
+        nl = chr(10)
+        issue_body = f"automated test issue for gh21.{nl}{nl}created: {timestamp}{nl}id: {random_id}{nl}{nl}this issue will be closed by the test."
+
+        {"issue_title": issue_title, "issue_body": issue_body}
+    input: []
+    output:
+      - issue_title
+      - issue_body
+    structured_output: true
+    transition: create_issue
+
+  - id: create_issue
+    type: toolkit
+    tool: create_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_title
+      - issue_body
+    input_mapping:
+      title:
+        type: variable
+        value: issue_title
+      body:
+        type: variable
+        value: issue_body
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - issue_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the create_issue operation results.
+
+          tool result: {tool_result}
+          expected title: {issue_title}
+
+          perform the following checks:
+
+          1. verify issue was created (result contains issue number)
+          2. extract issue number from result
+          3. confirm no errors in response
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "issue_number": integer or null,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: extract_issue_number
+
+  - id: extract_issue_number
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        test_results = alita_state.get('test_results', {})
+        issue_number = test_results.get('issue_number')
+        
+        if not issue_number:
+            tool_result = alita_state.get('tool_result', {})
+            if isinstance(tool_result, dict):
+                issue_number = tool_result.get('number')
+            elif isinstance(tool_result, str):
+                try:
+                    parsed = json.loads(tool_result)
+                    issue_number = parsed.get('number')
+                except:
+                    pass
+        
+        {"issue_number": issue_number}
+    input:
+      - test_results
+      - tool_result
+    output:
+      - issue_number
+    structured_output: true
+    transition: close_issue
+
+  - id: close_issue
+    type: toolkit
+    tool: update_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_number
+    input_mapping:
+      issue_id:
+        type: variable
+        value: issue_number
+      state:
+        type: fixed
+        value: closed
+    output:
+      - tool_result
+    structured_output: true
+    continue_on_error: true
+    transition: END

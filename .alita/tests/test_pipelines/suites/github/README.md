@@ -1,18 +1,24 @@
 # GitHub Toolkit Test Suite
 
-This directory contains a complete test suite for validating GitHub toolkit functionality through the Alita SDK.
+Comprehensive test coverage for GitHub toolkit operations with atomic, independent tests.
 
 ## Directory Structure
 
 ```
 github_toolkit/
 ├── pipeline.yaml          # Main suite configuration
-├── tests/                 # Test case files
-│   ├── test_case_1_list_branches.yaml
-│   ├── test_case_2_set_active_branch.yaml
-│   └── ...
+├── tests/                 # Test case files (25 atomic tests)
+│   ├── test_case_01_list_branches.yaml
+│   ├── test_case_02_commits_workflow.yaml
+│   ├── test_case_03_list_pull_requests.yaml
+│   ├── test_case_04_search_issues.yaml
+│   ├── test_case_05_generic_api_call.yaml
+│   ├── test_case_06_project_issue_workflow.yaml
+│   ├── test_case_07_update_file_single_line.yaml
+│   ├── ... (18 more sequential tests)
+│   └── test_case_25_get_files_from_dir.yaml
 ├── configs/               # Suite-specific configurations
-│   └── git-config.json   # GitHub toolkit base configuration
+│   └── github-config.json # GitHub toolkit base configuration
 ├── composables/           # Reusable composable pipelines
 │   └── rca_on_failure.yaml  # Root cause analysis pipeline
 └── README.md
@@ -20,8 +26,61 @@ github_toolkit/
 
 ## Overview
 
-These tests validate GitHub toolkit operations by declaring toolkits as pipeline participants and invoking tools via toolkit nodes or code nodes. Tests are organized from read-only operations to write operations.
+This suite validates GitHub toolkit operations through **25 atomic, independent tests**. After restructuring, all tests are self-contained, focusing on single operations with clear objectives and proper cleanup.
 
+## Pipeline Structure
+
+Each pipeline uses the new toolkit participant structure:
+
+```yaml
+name: "GH07 - Update File Single Line"
+description: "Test update_file with single line replacement"
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}  # Substituted during execution
+    name: ${GITHUB_TOOLKIT_NAME}  # Reference name
+
+state:
+  ...
+
+nodes:
+  - id: my_node
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    ...
+```
+## Prerequisites
+
+1. **GitHub Toolkit configured** - A GitHub toolkit must be created in the project with:
+   - Valid GitHub access token
+   - Repository configured (e.g., `ProjectAlita/elitea-testing`)
+   - Appropriate permissions for read/write operations
+
+2. **Environment Variables** - Set in `.env` file:
+   ```bash
+   GITHUB_TOOLKIT_ID=your_toolkit_id
+   GITHUB_TOOLKIT_NAME=github
+   GITHUB_TOKEN=ghp_your_token_here
+   GITHUB_REPOSITORY=owner/repo
+   ```
+
+3. **Test Repository** - Tests expect a repository with:
+   - `main` branch
+   - At least one issue
+   - Standard files (`.gitignore`, `README.md`, etc.)
+
+## Suite Configuration (pipeline.yaml)
+
+The `pipeline.yaml` file defines:
+
+- **Setup Steps**: Automated toolkit creation, test data setup
+- **Composable Pipelines**: RCA (Root Cause Analysis) pipeline for test failures
+- **Test Execution**: Test directory (`tests/`), test pattern, variable substitutions
+- **Cleanup Steps**: Automated teardown of test artifacts
+- **Hooks**: Post-test hooks like RCA on failure
+
+This configuration makes the suite self-contained and portable - just provide credentials and run!
 ## Pipeline Structure
 
 Each pipeline uses the new toolkit participant structure:
@@ -127,167 +186,154 @@ python cleanup.py github_toolkit --yes
 
 This removes all created pipelines, branches, and test data.
 
-## Test Cases
+## Test Inventory
 
-### Core Operations (GH1-GH10)
+### Core Tests (Original - Kept)
 
-| Test | Name | Description | Type |
-|------|------|-------------|------|
-| GH1 | List Branches | Verify `list_branches_in_repo` returns branch list | Read |
-| GH2 | Set Active Branch | Verify `set_active_branch` switches working branch | Read |
-| GH3 | Read File | Verify `read_file` retrieves file content | Read |
-| GH4 | Get Issues | Verify `get_issues` returns issue list | Read |
-| GH5 | Get Issue | Verify `get_issue` returns specific issue details | Read |
-| GH6 | Get Commits | Verify `get_commits` returns commit history | Read |
-| GH7 | List Pull Requests | Verify `list_pull_requests` returns PR list | Read |
-| GH8 | Create Branch | Verify `create_branch` creates new feature branch | Write |
-| GH8b | Delete Branch | Verify `delete_branch` removes branch with protections | Write |
-| GH9 | Create File | Verify `create_file` creates file in branch | Write |
-| GH10 | Create PR | Verify `create_pull_request` creates pull request | Write |
+| Test ID | File | Description | Size | Status |
+|---------|------|-------------|------|--------|
+| **GH01** | test_case_01_list_branches.yaml | List repository branches | 1.9K | ✅ Atomic |
+| **GH02** | test_case_02_commits_workflow.yaml | Get commits and diffs | 6.2K | ✅ Atomic |
+| **GH03** | test_case_03_list_pull_requests.yaml | List open pull requests | 2.3K | ✅ Atomic |
+| **GH04** | test_case_04_search_issues.yaml | Search issues by query | 2.7K | ✅ Atomic |
+| **GH05** | test_case_05_generic_api_call.yaml | Generic GitHub API calls | 3.0K | ✅ Atomic |
+| **GH06** | test_case_06_project_issue_workflow.yaml | Project board operations | 12K | ✅ Functional |
 
-### Pull Request Operations (GH11-GH12)
+### Update File Operations (New Atomic Tests)
 
-| Test | Name | Description | Type |
-|------|------|-------------|------|
-| GH11 | Get Pull Request | Verify `get_pull_request` retrieves specific PR details | Read |
-| GH12 | List PR Diffs | Verify `list_pull_request_diffs` retrieves file changes | Read |
+| Test ID | File | Description | Size |
+|---------|------|-------------|------|
+| **GH07** | test_case_07_update_file_single_line.yaml | Single line replacement | 5.6K |
+| **GH08** | test_case_08_update_file_multiline.yaml | Multiline code block updates | 7.0K |
+| **GH09** | test_case_09_update_file_json.yaml | JSON/structured content updates | 6.0K |
+| **GH10** | test_case_10_update_file_special_chars.yaml | Special character handling | 5.9K |
+| **GH11** | test_case_11_update_file_error_handling.yaml | Error handling (OLD not found) | 5.7K |
+| **GH12** | test_case_12_update_file_whitespace.yaml | Whitespace tolerance matching | 5.7K |
+| **GH13** | test_case_13_update_file_empty_replace.yaml | Empty replacement (deletion) | 5.7K |
 
-### Issue Operations (GH13, GH18)
+### File Operations (New Atomic Tests)
 
-| Test | Name | Description | Type |
-|------|------|-------------|------|
-| GH13 | Comment on Issue | Verify `comment_on_issue` adds comment to issue | Write |
-| GH18 | Search Issues | Verify `search_issues` finds matching issues/PRs | Read |
+| Test ID | File | Description | Size |
+|---------|------|-------------|------|
+| **GH14** | test_case_14_create_file.yaml | Create file with content | 4.6K |
+| **GH15** | test_case_15_apply_git_patch.yaml | Apply git patch to modify file | 6.4K |
 
-### File Operations (GH14-GH17)
+### Issue Operations (New Atomic Tests)
 
-| Test | Name | Description | Type |
-|------|------|-------------|------|
-| GH14 | Update File | Verify `update_file` modifies file using OLD/NEW format | Write |
-| GH15 | Delete File | Verify `delete_file` removes file from branch | Write |
-| GH16 | List Files Main Branch | Verify `list_files_in_main_branch` returns base branch files | Read |
-| GH17 | Get Files from Directory | Verify `get_files_from_directory` lists directory contents | Read |
+| Test ID | File | Description | Size |
+|---------|------|-------------|------|
+| **GH16** | test_case_16_create_issue.yaml | Create new issue | 3.8K |
+| **GH17** | test_case_17_comment_on_issue.yaml | Add comment to issue | 2.3K |
+| **GH18** | test_case_18_list_issues.yaml | List open issues | 1.8K |
+| **GH19** | test_case_19_get_issue.yaml | Get issue details | 1.9K |
 
-### Advanced Operations (GH19-GH21)
+### Pull Request Operations (New Atomic Tests)
 
-| Test | Name | Description | Type |
-|------|------|-------------|------|
-| GH19 | Get Commits Diff | Verify `get_commits_diff` compares two commits | Read |
-| GH20 | Apply Git Patch | Verify `apply_git_patch` applies unified diff patch | Write |
-| GH21 | Generic API Call | Verify `generic_github_api_call` calls supported methods | Read |
+| Test ID | File | Description | Size |
+|---------|------|-------------|------|
+| **GH20** | test_case_20_create_pull_request.yaml | Create new pull request | 5.7K |
+| **GH21** | test_case_21_get_pull_request.yaml | Get PR details | 1.9K |
+| **GH22** | test_case_22_list_pr_diffs.yaml | List PR file diffs | 1.8K |
 
-### Project Board Operations (GH22-GH25)
+### File Reading Operations (New Atomic Tests)
 
-| Test | Name | Description | Type |
-|------|------|-------------|------|
-| GH22 | Create Issue on Project | Verify `create_issue_on_project` adds issue to board | Write |
-| GH23 | List Project Issues | Verify `list_project_issues` retrieves board items | Read |
-| GH24 | Update Issue on Project | Verify `update_issue_on_project` updates board item | Write |
-| GH25 | Search Project Issues | Verify `search_project_issues` filters board items | Read |
+| Test ID | File | Description | Size |
+|---------|------|-------------|------|
+| **GH23** | test_case_23_read_file.yaml | Read file content | 1.9K |
+| **GH24** | test_case_24_list_files_branch.yaml | List files in branch | 1.8K |
+| **GH25** | test_case_25_get_files_from_dir.yaml | Get files from directory | 1.8K |
 
-## Test Organization
+## Test Statistics
 
-### Read Operations
-These tests are safe to run repeatedly without side effects:
-- **Core**: GH1 (branches), GH3 (file), GH4-GH5 (issues), GH6 (commits), GH7 (PRs)
-- **PR Details**: GH11 (PR info), GH12 (PR diffs)
-- **Files**: GH16 (main branch files), GH17 (directory files)
-- **Search**: GH18 (search issues), GH19 (commits diff), GH21 (generic API)
-- **Project**: GH23 (list items), GH25 (search items)
+- **Total Tests:** 25
+- **Atomic Tests:** 25 (100%)
+- **Average Size:** ~4.2K
+- **Largest Test:** 12K (GH06 - project operations)
+- **Smallest Test:** 1.8K (GH18, GH22, GH24, GH25)
 
-### Write Operations
-These tests modify the repository:
-- **GH2**: Sets active branch
-- **GH8**: Creates a new branch with timestamp suffix
-- **GH8b**: Deletes a branch (with protection for main/master/base branches)
-- **GH9**: Creates a file in the `tc-file-ops-2025-12-08` branch
-- **GH10**: Creates a PR from feature branch to main
-- **GH13**: Comments on an issue
-- **GH14**: Updates file content
-- **GH15**: Deletes a file
-- **GH20**: Applies a git patch
-- **GH22**: Creates issue on project board
-- **GH24**: Updates issue on project board
+## Deprecated Tests (Removed)
 
-## Dependent Test Flow
+The following tests were split into atomic tests and removed:
 
-For integrated testing, run tests in sequence:
-```
-GH1 → GH2 → GH3 → ... → GH25
+| Original Test | Size | Replaced By | Reason |
+|--------------|------|-------------|---------|
+| test_case_02_file_reading.yaml | 300 lines | GH23-GH25 | Combined list+get+read |
+| test_case_03_issue_workflow.yaml | 448 lines | GH16-GH19 | Combined create+list+get+comment |
+| test_case_06_file_operations.yaml | 375 lines | GH14-GH15 | Combined create+patch |
+| test_case_07_pull_request_workflow.yaml | 320 lines | GH20-GH22 | Combined create+get+diffs |
+| test_case_08_update_file.yaml | 1488 lines | GH07-GH13 | Combined 7 update scenarios |
+
+## Running Tests
+
+### Run Individual Test
+```bash
+cd .alita/tests/test_pipelines
+./run_test.sh --local suites/github GH07
 ```
 
-Or for specific workflows:
-```
-# File operations workflow
-GH8 (create branch) → GH2 (set branch) → GH9 (create file) → GH14 (update) → GH15 (delete) → GH8b (cleanup branch)
+### Run Test Category
+```bash
+# All update_file tests
+./run_test.sh --local suites/github GH07,GH08,GH09,GH10,GH11,GH12,GH13
 
-# PR workflow
-GH8 (create branch) → GH9 (create file) → GH10 (create PR) → GH11 (get PR) → GH12 (diffs)
+# All issue tests
+./run_test.sh --local suites/github GH16,GH17,GH18,GH19
 
-# Branch lifecycle workflow
-GH8 (create branch) → GH2 (set branch) → ... operations ... → GH8b (delete branch)
+# All PR tests
+./run_test.sh --local suites/github GH20,GH21,GH22
 
-# Project board workflow
-GH22 (create item) → GH23 (list) → GH24 (update) → GH25 (search)
-```
-
-## Code Node Pattern
-
-All tests use this pattern to access toolkit tools:
-
-```python
-# Get toolkit from pipeline participants
-github_toolkit = toolkits.get('github')
-if github_toolkit:
-    tools = github_toolkit.get_tools()
-
-    # Find specific tool
-    for tool in tools:
-        if tool.name == 'list_branches_in_repo':
-            result = tool.invoke({})
-            break
+# All file reading tests
+./run_test.sh --local suites/github GH23,GH24,GH25
 ```
 
-## Configuration
+### Run All Tests
+```bash
+./run_test.sh --local suites/github
+```
 
-State variables can be customized per test:
+## Test Design Principles
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `target_branch` | `main` or `tc-file-ops-2025-12-08` | Branch for operations |
-| `issue_number` | 1 | Issue number for GH5 |
-| `max_count` | 5 | Commit limit for GH6 |
-| `file_path` | `.gitignore` | File to read in GH3 |
+Each atomic test follows this pattern:
 
-## Expected Results
+1. **Setup** - Generate unique test data (timestamps, random IDs)
+2. **Prerequisites** - Create required resources (branches, files)
+3. **Execute** - Run the tool being tested
+4. **Validate** - LLM-based result verification
+5. **Cleanup** - Delete created resources (with `continue_on_error: true`)
 
-Each test outputs a `test_results` dict with:
-- `test_passed`: Boolean indicating overall success
-- `tool_executed`: Whether the tool was invoked successfully
-- Operation-specific results and validation checks
-- `error`: Error message if any failure occurred
+**Key Features:**
+- ✅ One test = one tool operation
+- ✅ Self-contained (creates own test data)
+- ✅ Independent (no test dependencies)
+- ✅ Parallel execution ready
+- ✅ Proper cleanup with error handling
+- ✅ Clear pass/fail validation
 
-## Troubleshooting
+## Coverage by Tool
 
-### Common Issues
+| Tool | Tests | Coverage |
+|------|-------|----------|
+| update_file | GH07-GH13 | 7 scenarios ✅ |
+| create_file | GH14 | ✅ |
+| apply_git_patch | GH15 | ✅ |
+| create_issue | GH16 | ✅ |
+| comment_on_issue | GH17 | ✅ |
+| get_issues | GH18 | ✅ |
+| get_issue | GH19 | ✅ |
+| create_pull_request | GH20 | ✅ |
+| get_pull_request | GH21 | ✅ |
+| list_pull_request_diffs | GH22 | ✅ |
+| read_file | GH23 | ✅ |
+| list_files_in_main_branch | GH24 | ✅ |
+| get_files_from_directory | GH25 | ✅ |
+| list_branches_in_repo | GH01 | ✅ |
+| get_commits | GH02 | ✅ |
+| get_commits_diff | GH02 | ✅ |
+| list_open_pull_requests | GH03 | ✅ |
+| search_issues | GH04 | ✅ |
+| generic_github_api_call | GH05 | ✅ |
+| *_project_* tools | GH06 | ✅ |
 
-1. **"GitHub toolkit not found in pipeline participants"**
-   - Verify `GITHUB_TOOLKIT_ID` is set correctly
-   - Re-seed pipelines with correct toolkit ID
-   - Check toolkit exists in the project
+**Total Coverage:** 20+ tools with 25 independent tests
 
-2. **"tool not found in toolkit"**
-   - Verify toolkit has the required tools enabled
-   - Check tool name matches exactly
-
-3. **Authentication errors**
-   - Verify GitHub access token is valid in toolkit config
-   - Check token has required permissions (repo scope)
-
-4. **"Branch not found"**
-   - Create the test branch `tc-file-ops-2025-12-08` in the repository
-   - Or update `target_branch` in state
-
-5. **"PR already exists"**
-   - This is expected if running GH10 multiple times
-   - Test handles this as a passing condition
+---

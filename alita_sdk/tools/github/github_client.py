@@ -20,6 +20,8 @@ from .schemas import (
     GitHubAuthConfig,
     GitHubRepoConfig,
     NoInput,
+    ListBranchesInput,
+    ListPullRequestsInput,
     BranchName,
     CreateBranchName,
     DeleteBranchName,
@@ -1716,12 +1718,13 @@ class GitHubClient(BaseModel):
         except ImportError as e:
             return f"Error processing code files: {str(e)}"
 
-    def list_branches_in_repo(self, repo_name: Optional[str] = None) -> str:
+    def list_branches_in_repo(self, repo_name: Optional[str] = None, max_count: Optional[int] = 100) -> str:
         """
-        Lists all branches in the repository.
+        Lists branches in the repository.
 
         Parameters:
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            max_count (Optional[int]): Maximum number of branches to return (default: 100, max: 100)
 
         Returns:
             str: JSON string containing a list of branches
@@ -1729,7 +1732,16 @@ class GitHubClient(BaseModel):
         try:
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
             branches = repo.get_branches()
-            branch_list = [{"name": branch.name, "protected": branch.protected} for branch in branches]
+            
+            # Limit the number of branches based on max_count
+            branch_list = []
+            count = 0
+            for branch in branches:
+                if count >= max_count:
+                    break
+                branch_list.append({"name": branch.name, "protected": branch.protected})
+                count += 1
+            
             return branch_list
         except Exception as e:
             return f"Failed to list branches: {str(e)}"
@@ -2023,12 +2035,13 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"Failed to get issues: {str(e)}"
 
-    def list_open_pull_requests(self, repo_name: Optional[str] = None) -> str:
+    def list_open_pull_requests(self, repo_name: Optional[str] = None, max_count: Optional[int] = 100) -> str:
         """
-        Lists all open pull requests for a repository.
+        Lists open pull requests for a repository.
 
         Parameters:
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            max_count (Optional[int]): Maximum number of pull requests to return (default: 100, max: 100)
 
         Returns:
             str: A JSON string containing a list of open pull requests and their details
@@ -2037,8 +2050,12 @@ class GitHubClient(BaseModel):
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
             open_prs = repo.get_pulls(state='open')
 
+            # Limit the number of pull requests based on max_count
             pr_list = []
+            count = 0
             for pr in open_prs:
+                if count >= max_count:
+                    break
                 pr_data = {
                     "number": pr.number,
                     "title": pr.title,
@@ -2051,6 +2068,7 @@ class GitHubClient(BaseModel):
                     "base": pr.base.ref
                 }
                 pr_list.append(pr_data)
+                count += 1
 
             return pr_list
         except Exception as e:
@@ -2326,7 +2344,7 @@ class GitHubClient(BaseModel):
                 "name": "list_open_pull_requests",
                 "mode": "list_open_pull_requests",
                 "description": LIST_PRS_PROMPT,
-                "args_schema": NoInput,
+                "args_schema": ListPullRequestsInput,
             },
             {
                 "ref": self.get_pull_request,
@@ -2396,7 +2414,7 @@ class GitHubClient(BaseModel):
                 "name": "list_branches_in_repo",
                 "mode": "list_branches_in_repo",
                 "description": LIST_BRANCHES_IN_REPO_PROMPT,
-                "args_schema": NoInput,
+                "args_schema": ListBranchesInput,
             },
             {
                 "ref": self.set_active_branch,

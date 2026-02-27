@@ -1,0 +1,233 @@
+name: "GH07 - Update File: Single Line"
+description: "Test update_file with simple single-line content replacement"
+priority: Critical
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  target_branch:
+    type: str
+  file_path:
+    type: str
+  original_content:
+    type: str
+  new_content:
+    type: str
+  file_query:
+    type: str
+  create_result:
+    type: str
+  update_result:
+    type: str
+  verified_content:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        target_branch = f"tc-test-gh12-{timestamp}-{random_suffix}"
+        file_path = f"test-data/update-test/gh12-single-{random_suffix}.md"
+        original_content = f"Original content v1 - created at {timestamp}"
+
+        {"target_branch": target_branch, "file_path": file_path, "original_content": original_content}
+    input: []
+    output:
+      - target_branch
+      - file_path
+      - original_content
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: set_active_branch
+
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: create_file
+
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: build_update_query
+
+  - id: build_update_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        original_content = str(alita_state.get('original_content', '')).strip()
+
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        new_content = f"Updated content v2 - modified at {timestamp} - ID: {random_id}"
+
+        nl = chr(10)
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += original_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query}
+    input:
+      - file_path
+      - original_content
+    output:
+      - new_content
+      - file_query
+    structured_output: true
+    transition: update_file
+
+  - id: update_file
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: verify_update
+
+  - id: verify_update
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - update_result
+      - verified_content
+      - new_content
+      - original_content
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the update_file operation results.
+
+          update result: {update_result}
+          file content after update: {verified_content}
+          expected new content: {new_content}
+          original content: {original_content}
+
+          perform the following checks:
+
+          1. verify update_file executed without errors
+          2. confirm new content appears in the file
+          3. verify original content was replaced (not present anymore)
+          4. check file length changed appropriately
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+      force:
+        type: fixed
+        value: true
+    output:
+      - create_result
+    structured_output: true
+    continue_on_error: true
+    transition: END

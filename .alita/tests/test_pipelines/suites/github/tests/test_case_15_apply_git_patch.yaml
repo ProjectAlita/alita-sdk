@@ -1,0 +1,264 @@
+name: "GH15 - Apply Git Patch"
+description: "Test apply_git_patch modifies file content correctly"
+priority: High
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  target_branch:
+    type: str
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  patch_content:
+    type: str
+  commit_message:
+    type: str
+  patched_text:
+    type: str
+  create_result:
+    type: str
+  patch_result:
+    type: str
+  read_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        target_branch = f"test/gh20-patch-{timestamp}-{random_suffix}"
+        file_path = f"test-data/generated/gh20-patch-{timestamp}-{random_suffix}.txt"
+        
+        nl = chr(10)
+        file_contents = f"# patch test file{nl}created at: {timestamp}{nl}random id: {random_suffix}{nl}original content line."
+
+        {"target_branch": target_branch, "file_path": file_path, "file_contents": file_contents}
+    input: []
+    output:
+      - target_branch
+      - file_path
+      - file_contents
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: set_active_branch
+
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: create_file
+
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+    output:
+      - create_result
+    structured_output: true
+    transition: prepare_patch
+
+  - id: prepare_patch
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        file_contents = alita_state.get('file_contents', '')
+
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        nl = chr(10)
+        original_lines = file_contents.split(nl)
+        line_count = len(original_lines)
+
+        patch_content = f"diff --git a/{file_path} b/{file_path}" + nl
+        patch_content += f"--- a/{file_path}" + nl
+        patch_content += f"+++ b/{file_path}" + nl
+        patch_content += f"@@ -{line_count},0 +{line_count},3 @@" + nl
+        patch_content += f"+{nl}"
+        patch_content += f"+# patch applied{nl}"
+        patch_content += f"+patched at: {timestamp} - id: {random_id}"
+
+        commit_message = f"gh20 patch test {random_id}"
+        patched_text = "patch applied"
+
+        {"patch_content": patch_content, "commit_message": commit_message, "patched_text": patched_text}
+    input:
+      - file_path
+      - file_contents
+    output:
+      - patch_content
+      - commit_message
+      - patched_text
+    structured_output: true
+    transition: apply_patch
+
+  - id: apply_patch
+    type: toolkit
+    tool: apply_git_patch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - patch_content
+      - commit_message
+    input_mapping:
+      patch_content:
+        type: variable
+        value: patch_content
+      commit_message:
+        type: variable
+        value: commit_message
+    output:
+      - patch_result
+    structured_output: true
+    transition: read_file_after_patch
+
+  - id: read_file_after_patch
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - read_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - patch_result
+      - read_result
+      - patched_text
+      - file_contents
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the apply_git_patch operation results.
+
+          patch result: {patch_result}
+          file content after patch: {read_result}
+          expected patch text: {patched_text}
+          original content: {file_contents}
+
+          perform the following checks:
+
+          1. verify patch tool executed without errors
+          2. confirm expected patch text appears in file
+          3. verify original content preserved
+          4. check file length increased after patching
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: delete_file
+
+  - id: delete_file
+    type: toolkit
+    tool: delete_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - create_result
+    structured_output: true
+    continue_on_error: true
+    transition: delete_branch
+
+  - id: delete_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+      force:
+        type: fixed
+        value: true
+    output:
+      - create_result
+    structured_output: true
+    continue_on_error: true
+    transition: END

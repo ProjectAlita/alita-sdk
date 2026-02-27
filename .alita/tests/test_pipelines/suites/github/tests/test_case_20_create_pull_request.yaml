@@ -1,0 +1,248 @@
+name: "GH20 - Create Pull Request"
+description: "Test create_pull_request creates new PR from head to base branch"
+priority: Critical
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  target_branch:
+    type: str
+  base_branch:
+    type: str
+    value: "main"
+  pr_title:
+    type: str
+  pr_body:
+    type: str
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  pr_number:
+    type: int
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        target_branch = f"test/gh25-pr-{timestamp}-{random_suffix}"
+        file_path = f"test-data/pr-test-{timestamp}-{random_suffix}.txt"
+        file_contents = f"pr test file created at {timestamp}"
+        pr_title = f"[test] gh25 pr - {timestamp}-{random_suffix}"
+        nl = chr(10)
+        pr_body = f"automated test pr for gh25.{nl}{nl}created: {timestamp}{nl}id: {random_suffix}"
+
+        {"target_branch": target_branch, "file_path": file_path, "file_contents": file_contents, "pr_title": pr_title, "pr_body": pr_body}
+    input: []
+    output:
+      - target_branch
+      - file_path
+      - file_contents
+      - pr_title
+      - pr_body
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: set_active_branch
+
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: create_file
+
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+    output:
+      - tool_result
+    structured_output: true
+    transition: create_pr
+
+  - id: create_pr
+    type: toolkit
+    tool: create_pull_request
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_title
+      - pr_body
+      - target_branch
+      - base_branch
+    input_mapping:
+      title:
+        type: variable
+        value: pr_title
+      body:
+        type: variable
+        value: pr_body
+      head:
+        type: variable
+        value: target_branch
+      base:
+        type: variable
+        value: base_branch
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - pr_title
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the create_pull_request operation results.
+
+          tool result: {tool_result}
+          expected title: {pr_title}
+
+          perform the following checks:
+
+          1. verify pr was created (result contains pr number)
+          2. extract pr number
+          3. confirm no errors in response
+          4. verify pr has required fields
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "pr_number": integer or null,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: extract_pr_number
+
+  - id: extract_pr_number
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        
+        test_results = alita_state.get('test_results', {})
+        pr_number = test_results.get('pr_number')
+        
+        if not pr_number:
+            tool_result = alita_state.get('tool_result', {})
+            if isinstance(tool_result, dict):
+                pr_number = tool_result.get('number')
+            elif isinstance(tool_result, str):
+                try:
+                    parsed = json.loads(tool_result)
+                    pr_number = parsed.get('number')
+                except:
+                    pass
+        
+        {"pr_number": pr_number}
+    input:
+      - test_results
+      - tool_result
+    output:
+      - pr_number
+    structured_output: true
+    transition: close_pr
+
+  - id: close_pr
+    type: toolkit
+    tool: update_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      issue_id:
+        type: variable
+        value: pr_number
+      state:
+        type: fixed
+        value: closed
+    output:
+      - tool_result
+    structured_output: true
+    continue_on_error: true
+    transition: delete_branch
+
+  - id: delete_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+      force:
+        type: fixed
+        value: true
+    output:
+      - tool_result
+    structured_output: true
+    continue_on_error: true
+    transition: END

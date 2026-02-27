@@ -1,0 +1,103 @@
+name: "GH17 - Comment on Issue"
+description: "Test comment_on_issue adds plain text comment to issue"
+priority: High
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  issue_number:
+    type: str
+    value: "163"
+  comment:
+    type: str
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        nl = chr(10)
+        comment = f"test comment from gh22{nl}{nl}created: {timestamp}{nl}id: {random_id}"
+
+        {"comment": comment}
+    input: []
+    output:
+      - comment
+    structured_output: true
+    transition: add_comment
+
+  - id: add_comment
+    type: toolkit
+    tool: comment_on_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_number
+      - comment
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+      comment:
+        type: variable
+        value: comment
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - comment
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the comment_on_issue operation results.
+
+          tool result: {tool_result}
+          expected comment: {comment}
+
+          perform the following checks:
+
+          1. verify comment was added (result contains success indicators)
+          2. confirm no errors in response
+          3. check result has comment id or confirmation
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
