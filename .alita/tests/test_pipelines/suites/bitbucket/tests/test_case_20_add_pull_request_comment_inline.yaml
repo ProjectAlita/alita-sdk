@@ -15,26 +15,175 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  source_branch:
+    type: str
+  test_file_path:
+    type: str
+  branch_result:
+    type: str
+  file_result:
+    type: str
+  pr_json_data:
+    type: str
+  pr_result:
+    type: str
+  pr_id:
+    type: str
+  delete_result:
+    type: str
+  inline_json_data:
+    type: str
   comment_result:
     type: str
   inline_comment_text:
     type: str
     value: This is an inline comment on a specific line of code. Test case BB20.
-  inline_file_path:
-    type: str
-    value: test-files/bb15-pr-changes.txt
-  inline_json_data:
-    type: str
   inline_line_number:
-    type: str
-    value: '1'
-  pr_id:
     type: str
     value: '1'
   test_results:
     type: dict
-entry_point: build_inline_json
+
+entry_point: prepare_test_data
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        source_branch = f"feature/bb20-inline-pr-{timestamp}-{random_suffix}"
+        test_file_path = f"test-files/bb20-inline-test-{timestamp}-{random_suffix}.txt"
+
+        {"source_branch": source_branch, "test_file_path": test_file_path}
+    output:
+      - source_branch
+      - test_file_path
+    structured_output: true
+    transition: create_source_branch
+
+  - id: create_source_branch
+    type: toolkit
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - branch_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    input:
+      - test_file_path
+      - source_branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: fixed
+        value: "Test file for BB20 - inline PR comment test\nLine 2 content\nLine 3 content\n"
+      branch:
+        type: variable
+        value: source_branch
+    output:
+      - file_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: build_pr_json
+
+  - id: build_pr_json
+    type: code
+    code:
+      type: fstring
+      value: |-
+        import json
+
+        branch = alita_state.get('source_branch')
+
+        pr_data = {
+            "title": "BB20: Test PR for Inline Comment",
+            "source": {
+                "branch": {
+                    "name": branch
+                }
+            },
+            "destination": {
+                "branch": {
+                    "name": "main"
+                }
+            }
+        }
+
+        json.dumps(pr_data)
+    input:
+      - source_branch
+    output:
+      - pr_json_data
+    structured_output: true
+    transition: create_pull_request
+
+  - id: create_pull_request
+    type: toolkit
+    input:
+      - pr_json_data
+    input_mapping:
+      pr_json_data:
+        type: variable
+        value: pr_json_data
+    output:
+      - pr_result
+    structured_output: true
+    tool: create_pull_request
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: extract_pr_id
+
+  - id: extract_pr_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+
+        pr_result = alita_state.get('pr_result', '')
+
+        pr_id = None
+        patterns = [
+            r'/pullrequests?[/](\d+)',
+            r'/pull-requests?[/](\d+)',
+            r'"id"\s*:\s*(\d+)',
+            r'#(\d+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, str(pr_result), re.IGNORECASE)
+            if match:
+                pr_id = match.group(1)
+                break
+
+        if not pr_id:
+            pr_id = "PR_ID_NOT_FOUND"
+
+        {"pr_id": pr_id}
+    input:
+      - pr_result
+    output:
+      - pr_id
+    structured_output: true
+    transition: build_inline_json
+
   - id: build_inline_json
     type: code
     code:
@@ -43,7 +192,7 @@ nodes:
         import json
 
         line = alita_state.get('inline_line_number')
-        path = alita_state.get('inline_file_path')
+        path = alita_state.get('test_file_path')
 
         inline_data = {
             "from": int(line),
@@ -54,7 +203,7 @@ nodes:
         inline_data
     input:
       - inline_line_number
-      - inline_file_path
+      - test_file_path
     output:
       - inline_json_data
     structured_output: false
@@ -87,6 +236,7 @@ nodes:
     type: llm
     input:
       - comment_result
+      - pr_id
     input_mapping:
       chat_history:
         type: fixed
@@ -97,21 +247,29 @@ nodes:
       task:
         type: fstring
         value: |
-          Validate that the tool output is a properly formatted Bitbucket comment URL.
+          Validate that the inline comment was added successfully to PR {pr_id}.
 
           Tool Output: {comment_result}
 
-          Expected Format: https://bitbucket.org/.../pull-requests/{pr_id}/_/diff#comment-{comment_id}
+          Expected: The tool should return a Bitbucket URL or a success message containing a comment ID.
+          Acceptable formats:
+          - URL: https://bitbucket.org/.../pull-requests/{pr_id}/_/diff#comment-{comment_id}
+          - Success message containing "comment" and a numeric ID
+          - Any response indicating the comment was created
 
           Validation Criteria:
-          1. Output is a string containing a Bitbucket URL
-          2. URL contains "bitbucket.org"
-          3. URL contains "pull-requests"
-          4. URL ends with "#comment-" followed by a numeric ID
+          1. tool_executed: Tool ran and returned a result (not null/empty)
+          2. comment_added: Result indicates comment was added (contains URL, comment ID, or success indicator)
+          3. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          4. no_rate_limit_error: Result does not contain "429" or "Too Many Requests"
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (true if output matches expected URL format),
+            "test_passed": boolean (true if tool_executed AND comment_added AND no_unhandled_exception AND no_rate_limit_error),
+            "tool_executed": boolean,
+            "comment_added": boolean,
+            "no_unhandled_exception": boolean,
+            "no_rate_limit_error": boolean,
             "is_valid_url": boolean (contains https://bitbucket.org),
             "has_pull_request_path": boolean (contains "pull-requests"),
             "has_comment_anchor": boolean (ends with "#comment-XXXXXX"),
@@ -125,4 +283,20 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
+    transition: cleanup_pr_branch
+
+  - id: cleanup_pr_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END

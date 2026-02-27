@@ -15,9 +15,22 @@ toolkits:
     name: ${BITBUCKET_TOOLKIT_NAME}
 
 state:
+  source_branch:
+    type: str
+  test_file_path:
+    type: str
+  branch_result:
+    type: str
+  file_result:
+    type: str
+  pr_json_data:
+    type: str
+  pr_result:
+    type: str
   pr_id:
     type: str
-    value: "1"
+  delete_result:
+    type: str
   comment_content:
     type: str
     value: |
@@ -43,8 +56,146 @@ state:
   test_results:
     type: dict
 
-entry_point: add_regular_comment
+entry_point: prepare_test_data
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        source_branch = f"feature/bb19-comment-pr-{timestamp}-{random_suffix}"
+        test_file_path = f"test-files/bb19-comment-test-{timestamp}-{random_suffix}.txt"
+
+        {"source_branch": source_branch, "test_file_path": test_file_path}
+    output:
+      - source_branch
+      - test_file_path
+    structured_output: true
+    transition: create_source_branch
+
+  - id: create_source_branch
+    type: toolkit
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - branch_result
+    structured_output: true
+    tool: create_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: create_test_file
+
+  - id: create_test_file
+    type: toolkit
+    input:
+      - test_file_path
+      - source_branch
+    input_mapping:
+      file_path:
+        type: variable
+        value: test_file_path
+      file_contents:
+        type: fixed
+        value: "Test file for BB19 - PR comment test"
+      branch:
+        type: variable
+        value: source_branch
+    output:
+      - file_result
+    structured_output: true
+    tool: create_file
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: build_pr_json
+
+  - id: build_pr_json
+    type: code
+    code:
+      type: fstring
+      value: |-
+        import json
+
+        branch = alita_state.get('source_branch')
+
+        pr_data = {
+            "title": "BB19: Test PR for Comment",
+            "source": {
+                "branch": {
+                    "name": branch
+                }
+            },
+            "destination": {
+                "branch": {
+                    "name": "main"
+                }
+            }
+        }
+
+        json.dumps(pr_data)
+    input:
+      - source_branch
+    output:
+      - pr_json_data
+    structured_output: true
+    transition: create_pull_request
+
+  - id: create_pull_request
+    type: toolkit
+    input:
+      - pr_json_data
+    input_mapping:
+      pr_json_data:
+        type: variable
+        value: pr_json_data
+    output:
+      - pr_result
+    structured_output: true
+    tool: create_pull_request
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: extract_pr_id
+
+  - id: extract_pr_id
+    type: code
+    code:
+      type: fixed
+      value: |
+        import re
+
+        pr_result = alita_state.get('pr_result', '')
+
+        pr_id = None
+        patterns = [
+            r'/pullrequests?[/](\d+)',
+            r'/pull-requests?[/](\d+)',
+            r'"id"\s*:\s*(\d+)',
+            r'#(\d+)',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, str(pr_result), re.IGNORECASE)
+            if match:
+                pr_id = match.group(1)
+                break
+
+        if not pr_id:
+            pr_id = "PR_ID_NOT_FOUND"
+
+        {"pr_id": pr_id}
+    input:
+      - pr_result
+    output:
+      - pr_id
+    structured_output: true
+    transition: add_regular_comment
+
   - id: add_regular_comment
     type: toolkit
     input:
@@ -123,4 +274,20 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
+    transition: cleanup_pr_branch
+
+  - id: cleanup_pr_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - source_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: source_branch
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: END

@@ -1,7 +1,7 @@
 ---
 name: "pr-impact-analyzer"
 description: "Analyze PR changes and generate targeted test matrix for GitHub Actions"
-model: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+model: "eu.anthropic.claude-sonnet-4-6"
 temperature: 0.0
 max_tokens: 16000
 mcps:

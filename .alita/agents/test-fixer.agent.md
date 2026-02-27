@@ -1,6 +1,6 @@
 ---
 name: test-fixer
-model: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+model: "eu.anthropic.claude-sonnet-4-6"
 temperature: 0.1
 max_tokens: 16000
 toolkit_configs: 
@@ -55,6 +55,60 @@ Execute the ENTIRE workflow (Steps 1-8) end-to-end WITHOUT ANY user interaction.
 11. **Update milestone file** after Steps 2, 3, 5, 6, 7, 8
 12. **PR regression classification** — when `pr_change_context.json` exists and an SDK bug's error location matches `changed_sdk_files` or `changed_methods_by_file`, classify as `pr_regression` (not reported to bug board). Bugs in UNCHANGED code → `sdk_bug` with `bug_report_needed: true`.
 
+## Error Detection Reference
+
+Use this lookup table on the cached errors-only data to pre-classify failures. Apply the FIRST matching rule.
+
+### Signal → Classification Mapping
+
+| # | Signals (check in order) | Pre-classification | Action |
+|---|---|---|---|
+| 1 | `success=false` AND `output=null` AND top-level `error` contains `"429"` | **FLAKY** | Rerun — toolkit hit rate limit during initialization |
+| 2 | `success=false` AND `output=null` AND top-level `error` contains traceback NOT `429` | **sdk_bug** | Toolkit initialization crash; find error class in traceback |
+| 3 | Any `tool_output` contains `"429 Client Error"` or `"Too Many Requests"` | **FLAKY** | Rerun — transient API throttle |
+| 4 | `result.error` contains `"429"` or `"rate limit"` or `"Too Many Requests"` (no `429` in tool_output) | **FLAKY** | Rerun — rate limit surfaced through LLM validation |
+| 5 | `result.error` contains `"exceeded"` or `"limit"` (e.g. `"200 comments per pull request"`) | **test_code_issue** → Fix 10 | Environmental resource exhaustion; add setup node to create fresh resource |
+| 6 | `result` shows primary feature succeeded (e.g. `file_created=true`, `pr_created=true`) BUT cleanup/secondary flags false AND `result.error` mentions `"rate limit"` or `"429"` | **FLAKY** | Primary feature worked; rate-limit hit only secondary steps — rerun |
+| 7 | Negative test (`pipeline_name` contains `"error"`, `"invalid"`, `"non-existent"`, `"duplicate"`, `"prevent"`) AND primary operation flag shows it SUCCEEDED when it should have FAILED (e.g. `duplicate_creation_failed=false`, `error_indicates_exists=false`) | **sdk_bug** | Tool silently succeeds on invalid input; NOT a test fix |
+| 8 | `test_passed=null` AND `thinking_steps[*].finish_reason="length"` | **test_code_issue** → Fix 8 | LLM truncation; add trim code node |
+| 9 | `test_passed=null` AND no `finish_reason="length"` | **test_code_issue** → Fix 2 | LLM returned null result; check validation prompt |
+| 10 | All `tool_calls_dict[*].error=null`, no `"error"` / `"429"` in `tool_output`, but specific result flag is false | **test_code_issue** → Fix 2 | Tools ran fine; validation logic is wrong (wrong assertion, missing var, formula error) |
+| 11 | `result` flag `commit_confirmed=false` while all other flags true, `llm_response_tokens_output > 2000` | **test_code_issue** → Fix 8 | LLM over-generated; constrain prompt or add trim node |
+| 12 | `result` flag for cleanup step is false (e.g. `branch_not_in_list_after=false`, `deletion_success=false`) while primary feature flags true | **test_code_issue** → Fix 1 or 7 | Cleanup failure; add `continue_on_error: true` to cleanup node; reorder if needed |
+
+### Result Field Semantics
+
+The `output.result` object is the LLM validator's structured verdict. Key patterns:
+
+- **All flags relate to the same step** (all false) → that whole step failed; check `tool_calls_dict` for what the tool actually returned.
+- **Primary feature flag true, secondary flags false** → primary tool worked; secondary verification steps failed (likely rate-limit or cleanup issue).
+- **`error` field in `result`** contains the LLM's free-text explanation — treat as the human-readable error message for grouping.
+- **`tools_executed=false`** → pipeline did NOT reach the tool node (check transitions/state wiring).
+- **`no_errors=false` with specific error in `result.error`** → tool ran but returned an error string.
+
+### tool_calls_dict Semantics
+
+Each entry: `{ tool_name, tool_inputs, tool_output, finish_reason, error }`
+
+- `error` field is almost always `null` — SDK tools rarely set this field; errors surface as strings inside `tool_output`.
+- `tool_output` starts with `"Tool execution error!"` or `"Failed to ..."` → the tool caught an exception and returned it as a string (not a raised error).
+- `tool_output` starts with `"Tool execution error!"` containing `"429"` → rate limit hit inside the tool.
+- `finish_reason: "stop"` is normal for all tool nodes.
+- Multiple calls to the same `tool_name` → LLM retried after failure.
+
+### Pre-Classification Decision Tree
+
+```
+Is success=false AND output=null?
+  └─ YES → Is "429" in top-level error? → FLAKY (rule 1) else sdk_bug (rule 2)
+  └─ NO  → Is "429" in any tool_output?  → FLAKY (rule 3)
+            └─ NO → Is "429"/"rate limit" in result.error? → FLAKY (rule 4)
+                     └─ NO → Is "exceeded"/"limit" in result.error? → Fix 10 (rule 5)
+                              └─ NO → Is negative test with unexpected success? → sdk_bug (rule 7)
+                                       └─ NO → finish_reason=length? → Fix 8 (rule 8)
+                                                └─ NO → All tools ran OK? → Fix 2/1/7 (rules 10-12)
+```
+
 ## Environment Commands
 
 | Environment | Command |
@@ -70,9 +124,22 @@ Execute the ENTIRE workflow (Steps 1-8) end-to-end WITHOUT ANY user interaction.
 
 **B. Extract target branch** from user prompt (e.g., "on branch feature/test-improvements"). If not found → TARGET_BRANCH = null (no commits). Store in milestone `ci_target_branch`.
 
-**C. Read results.json (ONE TIME).** Path: `.alita/tests/test_pipelines/test_results/suites/<suite>/results.json`. Cache all failure data in milestone `initial_failures`:
-- Fields: `test_id`, `status` (passed/failed/error), `error_message`, `error_type`, `duration`
-- Fallback if missing: read `run.log` in 100-line chunks
+**C. Read results file (ONE TIME).** Prefer errors-only file if it exists:
+1. **Errors-only file (preferred):** `.alita/tests/test_pipelines/test_results/suites/<suite>/results_errors_only.json` — pre-filtered to failing tests only, smaller, faster to parse.
+2. **Full file (fallback):** `.alita/tests/test_pipelines/test_results/suites/<suite>/results.json` — filter to `test_passed != true` entries.
+3. **Last resort:** read `run.log` in 100-line chunks.
+
+For each failing entry, cache in milestone `initial_failures`:
+- `test_id` — extract from `pipeline_name` (e.g., `"851ed3b3_BB02 - ..."` → `BB02`)
+- `test_passed` — `false` = assertion failure; `null` = pipeline crash (see `error` field)
+- `success` — `false` = toolkit initialization crashed before any tool ran
+- `error` — top-level crash traceback (only set when `success=false`)
+- `output.result` — all assertion flags + `error` string (primary diagnosis source)
+- `output.tool_calls_dict` — per-tool: `tool_name`, `tool_inputs`, `tool_output`, `error`
+- `output.thinking_steps[*].finish_reason` — `"length"` means LLM was truncated
+- `output.llm_response_tokens_output` — high values (>2000) risk truncation
+
+Apply the **Error Detection Reference** (see below) to pre-classify each failure BEFORE Step 2.
 
 **D. Read PR change context (ONE TIME, optional).** Path: `.alita/tests/test_pipelines/pr_change_context.json`.
 - If exists: cache `changed_sdk_files` and `changed_methods_by_file`
@@ -302,7 +369,7 @@ When no fixes applied: `"committed": false, "commit_details": {"skip_reason": ".
   "intent_analysis": [{"test_id": "", "test_intent": "", "positive_or_negative": "", "primary_feature": "", "sdk_behaves_correctly": true, "classification": "test_code_issue|sdk_bug", "reasoning": ""}],
   "fix_attempts": [{"attempt": 1, "test_ids": [], "files_modified": [{"path": ""}], "fix_rationale": "", "intent_preserved": true, "similar_passing_tests": [], "verification_result": ""}],
   "pr_change_context": {"available": false, "pr_number": null, "pr_branch": null, "changed_sdk_files": [], "changed_methods_by_file": {}},
-  "blockers": [{"test_ids": [], "blocker_type": "sdk_bug|pr_regression|max_attempts_exceeded|environmental_constraint", "title": "", "affected_component": "", "description": "", "pr_feedback_needed": false}],
+  "blocked": [{"test_ids": [], "blocker_type": "sdk_bug|pr_regression|max_attempts_exceeded|environmental_constraint", "title": "", "affected_component": "", "description": "", "pr_feedback_needed": false}],
   "commit_info": {"committed": false, "branch": "", "files_committed": [], "pr_number": null},
   "summary": {"fixed": 0, "flaky": 0, "blocked": 0}
 }

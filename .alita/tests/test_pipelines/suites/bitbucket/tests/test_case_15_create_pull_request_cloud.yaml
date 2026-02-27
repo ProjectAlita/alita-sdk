@@ -98,21 +98,6 @@ nodes:
     structured_output: true
     tool: create_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: switch_to_source_branch
-
-  - id: switch_to_source_branch
-    type: toolkit
-    input:
-      - source_branch
-    input_mapping:
-      branch_name:
-        type: variable
-        value: source_branch
-    output:
-      - switch_result
-    structured_output: true
-    tool: set_active_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: create_test_file
 
   - id: create_test_file
@@ -190,7 +175,6 @@ nodes:
     type: llm
     input:
       - branch_result
-      - switch_result
       - file_result
       - pr_result
       - pr_title
@@ -210,7 +194,6 @@ nodes:
           Analyze the output from 'create_pull_request' tool execution with Cloud format.
 
           Branch Creation Result: {branch_result}
-          Branch Switch Result: {switch_result}
           File Creation Result: {file_result}
           PR Creation Result: {pr_result}
           PR Title: {pr_title}
@@ -222,18 +205,19 @@ nodes:
 
           Validation Criteria (ALL must pass for test_passed=true):
           1. branch_created: Source branch was created successfully
-          2. branch_switched: Successfully switched to source branch
-          3. file_created: Test file was created in the branch
-          4. no_errors: No error indicators in any output
-          5. pr_created: PR creation returned success indicator
-          6. pr_id_returned: PR result contains an ID or URL
-          7. cloud_format_accepted: The cloud JSON format was accepted
+          2. file_created: Test file was created in the branch
+          3. no_errors: No error indicators in pr_result or file_result
+          4. pr_created: PR creation returned success indicator
+          5. pr_id_returned: PR result contains an ID or URL
+          6. cloud_format_accepted: The cloud JSON format was accepted
+
+          NOTE: branch_switched is NOT a required criterion. The create_file tool accepts a branch parameter directly, so switching active branch is not needed.
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (true only if ALL criteria pass),
+            "test_passed": boolean (true only if criteria 1-6 ALL pass),
             "branch_created": boolean,
-            "branch_switched": boolean,
+            "branch_switched": boolean (optional, does not affect test_passed),
             "file_created": boolean,
             "no_errors": boolean,
             "pr_created": boolean,

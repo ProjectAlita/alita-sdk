@@ -376,6 +376,17 @@ echo -e "${BLUE}═════════════════════�
 
 # Parse results and display summary
 if [ -f "$RESULTS_FILE" ]; then
+    # Keep named copies for bug reporter
+    SUITE_DIR="$(dirname "$RESULTS_FILE")"
+    cp "$RESULTS_FILE" "${SUITE_DIR}/results_for_bug_reporter.json"
+
+    # Generate errors-only view for test-fixer agent consumption
+    ERRORS_ONLY_FILE="${RESULTS_FILE%.json}_errors_only.json"
+    if python scripts/results_errors_only.py "$RESULTS_FILE" "$ERRORS_ONLY_FILE" 2>/dev/null; then
+        echo -e "${BLUE}  Errors-only view: $ERRORS_ONLY_FILE${NC}"
+        cp "$ERRORS_ONLY_FILE" "${SUITE_DIR}/results_errors_only_for_bug_reporter.json" 2>/dev/null || true
+    fi
+
     PASSED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('passed', 0))" 2>/dev/null || echo "0")
     FAILED=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('failed', 0))" 2>/dev/null || echo "0")
     ERRORS=$(python -c "import json; data=json.load(open('$RESULTS_FILE')); print(data.get('errors', 0))" 2>/dev/null || echo "0")
