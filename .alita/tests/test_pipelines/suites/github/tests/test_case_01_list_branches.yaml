@@ -12,6 +12,8 @@ state:
     type: list
   tool_result:
     type: str
+  trimmed_result:
+    type: dict
   test_results:
     type: dict
 
@@ -27,13 +29,39 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    transition: trim_branches
+
+  - id: trim_branches
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        raw = alita_state.get("tool_result", "")
+        branches = []
+        try:
+            if isinstance(raw, list):
+                branches = raw
+            elif isinstance(raw, str):
+                branches = json.loads(raw)
+        except Exception:
+            pass
+        branch_names = [b.get("name", str(b)) if isinstance(b, dict) else str(b) for b in branches]
+        has_main = "main" in branch_names
+        data = {"branches_count": len(branch_names), "has_main_branch": has_main, "branches_sample": branch_names[:5], "tool_executed": len(branch_names) > 0}
+        {"trimmed_result": data}
+    input:
+      - tool_result
+    output:
+      - trimmed_result
+    structured_output: true
     transition: process_results
 
   - id: process_results
     type: llm
     model: gpt-4o
     input:
-      - tool_result
+      - trimmed_result
     input_mapping:
       system:
         type: fixed
@@ -41,19 +69,22 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from the 'list_branches_in_repo' tool.
+          Analyze the pre-processed output from the 'list_branches_in_repo' tool.
 
-          Tool Result: {tool_result}
+          Trimmed Result: {trimmed_result}
 
-          Perform the following checks:
+          The trimmed_result contains:
+          - branches_count: total number of branches found
+          - has_main_branch: whether 'main' branch exists
+          - branches_sample: first 5 branch names
+          - tool_executed: whether the tool ran successfully
 
-          Confirm the tool executed successfully (the result is not empty or null).
-          Determine if any branches were found (branches count > 0).
-          Check if a 'main' branch exists in the list.
+          Do NOT echo back the full data. Keep response under 200 tokens.
+
           Return a JSON object named test_results with the following structure:
 
           {
-          "test_passed": boolean (true if all checks pass),
+          "test_passed": boolean (true if tool_executed is true AND branches_count > 0 AND has_main_branch is true),
           "tool_executed": boolean,
           "branches_count": integer,
           "has_main_branch": boolean,
