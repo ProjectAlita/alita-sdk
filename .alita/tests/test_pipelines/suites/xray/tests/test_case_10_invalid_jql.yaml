@@ -30,7 +30,7 @@ state:
     value: ["Unable to get tests", "error", "failed", "exception", "syntax", "parse"]
   unexpected_success_indicators:
     type: list
-    value: ["Extracted tests", "issueId", "jira"]
+    value: ["Extracted tests", "total.*results", "issueId.*16"]
   test_results:
     type: dict
 
@@ -127,13 +127,14 @@ nodes:
           1. tool_executed: Always true (we reached this validation node)
           2. has_error_message: Result is NOT empty/null/None (length > 10 characters)
           3. error_message_meaningful: Result contains at least one expected error indicator
-          4. no_test_data: Output does NOT contain test data structures (issueId, jira fields)
-          5. no_success_message: Output does NOT contain "Extracted tests" success message
+          4. no_test_data: Output does NOT contain actual test data (i.e. does NOT start with "Extracted tests" or contain numeric issueId values like "issueId: 12345")
+          5. no_success_message: Output does NOT contain the literal phrase "Extracted tests" at the start of the response
 
           FAILURE CONDITIONS:
           - If result is empty, null, or < 10 characters: has_error_message = false, TEST FAILS
           - If result does not contain any expected error indicators: error_message_meaningful = false, TEST FAILS
-          - If result contains success indicators: TEST FAILS
+          - If result starts with "Extracted tests" or contains actual numeric issueId data: TEST FAILS
+          - NOTE: The error message body may reference field names like "results", "jira", "issueId" as part of explaining the error — this is NOT a success indicator
 
           Return JSON test_results:
           {{
