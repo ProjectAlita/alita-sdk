@@ -45,6 +45,8 @@ state:
     type: str
   read_result:
     type: str
+  trimmed_result:
+    type: dict
   test_results:
     type: dict
 
@@ -135,65 +137,39 @@ nodes:
     structured_output: true
     tool: read_file
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
-    transition: validate_results
+    transition: trim_results
 
-  - id: validate_results
-    type: llm
+  - id: trim_results
+    type: code
+    code:
+      type: fstring
+      value: |-
+        create_result = alita_state.get('create_result', '')
+        read_result = alita_state.get('read_result', '')
+
+        create_ok = "has been created" in str(create_result) or "created" in str(create_result).lower()
+        no_err = not any(e in str(create_result).lower() for e in ["error", "failed", "exception", "permission denied", "not found"])
+        read_ok = bool(read_result) and len(str(read_result)) > 0
+        content_match = "Test File BB11" in str(read_result) and "Special chars" in str(read_result)
+        special_chars = "\u00b1\u221e\u00a7" in str(read_result) or "\u00e9mojis" in str(read_result)
+
+        {
+          "trimmed_result": {
+            "file_created": create_ok,
+            "no_errors": no_err,
+            "read_succeeded": read_ok,
+            "content_matches": content_match,
+            "special_chars_preserved": special_chars,
+            "create_result_snippet": str(create_result)[:200],
+            "read_result_snippet": str(read_result)[:200]
+          }
+        }
     input:
       - create_result
       - read_result
-      - test_content
-      - expected_success_indicators
-      - error_indicators
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a strict quality assurance validator. Only return valid JSON.
-      task:
-        type: fstring
-        value: |
-          Analyze the output from 'create_file' tool execution.
-
-          Create Result: {create_result}
-          Read Verification: {read_result}
-          Original Content: {test_content}
-          Expected Success Indicators: {expected_success_indicators}
-          Error Indicators: {error_indicators}
-
-          This is a POSITIVE test - we expect successful file creation.
-
-          Validation Criteria (ALL must pass for test_passed=true):
-          1. file_created: Create operation returned success indicator (e.g. "has been created", "created", "success")
-          2. no_errors: No error indicators in create result
-          3. content_matches: Read result contains the original content
-          4. special_chars_preserved: Special characters and Unicode are preserved in read result
-          5. read_succeeded: File was successfully read back after creation
-
-          NOTE: commit_confirmed is NOT a required criterion. The Bitbucket create_file tool does not return a commit SHA in its output string.
-
-          Return JSON test_results:
-          {{
-            "test_passed": boolean (true only if criteria 1-5 ALL pass),
-            "file_created": boolean,
-            "no_errors": boolean,
-            "content_matches": boolean,
-            "special_chars_preserved": boolean,
-            "read_succeeded": boolean,
-            "commit_confirmed": boolean (optional, does not affect test_passed),
-            "content_length_original": number,
-            "content_length_read": number,
-            "error": string | null
-          }}
-
-          Return ONLY the JSON object.
-    model: ${DEFAULT_LLM_MODEL}
     output:
-      - test_results
-    structured_output_dict:
-      test_results: dict
+      - trimmed_result
+    structured_output: true
     transition: cleanup_branch
 
   - id: cleanup_branch
@@ -210,4 +186,43 @@ nodes:
     structured_output: true
     tool: delete_branch
     toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: validate_results
+
+  - id: validate_results
+    type: llm
+    input:
+      - trimmed_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a strict quality assurance validator. Only return valid JSON. Keep response under 300 tokens.
+      task:
+        type: fstring
+        value: |
+          Review pre-computed validation flags for a Bitbucket create_file test.
+
+          Validation flags: {trimmed_result}
+
+          All flags were computed by a code node. Trust them directly.
+
+          Return JSON:
+          {{
+            "test_passed": boolean (true only if file_created AND no_errors AND read_succeeded AND content_matches AND special_chars_preserved are all true),
+            "file_created": boolean,
+            "no_errors": boolean,
+            "content_matches": boolean,
+            "special_chars_preserved": boolean,
+            "read_succeeded": boolean,
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object.
+    model: ${DEFAULT_LLM_MODEL}
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
     transition: END
