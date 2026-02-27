@@ -24,6 +24,7 @@ from ..utils.mcp_oauth import (
     extract_resource_metadata_url,
     fetch_resource_metadata,
     infer_authorization_servers_from_realm,
+    substitute_mcp_placeholders,
 )
 
 logger = logging.getLogger(__name__)
@@ -244,6 +245,10 @@ class McpToolkit(BaseToolkit):
             logger.error(f"Headers must be a dictionary or JSON string, got: {type(headers)}")
             raise ValueError(f"Headers must be a dictionary or JSON string, got: {type(headers)}")
 
+        # Substitute {param} and {{secret.name}} placeholders in headers
+        if parsed_headers and client:
+            parsed_headers = substitute_mcp_placeholders(parsed_headers, user_config={}, client=client)
+
         # Extract session_id from kwargs if provided
         session_id = kwargs.get('session_id')
         if session_id:
@@ -437,13 +442,17 @@ class McpToolkit(BaseToolkit):
         if connection_config.headers:
             headers.update(connection_config.headers)
 
+        # True when the user has an Authorization header in their DB toolkit config
+        configured_auth = any(k.lower() == 'authorization' for k in headers)
+
         # Create unified MCP client (auto-detects SSE vs Streamable HTTP)
         client = McpClient(
             url=connection_config.url,
             session_id=session_id,
             headers=headers,
             timeout=timeout,
-            ssl_verify=ssl_verify
+            ssl_verify=ssl_verify,
+            configured_auth=configured_auth
         )
         
         server_session_id = None
