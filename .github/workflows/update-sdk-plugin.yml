@@ -93,8 +93,12 @@ jobs:
           git config --global user.name 'GitHub Action'
           git config --global user.email 'action@github.com'
           git add requirements.txt metadata.json
-          git commit -m "chore: update alita-sdk to version ${{ steps.get_version.outputs.version }}"
-          git push
+          if git diff --cached --quiet; then
+            echo "::notice title=No Changes::sdk_plugin already at version ${{ steps.get_version.outputs.version }}"
+          else
+            git commit -m "chore: update alita-sdk to version ${{ steps.get_version.outputs.version }}"
+            git push
+          fi
 
       - name: Create Pull Request
         if: github.event_name == 'workflow_dispatch' && inputs.create-pr == true
