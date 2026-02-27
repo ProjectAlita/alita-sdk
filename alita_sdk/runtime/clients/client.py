@@ -654,6 +654,54 @@ class AlitaClient:
         logger.info(f"Unsecret response: {data}")
         return data.get('value', None)
 
+    def _inject_summarization(
+        self, middleware_list: list, context_settings: Optional[dict], conversation_id: Optional[str] = None
+    ):
+        """
+        Inject summarization middleware into the middleware list based on context settings.
+        """
+        if not context_settings or not conversation_id:
+            return
+
+        # Check if context management is enabled (master switch)
+        if not context_settings.get('enabled', True):
+            return
+
+        # Check if summarization specifically is enabled
+        if not context_settings.get('enable_summarization', True):
+            return
+
+        max_context_tokens = context_settings.get('max_context_tokens')
+        preserve_recent = context_settings.get('preserve_recent_messages', 5)
+
+        if not max_context_tokens or max_context_tokens <= 0:
+            return
+
+        try:
+            from ..middleware.summarization import SummarizationMiddleware
+
+            # Get model config from context strategy
+            summary_max_tokens = context_settings.get('max_tokens', 4000)
+            summary_temperature = context_settings.get('temperature', 0.7)
+
+            # Try low-tier model first for cost efficiency
+            summarization_llm = self.get_low_tier_llm(max_tokens=summary_max_tokens, temperature=summary_temperature)
+
+            # Extract callbacks from context_settings for backend integration
+            callbacks = context_settings.get('callbacks', {})
+
+            summarization_middleware = SummarizationMiddleware(
+                model=summarization_llm,
+                trigger=("tokens", max_context_tokens),
+                keep=("messages", preserve_recent),
+                summary_prompt=context_settings.get('summary_instructions'),
+                conversation_id=conversation_id,
+                callbacks=callbacks if callbacks else None
+            )
+            middleware_list.append(summarization_middleware)
+        except Exception as e:
+            logger.warning(f"Failed to auto-inject SummarizationMiddleware: {e}")
+
     def application(self, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None, memory=None, runtime='langchain',
@@ -662,7 +710,7 @@ class AlitaClient:
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
                     conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None,
                     is_subgraph: bool = False, middleware: Optional[list] = None,
-                    exception_handling_enabled: bool = False):
+                    exception_handling_enabled: bool = False, context_settings: Optional[dict] = None):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -728,6 +776,9 @@ class AlitaClient:
                 conversation_id=conversation_id
             )
             middleware_list.append(error_handler)
+
+        # Automatically compresses conversation history when threshold is exceeded
+        self._inject_summarization(middleware_list, context_settings, conversation_id)
 
         # Extract lazy_tools_mode from internal_tools (it's a mode flag, not an actual tool)
         # UI stores it in meta.internal_tools array, not as meta.lazy_tools_mode boolean
@@ -1155,7 +1206,7 @@ class AlitaClient:
                       mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
                       ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic",
                       lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None,
-                      exception_handling_enabled: bool = False):
+                      exception_handling_enabled: bool = False, context_settings: Optional[dict] = None):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -1177,6 +1228,7 @@ class AlitaClient:
             internal_tools: Optional list of internal tool names (e.g., ['swarm', 'planner']).
                            Enables special modes like swarm for multi-agent collaboration.
             exception_handling_enabled: Enable automatic exception handling with ToolExceptionHandlerMiddleware (default: False)
+            context_settings: Optional context params
 
         Returns:
             Runnable agent ready for execution
@@ -1228,6 +1280,9 @@ class AlitaClient:
                 conversation_id=conversation_id
             )
             middleware_list.append(error_handler)
+
+        # Automatically compresses conversation history when a threshold is exceeded
+        self._inject_summarization(middleware_list, context_settings, conversation_id)
 
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler

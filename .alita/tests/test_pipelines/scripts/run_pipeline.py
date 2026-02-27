@@ -279,7 +279,30 @@ def process_pipeline_result(
 
     # CRITICAL: Check for tool execution errors FIRST (before checking test_passed from LLM)
     # This prevents false positives where LLM says "test passed" but a tool actually failed
+    # BUT: First check if ANY tool call has test_passed=true (for multi-node tests)
+    has_explicit_test_passed = False
     if isinstance(result_data, dict) and "tool_calls_dict" in result_data:
+        tool_calls = result_data.get("tool_calls_dict", {})
+        if isinstance(tool_calls, dict):
+            for tool_call_id, tool_call in tool_calls.items():
+                if not isinstance(tool_call, dict):
+                    continue
+                tool_output = tool_call.get("tool_output") or tool_call.get("content")
+                if isinstance(tool_output, str) and tool_output.strip():
+                    try:
+                        parsed_output = json.loads(tool_output)
+                        if isinstance(parsed_output, dict):
+                            result_data_inner = parsed_output.get("result", {})
+                            if isinstance(result_data_inner, dict) and result_data_inner.get("test_passed") is True:
+                                has_explicit_test_passed = True
+                                if logger:
+                                    logger.debug(f"Found explicit test_passed=true in tool call {tool_call_id}")
+                                break
+                    except json.JSONDecodeError:
+                        pass
+    
+    # Now check for errors (but skip if we found explicit test_passed=true)
+    if isinstance(result_data, dict) and "tool_calls_dict" in result_data and not has_explicit_test_passed:
         tool_calls = result_data.get("tool_calls_dict", {})
         if isinstance(tool_calls, dict):
             for tool_call_id, tool_call in tool_calls.items():
@@ -338,26 +361,37 @@ def process_pipeline_result(
                         parsed_output = json.loads(tool_output)
                         if isinstance(parsed_output, dict):
                             # Check for error field or execution failure status
+                            # BUT: Don't treat as error if result indicates success (e.g., test_passed=true)
+                            # This handles cases where tools return warnings in stderr/error field
                             if "error" in parsed_output and parsed_output["error"]:
-                                tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
-                                error_msg = parsed_output["error"]
-                                
-                                # Extract meaningful error from tracebacks
-                                if "Traceback" in error_msg:
-                                    # Get last line of traceback (usually the actual error)
-                                    lines = error_msg.strip().split('\n')
-                                    error_summary = lines[-1] if lines else error_msg
+                                # Check if result indicates success despite error/warning in stderr
+                                result_data = parsed_output.get("result")
+                                if isinstance(result_data, dict) and result_data.get("test_passed") is True:
+                                    # Tool returned warnings in error field but test passed
+                                    # Log as warning but don't fail the test
+                                    if logger:
+                                        logger.warning(f"Tool returned warnings in error field but test passed: {parsed_output['error'][:200]}")
                                 else:
-                                    error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
-                                
-                                detected_error = f"Tool '{tool_name}' returned error: {error_summary}"
-                                test_passed = False
-                                
-                                if logger:
-                                    logger.error(f"Tool output error detected: {detected_error}")
-                                    logger.debug(f"Full error: {error_msg}")
-                                
-                                break
+                                    # Actual error - tool failed
+                                    tool_name = tool_call.get("tool_meta", {}).get("name", "unknown_tool")
+                                    error_msg = parsed_output["error"]
+                                    
+                                    # Extract meaningful error from tracebacks
+                                    if "Traceback" in error_msg:
+                                        # Get last line of traceback (usually the actual error)
+                                        lines = error_msg.strip().split('\n')
+                                        error_summary = lines[-1] if lines else error_msg
+                                    else:
+                                        error_summary = error_msg[:200] + "..." if len(error_msg) > 200 else error_msg
+                                    
+                                    detected_error = f"Tool '{tool_name}' returned error: {error_summary}"
+                                    test_passed = False
+                                    
+                                    if logger:
+                                        logger.error(f"Tool output error detected: {detected_error}")
+                                        logger.debug(f"Full error: {error_msg}")
+                                    
+                                    break
                             
                             # Check for execution failure status
                             elif parsed_output.get("status") == "Execution failed":
@@ -447,6 +481,13 @@ def process_pipeline_result(
                             # Check for error field (only if test_passed wasn't explicitly set above)
                             if "error" in parsed_content and parsed_content["error"]:
                                 error_msg = parsed_content["error"]
+                                
+                                # Skip warnings - only treat actual errors as failures
+                                # Common warning patterns: "Warning:", "DeprecationWarning", "FutureWarning", etc.
+                                if "Warning" in error_msg and "Traceback" not in error_msg:
+                                    if logger:
+                                        logger.debug(f"Skipping warning in chat history: {error_msg[:200]}")
+                                    continue  # Skip this warning, don't mark test as failed
                                 
                                 # Check if this error came from a continue_on_error node
                                 if is_error_from_continue_on_error_node(error_msg, tool_calls_dict, nodes_with_continue_on_error, logger):

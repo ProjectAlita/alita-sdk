@@ -793,6 +793,7 @@ def create_graph(
         for_subgraph: bool = False,
         lazy_tools_mode: bool = False,
         always_bind_tools: Optional[list[BaseTool]] = None,
+        middleware_manager: Optional[Any] = None,
         **kwargs
 ):
     """
@@ -813,6 +814,8 @@ def create_graph(
         always_bind_tools: Optional list of tools that should always be bound directly
             to the LLM (e.g., middleware tools like planning). These bypass the
             ToolRegistry and are bound alongside meta-tools in lazy mode.
+        middleware_manager: Optional middleware manager for before_model/after_model hooks.
+            Used for context management (summarization, context editing).
         **kwargs: Additional keyword arguments
     """
 
@@ -1082,6 +1085,8 @@ def create_graph(
                     # Fix for #3290: Always pass as list (or empty list), never None, to ensure
                     # always_bind_tools are included with dynamically selected tools
                     always_bind_tools=always_bind_tools or [],
+                    # Middleware manager for before_model/after_model hooks (summarization, context editing)
+                    middleware_manager=middleware_manager,
                 ))
             elif node_type in ['router', 'decision']:
                 if node_type == 'router':

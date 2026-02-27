@@ -105,6 +105,37 @@ class Middleware(ABC):
         """
         pass
 
+    def before_model(self, state: dict, config: dict) -> Optional[dict]:
+        """
+        Called before model invocation. Can modify state (messages).
+
+        Override this to implement pre-model logic like:
+        - Summarization (compress old messages)
+        - Context editing (clear old tool outputs)
+        - Token management
+
+        Args:
+            state: Current graph state with 'messages' key
+            config: Runtime configuration (thread_id, etc.)
+
+        Returns:
+            State updates dict (e.g., {'messages': [...]}) or None
+        """
+        return None
+
+    def after_model(self, state: dict, config: dict) -> Optional[dict]:
+        """
+        Called after model invocation. Can modify state.
+
+        Args:
+            state: Current graph state after model response
+            config: Runtime configuration
+
+        Returns:
+            State updates dict or None
+        """
+        return None
+
     def _fire_callback(self, event: str, data: Any) -> None:
         """
         Fire a callback if registered.
@@ -208,3 +239,120 @@ class MiddlewareManager:
                 mw.on_conversation_end(conversation_id)
             except Exception as e:
                 logger.error(f"Middleware {type(mw).__name__} failed on_conversation_end: {e}")
+
+    def run_before_model(self, state: dict, config: dict) -> tuple[dict, list]:
+        """
+        Run all middleware before_model hooks.
+
+        Hooks can modify state, especially messages (for summarization, context editing).
+        Returns both the processed state (for LLM to use) and RemoveMessage operations
+        (for LangGraph checkpoint).
+
+        Args:
+            state: Current graph state with 'messages' key
+            config: Runtime configuration
+
+        Returns:
+            Tuple of (updated_state, remove_ops)
+            - updated_state: State with processed messages for LLM
+            - remove_ops: Only RemoveMessage operations for checkpoint (not actual messages)
+        """
+        try:
+            from langchain_core.messages import RemoveMessage
+        except ImportError:
+            RemoveMessage = None
+
+        remove_ops = []
+        for mw in self._middleware:
+            try:
+                updates = mw.before_model(state, config)
+                if updates and 'messages' in updates:
+                    # Only collect RemoveMessage operations for checkpoint
+                    # The actual messages are already in state after processing
+                    if RemoveMessage is not None:
+                        for msg in updates['messages']:
+                            if isinstance(msg, RemoveMessage):
+                                remove_ops.append(msg)
+                    # Apply updates in-memory for LLM processing
+                    original_count = len(state.get('messages', []))
+                    state = {**state, 'messages': self._apply_message_updates(
+                        state.get('messages', []), updates['messages']
+                    )}
+                    new_count = len(state.get('messages', []))
+                    logger.info(
+                        f"[MiddlewareManager] {type(mw).__name__} applied: "
+                        f"{original_count} -> {new_count} messages, RemoveMessage ops: {len(remove_ops)}"
+                    )
+            except Exception as e:
+                logger.error(f"Middleware {type(mw).__name__} before_model failed: {e}")
+        return state, remove_ops
+
+    def run_after_model(self, state: dict, config: dict) -> dict:
+        """
+        Run all middleware after_model hooks.
+
+        Args:
+            state: Current graph state after model response
+            config: Runtime configuration
+
+        Returns:
+            Updated state dict
+        """
+        for mw in self._middleware:
+            try:
+                updates = mw.after_model(state, config)
+                if updates:
+                    state = {**state, **updates}
+            except Exception as e:
+                logger.error(f"Middleware {type(mw).__name__} after_model failed: {e}")
+        return state
+
+    def get_context_info(self) -> Dict[str, Any]:
+        """
+        Get current context info (always available, not just after summarization).
+
+        Returns:
+            Dict with message_count, token_count, summarized (always present)
+        """
+        for mw in self._middleware:
+            if hasattr(mw, 'last_context_info') and mw.last_context_info:
+                return mw.last_context_info
+
+        return {
+            'message_count': 0,
+            'token_count': 0,
+            'summarized': False,
+        }
+
+    @staticmethod
+    def _apply_message_updates(current_messages: list, updates: list) -> list:
+        """
+        Apply message updates including RemoveMessage operations.
+
+        Handles LangGraph's RemoveMessage pattern for clearing old messages.
+
+        Args:
+            current_messages: Current list of messages
+            updates: List of messages/RemoveMessage operations
+
+        Returns:
+            Updated message list
+        """
+        try:
+            from langchain_core.messages import RemoveMessage
+            from langgraph.graph.message import REMOVE_ALL_MESSAGES
+        except ImportError:
+            # If imports fail, just return updates as-is
+            return updates
+
+        new_messages = []
+        for msg in updates:
+            if isinstance(msg, RemoveMessage):
+                if msg.id == REMOVE_ALL_MESSAGES:
+                    current_messages = []
+                else:
+                    current_messages = [m for m in current_messages if m.id != msg.id]
+            else:
+                new_messages.append(msg)
+
+        return current_messages + new_messages
