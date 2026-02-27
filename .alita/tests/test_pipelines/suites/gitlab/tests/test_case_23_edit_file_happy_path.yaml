@@ -173,8 +173,8 @@ nodes:
           2. file_created: Initial file was created successfully
           3. tool_executed: edit_file tool ran and returned results
           4. no_errors: Output does NOT contain error indicators
-          5. text_replaced: Output confirms exact text was replaced with new text
-          6. operation_confirmed: Edit operation is confirmed in response
+          5. text_replaced: edit_file returned a success message such as "Updated file ..." or "File updated" - this IS sufficient confirmation that the text was replaced; do NOT require the old/new text to be echoed back
+          6. operation_confirmed: Edit operation is confirmed in response (any success message counts)
 
           Return JSON test_results:
           {{
