@@ -1,0 +1,277 @@
+name: "GH08 - Update File: Multiline"
+description: "Test update_file with multiline code block replacement"
+priority: High
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  target_branch:
+    type: str
+  file_path:
+    type: str
+  original_content:
+    type: str
+  new_content:
+    type: str
+  old_content:
+    type: str
+  file_query:
+    type: str
+  create_result:
+    type: str
+  update_result:
+    type: str
+  verified_content:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        target_branch = f"tc-test-gh13-{timestamp}-{random_id}"
+        file_path = f"test-data/update-test/gh13-multiline-{random_id}.py"
+
+        nl = chr(10)
+        original_content = (
+            f"# test file created at {timestamp}" + nl +
+            f"# id: {random_id}" + nl +
+            nl +
+            "def hello_world():" + nl +
+            '    """original docstring."""' + nl +
+            '    print("hello, world!")' + nl +
+            "    return true" + nl +
+            nl +
+            "def calculate(a, b):" + nl +
+            '    """calculate sum."""' + nl +
+            "    result = a + b" + nl +
+            "    return result" + nl
+        )
+
+        {"target_branch": target_branch, "file_path": file_path, "original_content": original_content}
+    input: []
+    output:
+      - target_branch
+      - file_path
+      - original_content
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: set_active_branch
+
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: create_file
+
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - original_content
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: original_content
+    output:
+      - create_result
+    structured_output: true
+    transition: build_update_query
+
+  - id: build_update_query
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        file_path = alita_state.get('file_path')
+        timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        random_id = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+        nl = chr(10)
+
+        old_content = (
+            "def hello_world():" + nl +
+            '    """original docstring."""' + nl +
+            '    print("hello, world!")' + nl +
+            "    return true" + nl
+        )
+
+        new_content = (
+            'def hello_world(name: str = "world") -> bool:' + nl +
+            '    """' + nl +
+            "    greet someone by name." + nl +
+            nl +
+            "    args:" + nl +
+            '        name: the name to greet. defaults to "world".' + nl +
+            nl +
+            "    returns:" + nl +
+            "        true if greeting was successful." + nl +
+            nl +
+            f"    updated: {timestamp}" + nl +
+            f"    update id: {random_id}" + nl +
+            '    """' + nl +
+            "    import logging" + nl +
+            "    logger = logging.getlogger(__name__)" + nl +
+            '    logger.info(f"greeting {name}")' + nl +
+            '    print(f"hello, {name}!")' + nl +
+            "    return true"
+        )
+
+        file_query = file_path + nl
+        file_query += "OLD <<<<" + nl
+        file_query += old_content + nl
+        file_query += ">>>> OLD" + nl
+        file_query += "NEW <<<<" + nl
+        file_query += new_content + nl
+        file_query += ">>>> NEW"
+
+        {"new_content": new_content, "file_query": file_query, "old_content": old_content}
+    input:
+      - file_path
+    output:
+      - new_content
+      - file_query
+      - old_content
+    structured_output: true
+    transition: update_file
+
+  - id: update_file
+    type: toolkit
+    tool: update_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_query
+    input_mapping:
+      file_query:
+        type: variable
+        value: file_query
+    output:
+      - update_result
+    structured_output: true
+    transition: verify_update
+
+  - id: verify_update
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - verified_content
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - update_result
+      - verified_content
+      - old_content
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the multiline update_file operation results.
+
+          update result: {update_result}
+          file content after update: {verified_content}
+          old content that should be replaced: {old_content}
+
+          perform the following checks:
+
+          1. verify update executed without errors
+          2. confirm new function signature exists (def hello_world(name: str))
+          3. verify new docstring with args and returns sections present
+          4. check import logging statement added
+          5. confirm logger.info call exists
+          6. verify original docstring was replaced
+          7. confirm other functions (calculate) were preserved
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: cleanup_branch
+
+  - id: cleanup_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+      force:
+        type: fixed
+        value: true
+    output:
+      - create_result
+    structured_output: true
+    continue_on_error: true
+    transition: END

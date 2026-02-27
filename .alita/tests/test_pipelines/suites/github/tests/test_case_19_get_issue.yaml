@@ -1,0 +1,79 @@
+name: "GH19 - Get Issue Details"
+description: "Test get_issue retrieves specific issue details by number"
+priority: High
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  issue_number:
+    type: str
+    value: "163"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_issue
+
+nodes:
+  - id: invoke_get_issue
+    type: toolkit
+    tool: get_issue
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - issue_number
+    input_mapping:
+      issue_number:
+        type: variable
+        value: issue_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - issue_number
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the get_issue operation results.
+
+          tool result: {tool_result}
+          requested issue number: {issue_number}
+
+          perform the following checks:
+
+          1. verify tool executed successfully
+          2. confirm issue details retrieved (has number field)
+          3. verify number matches requested issue
+          4. check has title, body, state fields
+          5. extract key details
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "issue_number": integer or null,
+            "has_required_fields": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

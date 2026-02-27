@@ -1,4 +1,4 @@
-name: "GH11 - Project Issue Workflow"
+name: "GH06 - Project Issue Workflow"
 description: "Test project issue lifecycle: create_issue_on_project, search_project_issues, list_project_issues, update_issue_on_project, comment, close"
 
 toolkits:

@@ -1,4 +1,4 @@
-name: "GH09 - Search Issues"
+name: "GH04 - Search Issues"
 description: "Verify search_issues tool finds matching issues and PRs based on query"
 
 toolkits:

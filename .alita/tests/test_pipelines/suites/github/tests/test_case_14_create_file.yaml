@@ -1,0 +1,196 @@
+name: "GH14 - Create File"
+description: "Test create_file creates new file with specified content on branch"
+priority: Critical
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  target_branch:
+    type: str
+  file_path:
+    type: str
+  file_contents:
+    type: str
+  create_result:
+    type: str
+  read_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
+
+nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+
+        target_branch = f"test/gh19-create-{timestamp}-{random_suffix}"
+        file_path = f"test-data/generated/gh19-file-{timestamp}-{random_suffix}.txt"
+        
+        nl = chr(10)
+        file_contents = f"# file operations test{nl}created at: {timestamp}{nl}random id: {random_suffix}{nl}this file tests create_file functionality."
+
+        {"target_branch": target_branch, "file_path": file_path, "file_contents": file_contents}
+    input: []
+    output:
+      - target_branch
+      - file_path
+      - file_contents
+    structured_output: true
+    transition: create_branch
+
+  - id: create_branch
+    type: toolkit
+    tool: create_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      proposed_branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: set_active_branch
+
+  - id: set_active_branch
+    type: toolkit
+    tool: set_active_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+    output:
+      - create_result
+    structured_output: true
+    transition: create_file
+
+  - id: create_file
+    type: toolkit
+    tool: create_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+      - file_contents
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+      file_contents:
+        type: variable
+        value: file_contents
+    output:
+      - create_result
+    structured_output: true
+    transition: read_file_verify
+
+  - id: read_file_verify
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - read_result
+    structured_output: true
+    continue_on_error: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - create_result
+      - read_result
+      - file_contents
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the create_file operation results.
+
+          create result: {create_result}
+          read result: {read_result}
+          expected contents: {file_contents}
+
+          note: read may fail due to github api propagation delay - this is acceptable.
+
+          perform the following checks:
+
+          1. verify create_file executed (create_result not error)
+          2. if read succeeded, verify content matches expected
+          3. if read succeeded, check all key lines present
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: delete_file
+
+  - id: delete_file
+    type: toolkit
+    tool: delete_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - create_result
+    structured_output: true
+    continue_on_error: true
+    transition: delete_branch
+
+  - id: delete_branch
+    type: toolkit
+    tool: delete_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - target_branch
+    input_mapping:
+      branch_name:
+        type: variable
+        value: target_branch
+      force:
+        type: fixed
+        value: true
+    output:
+      - create_result
+    structured_output: true
+    continue_on_error: true
+    transition: END

@@ -1,0 +1,74 @@
+name: "GH24 - List Files in Branch"
+description: "Test list_files_in_main_branch retrieves file list from main branch"
+priority: High
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  known_file:
+    type: str
+    value: ".gitignore"
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_list_files
+
+nodes:
+  - id: invoke_list_files
+    type: toolkit
+    tool: list_files_in_main_branch
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input: []
+    input_mapping: {}
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - known_file
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the list_files_in_main_branch operation results.
+
+          tool result: {tool_result}
+          known file to check: {known_file}
+
+          perform the following checks:
+
+          1. verify tool executed successfully
+          2. confirm files were found (count > 0)
+          3. check if known file exists in list
+          4. extract sample of files
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "files_count": integer,
+            "has_known_file": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END
