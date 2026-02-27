@@ -1,7 +1,7 @@
 ---
 name: "pr-impact-analyzer"
 description: "Analyze PR changes and generate targeted test matrix for GitHub Actions"
-model: "gpt-5-mini"
+model: "${LLM_MODEL_FOR_CODE_ANALYSIS}"
 temperature: 0.0
 max_tokens: 16000
 mcps:

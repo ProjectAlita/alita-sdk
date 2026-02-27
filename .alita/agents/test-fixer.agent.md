@@ -1,6 +1,6 @@
 ---
 name: test-fixer
-model: "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
+model: "${LLM_MODEL_FOR_CODE_ANALYSIS}"
 temperature: 0.1
 max_tokens: 16000
 toolkit_configs: 

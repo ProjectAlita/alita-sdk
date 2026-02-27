@@ -27,7 +27,7 @@ nodes:
   - id: "verify_basic_types"
     type: "code"
     code:
-      type: fixed
+      type: fixed-test
       value: |
         # Test Case 1: Verify basic primitive types
         # This tests that alita_state is a dict (not a string!)

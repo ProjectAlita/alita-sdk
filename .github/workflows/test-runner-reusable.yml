@@ -296,6 +296,7 @@ jobs:
           export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
           export ENV_NAME="${{ inputs.environment }}"
+          export LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.LLM_MODEL_FOR_CODE_ANALYSIS }}"
           
           # Build the results path first
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json"
@@ -689,6 +690,7 @@ jobs:
           export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
           export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
           export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
+          export LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.LLM_MODEL_FOR_CODE_ANALYSIS }}"
           
           # Build the results path
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"

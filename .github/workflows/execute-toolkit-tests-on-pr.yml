@@ -56,6 +56,7 @@ jobs:
           docker-compose run --rm --name alita-sdk-analyzer alita-sdk \
             sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/pr-impact-analyzer.agent.md --dir . 'Analyze PR $PR_REF'"
         env:
+          LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.LLM_MODEL_FOR_CODE_ANALYSIS }}
           DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_DEV }}
           ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_DEV }}
           PROJECT_ID: ${{ secrets.PROJECT_ID_DEV }}
