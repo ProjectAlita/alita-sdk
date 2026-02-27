@@ -1,4 +1,4 @@
-name: Update Indexer Worker Dependencies
+name: Update SDK Plugin
 
 on:
   workflow_run:
@@ -13,13 +13,13 @@ on:
         type: boolean
         default: false
       target-branch:
-        description: "Target branch in indexer_worker (leave empty to use current branch)"
+        description: "Target branch in sdk_plugin (leave empty to use current branch)"
         required: false
         type: string
         default: ""
 
 jobs:
-  update-dependencies:
+  update-sdk-plugin:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -32,17 +32,14 @@ jobs:
         id: branch
         run: |
           if [ "${{ github.event_name }}" == "workflow_run" ]; then
-            # Use the branch that triggered the PyPI publish workflow
             BRANCH="${{ github.event.workflow_run.head_branch }}"
           elif [ -n "${{ inputs.target-branch }}" ]; then
-            # Use manually specified branch
             BRANCH="${{ inputs.target-branch }}"
           else
-            # Default to current branch
             BRANCH="${{ github.ref_name }}"
           fi
           echo "target_branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "::notice title=Target Branch::Will update indexer_worker on branch: $BRANCH"
+          echo "::notice title=Target Branch::Will update sdk_plugin on branch: $BRANCH"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -65,32 +62,37 @@ jobs:
           VERSION=$(python -c "import build.util; print(build.util.project_wheel_metadata('.').get('Version'))")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      # - name: Install SSH key
-      #   uses: webfactory/ssh-agent@v0.8.0
-      #   with:
-      #     ssh-private-key: ${{ secrets.INDEXER_WORKER_DEPLOYMENT_KEY }}
-
-      - name: Checkout indexer_worker
+      - name: Checkout sdk_plugin
         uses: actions/checkout@v4
         with:
-          repository: ProjectAlita/indexer_worker
-          ssh-key: ${{ secrets.INDEXER_WORKER_DEPLOYMENT_KEY }}
-          path: indexer_worker
+          repository: ProjectAlita/sdk_plugin
+          ssh-key: ${{ secrets.SDK_PLUGIN_DEPLOYMENT_KEY }}
+          path: sdk_plugin
           ref: ${{ steps.branch.outputs.target_branch }}
 
-      - name: Update requirements.txt
+      - name: Update requirements.txt and metadata.json
         run: |
-          cd indexer_worker
-          # Update alita-sdk version
+          cd sdk_plugin
+          # Update alita-sdk version in requirements.txt
           sed -i "s/alita-sdk\[all\]==[0-9.]*/alita-sdk\[all\]==${{ steps.get_version.outputs.version }}/" requirements.txt
+          # Update version in metadata.json
+          python -c "
+          import json
+          with open('metadata.json', 'r') as f:
+              data = json.load(f)
+          data['version'] = '${{ steps.get_version.outputs.version }}'
+          with open('metadata.json', 'w') as f:
+              json.dump(data, f, indent=2)
+              f.write('\n')
+          "
 
       - name: Commit and push changes
         if: github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && inputs.create-pr == false)
         run: |
-          cd indexer_worker
+          cd sdk_plugin
           git config --global user.name 'GitHub Action'
           git config --global user.email 'action@github.com'
-          git add requirements.txt
+          git add requirements.txt metadata.json
           git commit -m "chore: update alita-sdk to version ${{ steps.get_version.outputs.version }}"
           git push
 
@@ -102,15 +104,16 @@ jobs:
           commit-message: "chore: update alita-sdk to version ${{ steps.get_version.outputs.version }}"
           title: "Update alita-sdk to version ${{ steps.get_version.outputs.version }}"
           body: |
-            This PR updates the following dependencies to version ${{ steps.get_version.outputs.version }}:
-            - alita-sdk
+            This PR updates alita-sdk to version ${{ steps.get_version.outputs.version }}:
+            - `requirements.txt`: pip dependency pin
+            - `metadata.json`: plugin version for pylon
 
-            This update was automatically triggered by the release of a new version.
+            Automatically triggered by PyPI release.
             Target branch: ${{ steps.branch.outputs.target_branch }}
-          branch: update-dependencies-${{ steps.branch.outputs.target_branch }}
+          branch: update-sdk-${{ steps.branch.outputs.target_branch }}
           base: ${{ steps.branch.outputs.target_branch }}
           delete-branch: true
-          
+
       - name: Show version bump annotation
         run: |
-          echo "::notice title=Version Bump::Updating sdk version to ${{ steps.get_version.outputs.version }}"
+          echo "::notice title=Version Bump::Updated sdk_plugin to alita-sdk ${{ steps.get_version.outputs.version }}"
