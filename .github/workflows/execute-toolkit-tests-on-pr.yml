@@ -10,6 +10,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  DEFAULT_CODE_ANALYSIS_MODEL: 'eu.anthropic.claude-sonnet-4-6'
 
 jobs:
   configure-matrix:
@@ -56,6 +57,7 @@ jobs:
           docker-compose run --rm --name alita-sdk-analyzer alita-sdk \
             sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/pr-impact-analyzer.agent.md --dir . 'Analyze PR $PR_REF'"
         env:
+          DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS || env.DEFAULT_CODE_ANALYSIS_MODEL }}
           DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
           ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_STAGE }}
           PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}

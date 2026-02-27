@@ -32,6 +32,7 @@ services:
       - TESTRAIL_PASSWORD=${TESTRAIL_PASSWORD:-}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
       - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-5-mini}
+      - DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS=${DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS:-eu.anthropic.claude-sonnet-4-6}
       - SANDBOX_BASE=/app/
       - DENO_DIR=/app/
       - PYTHONPATH=/app
