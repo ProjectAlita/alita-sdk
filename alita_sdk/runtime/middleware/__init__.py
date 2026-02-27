@@ -6,9 +6,11 @@ Middleware provides modular extensions for agents, including:
 - System prompt modifications
 - State restoration on conversation resume
 - Callbacks for UI/CLI integration
+- Context management (summarization)
 
 Available middleware:
 - PlanningMiddleware: Task planning and progress tracking
+- SummarizationMiddleware: Automatic context compression when token limits approached
 - ToolExceptionHandlerMiddleware: Smart tool error handling with strategies
 
 Available strategies (for ToolExceptionHandlerMiddleware):
@@ -23,10 +25,8 @@ Available strategies (for ToolExceptionHandlerMiddleware):
 Usage:
     from alita_sdk.runtime.middleware import (
         PlanningMiddleware,
+        SummarizationMiddleware,
         ToolExceptionHandlerMiddleware,
-        TransformErrorStrategy,
-        CircuitBreakerStrategy,
-        LoggingStrategy,
         MiddlewareManager
     )
 
@@ -36,24 +36,23 @@ Usage:
         connection_string="postgresql://...",
     )
 
+    # Create summarization middleware (compresses old messages)
+    summarization = SummarizationMiddleware(
+        model=llm,  # BaseChatModel instance
+        trigger=("tokens", 50000),
+        keep=("messages", 10),
+    )
+
     # Create error handler with default strategies (recommended)
     error_handler = ToolExceptionHandlerMiddleware.create_default(
         llm=llm,
         threshold=3
     )
 
-    # Or create with explicit strategies
-    error_handler = ToolExceptionHandlerMiddleware(
-        strategies=[
-            LoggingStrategy(),
-            CircuitBreakerStrategy(threshold=3),
-            TransformErrorStrategy(llm=llm, use_llm=True)
-        ]
-    )
-
     # Use with MiddlewareManager for multiple middleware
     manager = MiddlewareManager()
     manager.add(planning)
+    manager.add(summarization)
     manager.add(error_handler)
 
     # Get tools and prompts
@@ -61,8 +60,12 @@ Usage:
     prompt = manager.get_combined_prompt()
 """
 
-from .base import Middleware, MiddlewareManager
+from .base import (
+    Middleware,
+    MiddlewareManager,
+)
 from .planning import PlanningMiddleware
+from .summarization import SummarizationMiddleware
 from .tool_exception_handler import ToolExceptionHandlerMiddleware
 from .strategies import (
     ExceptionHandlerStrategy,
@@ -77,6 +80,7 @@ __all__ = [
     "Middleware",
     "MiddlewareManager",
     "PlanningMiddleware",
+    "SummarizationMiddleware",
     "ToolExceptionHandlerMiddleware",
     # Strategies
     "ExceptionHandlerStrategy",

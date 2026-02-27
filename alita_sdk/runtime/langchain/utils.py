@@ -200,6 +200,8 @@ def create_state(data: Optional[dict] = None):
 
     state_dict["state_types"] = types_dict  # Default value for state_types
     types_dict["state_types"] = dict
+    # Add context_info for context management tracking (unified format with summarization)
+    state_dict["context_info"] = Optional[dict]
     logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 

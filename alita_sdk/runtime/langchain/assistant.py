@@ -493,7 +493,8 @@ class Assistant:
             lazy_tools_mode=self.lazy_tools_mode,
             alita_client=self.alita_client,
             steps_limit=self.max_iterations,
-            always_bind_tools=self._always_bind_tools  # Middleware tools always bound directly
+            always_bind_tools=self._always_bind_tools,  # Middleware tools always bound directly
+            middleware_manager=self.middleware_manager,  # Pass middleware for before_model hooks
         )
 
         return agent
@@ -512,7 +513,8 @@ class Assistant:
             steps_limit=self.max_iterations,
             for_subgraph=self.is_subgraph,  # Pass for_subgraph flag to filter PrinterNodes
             lazy_tools_mode=self.lazy_tools_mode,
-            always_bind_tools=self._always_bind_tools  # Middleware tools always bound directly
+            always_bind_tools=self._always_bind_tools,  # Middleware tools always bound directly
+            middleware_manager=self.middleware_manager,  # Pass middleware for before_model hooks
         )
         #
         return agent
