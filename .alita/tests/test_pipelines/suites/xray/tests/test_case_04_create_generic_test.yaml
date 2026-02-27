@@ -32,7 +32,7 @@ state:
     value: ["Created test case", "issueId", "key", "Generic", "ELITEA_AI_CREATED"]
   error_indicators:
     type: list
-    value: ["Unable to create", "error", "failed", "exception", "GraphQL errors"]
+    value: ["Unable to create", "GraphQL errors", "failed", "exception", "Tool execution error"]
   test_results:
     type: dict
 

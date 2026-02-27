@@ -143,6 +143,7 @@ nodes:
     model: gpt-4o-2024-11-20
     input:
       - tool_result
+      - nested_file_path
     input_mapping:
       system:
         type: fixed
@@ -154,17 +155,19 @@ nodes:
 
           tool executed: list_folders
           results: {tool_result}
+          created nested file path: {nested_file_path}
 
           expected behavior:
           - tool executes successfully without errors
           - returns list of directories/folders only (no files)
-          - output includes 'test-folders' directory created earlier
+          - output includes the parent directory from the nested_file_path (extract the first path component before '/')
 
           evaluate:
           1. did the tool execute successfully?
           2. are there any errors?
           3. does the output contain a list of directories?
-          4. are directory paths properly formatted?
+          4. does the output include the expected directory (first component of nested_file_path)?
+          5. are directory paths properly formatted?
 
           return a json object with:
           {{

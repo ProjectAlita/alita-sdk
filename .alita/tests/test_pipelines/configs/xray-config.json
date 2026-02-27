@@ -4,7 +4,7 @@
   "id": 1,
   "xray_configuration": {
     "alita_title": "xray_cloud",
-    "private": true
+    "private": false
   },
   "selected_tools": [
     "get_tests",

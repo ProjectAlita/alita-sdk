@@ -54,6 +54,7 @@ from seed_pipelines import (
 
 # Reuse shared utilities from utils_common.py
 from utils_common import (
+    load_from_env,
     load_token_from_env,
     load_base_url_from_env,
     load_project_id_from_env,
@@ -103,7 +104,7 @@ class MetadataCollectingCallback(BaseCallbackHandler):
         super().__init__()
 
         # Attributes required for compatibility (referenced in callback methods)
-        self.current_model: str = 'gpt-4o'  # Default model name
+        self.current_model: str = load_from_env('DEFAULT_LLM_MODEL') or 'gpt-5-mini'  # Default model name
         self.step_counter: int = 0  # Step counter for execution tracking
 
         # Data collection (backend-compatible format)
@@ -686,7 +687,7 @@ class IsolatedPipelineTestRunner:
             self.alita_client = create_alita_client()
         return self.alita_client
 
-    def _get_llm(self, model: str = 'gpt-4o-2024-11-20', temperature: float = 0.0, max_tokens: int = 4096):
+    def _get_llm(self, model: str = 'gpt-5-mini', temperature: float = 0.0, max_tokens: int = 4096):
         """
         Get LLM from AlitaClient or return pre-created instance.
 
@@ -909,7 +910,7 @@ class IsolatedPipelineTestRunner:
             logger.info("No toolkit tools (test uses only code/llm nodes)")
 
         # Extract model from YAML if specified in nodes
-        model_name = 'gpt-4o-2024-11-20'  # default
+        model_name = 'gpt-5-mini'  # default
         # try:
         #     yaml_dict = yaml.safe_load(yaml_schema)
         #     if isinstance(yaml_dict, dict) and 'nodes' in yaml_dict:

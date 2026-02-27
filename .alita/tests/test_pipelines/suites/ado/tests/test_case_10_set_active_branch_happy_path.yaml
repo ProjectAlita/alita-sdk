@@ -81,11 +81,13 @@ nodes:
           File Read: {verification_file}
 
           Validation Criteria (ALL must pass):
-          1. tool_executed: set_active_branch result is "Switched to branch ActiveBranchTest"
-          2. branch_confirmed: set_active_branch output mentions '{branch_name}'
-          3. file_read_success: read_file returned content
+          1. tool_executed: set_active_branch result contains "Switched to branch" and mentions '{branch_name}' (branch name may be wrapped in backticks like `{branch_name}`)
+          2. branch_confirmed: set_active_branch output mentions '{branch_name}' (with or without backticks)
+          3. file_read_success: read_file returned content (not empty, not null, not error)
           4. active_branch_working: read_file used the active branch (no 'branch not found' error)
           5. no_error: Neither output contains 'error', 'failed', 'exception', 'not found'
+          
+          IMPORTANT: The set_active_branch tool returns "Switched to branch `BranchName`" with backticks - this is CORRECT and should pass validation.
 
           Return a JSON object with structure:
           {{

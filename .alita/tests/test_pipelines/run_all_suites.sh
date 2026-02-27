@@ -341,9 +341,11 @@ run_suite() {
         return 1
     fi
 
-    # Create copy for bug reporter
+    # Create copy for bug reporter + errors-only view for test-fixer agent
     if [ -f "$results_file" ]; then
         cp "$results_file" "${suite_output_dir}/results_for_bug_reporter.json"
+        python scripts/results_errors_only.py "$results_file" "${results_file%.json}_errors_only.json" 2>/dev/null || true
+        cp "${results_file%.json}_errors_only.json" "${suite_output_dir}/results_errors_only_for_bug_reporter.json" 2>/dev/null || true
     fi
 
     # Step 4: Cleanup
@@ -486,9 +488,11 @@ run_suite_local() {
         fi
     fi
 
-    # Create copy for bug reporter
+    # Create copy for bug reporter + errors-only view for test-fixer agent
     if [ -f "$results_file" ]; then
         cp "$results_file" "${suite_output_dir}/results_for_bug_reporter.json"
+        python scripts/results_errors_only.py "$results_file" "${results_file%.json}_errors_only.json" 2>/dev/null || true
+        cp "${results_file%.json}_errors_only.json" "${suite_output_dir}/results_errors_only_for_bug_reporter.json" 2>/dev/null || true
     fi
 
     # Step 3: Cleanup (with --local flag)

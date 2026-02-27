@@ -11,7 +11,7 @@ description: |
 
 env_mapping:
   toolkit_config: ${QTEST_CONFIG_PATH:../../configs/qtest-config.json}
-  base_url: ${QTEST_BASE_URL:https://alita.qtestnet.com}
+  qtest_base_url: ${QTEST_BASE_URL:https://alita.qtestnet.com}
   qtest_api_token: ${QTEST_API_TOKEN}
   qtest_project_id: ${QTEST_PROJECT_ID:154314}
   qtest_requirement_id: ${QTEST_REQUIREMENT_ID:RQ-1}
@@ -35,7 +35,9 @@ setup:
       toolkit_name: ${QTEST_TOOLKIT_NAME:qtest-testing}
       overrides:
         qtest_configuration:
-          qtest_project_id: ${QTEST_PROJECT_ID:154314}
+          private: false
+          alita_title: ${QTEST_SECRET_NAME:qtest}
+        qtest_project_id: ${QTEST_PROJECT_ID:154314}
     save_to_env:
       - key: QTEST_TOOLKIT_ID
         value: $.id
@@ -71,15 +73,15 @@ cleanup:
       pattern: "QT*"
     continue_on_error: true
 
-  - name: Delete Created Test Cases
-    type: custom
-    script: |
-      # Cleanup created test cases if they exist in state
-      if [ -n "$CREATED_TEST_QT_ID" ]; then
-        echo "Cleaning up test case: $CREATED_TEST_QT_ID"
-        # The delete_test_case tool will be called during pipeline cleanup
-      fi
-    continue_on_error: true
+  # - name: Delete Created Test Cases
+  #   type: custom
+  #   script: |
+  #     # Cleanup created test cases if they exist in state
+  #     if [ -n "$CREATED_TEST_QT_ID" ]; then
+  #       echo "Cleaning up test case: $CREATED_TEST_QT_ID"
+  #       # The delete_test_case tool will be called during pipeline cleanup
+  #     fi
+  #   continue_on_error: true
 
   - name: Delete QTest Toolkit
     type: toolkit

@@ -9,7 +9,7 @@ description: |
   - Returns list of test runs (if any exist)
   - Response contains test run fields (Id, Name, Status)
   - Handles test cases with no runs gracefully
-  - No error indicators in output
+  - No error indicators in output (excluding Status field values)
 
 toolkits:
   - id: ${QTEST_TOOLKIT_ID}
@@ -32,7 +32,7 @@ state:
     value: ["test runs", "TR-", "Id", "Name"]
   error_indicators:
     type: list
-    value: ["error", "failed", "exception"]
+    value: ["error", "exception"]
   test_results:
     type: dict
 
@@ -136,9 +136,13 @@ nodes:
 
           This is a POSITIVE test - we expect successful execution.
 
+          IMPORTANT: The word "Failed" or "Passed" appearing as a STATUS FIELD VALUE 
+          in test run data is NOT an error - it's valid test execution status.
+          Only flag actual error messages like "error", "exception", "failed to execute".
+
           Validation Criteria (ALL must pass for test_passed=true):
           1. tool_executed: Tool ran without throwing an exception
-          2. no_errors: Output does NOT contain error indicators
+          2. no_errors: Output does NOT contain actual error indicators (error, exception)
           3. has_valid_response: Response structure is valid (list or JSON)
           4. graceful_handling: Empty results are handled gracefully (not an error)
           5. mentions_defects_hint: Response mentions how to find defects via test runs

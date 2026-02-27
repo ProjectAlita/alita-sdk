@@ -31,12 +31,16 @@ services:
       - QTEST_API_TOKEN=${QTEST_API_TOKEN:-}
       - TESTRAIL_PASSWORD=${TESTRAIL_PASSWORD:-}
       - PGVECTOR_CONNECTION_STRING=postgresql://postgres:yourpassword@pgvector-db:5432/postgres
-      - DEFAULT_LLM_MODEL=gpt-4o-2024-11-20
+      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-5-mini}
       - SANDBOX_BASE=/app/
       - DENO_DIR=/app/
       - PYTHONPATH=/app
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
+      - RP_ENABLED=${RP_ENABLED:-false}                             
+      - RP_ENDPOINT=${RP_ENDPOINT:-https://tms.onetest.ai/api/receiver}
+      - RP_PROJECT=${RP_PROJECT:-}
+      - RP_API_KEY=${RP_API_KEY:-}
     volumes:
       - ./.alita:/app/.alita
       - ./alita_sdk:/app/alita_sdk

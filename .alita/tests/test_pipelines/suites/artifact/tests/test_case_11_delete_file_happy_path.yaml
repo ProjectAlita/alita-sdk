@@ -165,14 +165,16 @@ nodes:
           Read after delete: {read_after_result}
           
           Expected behavior:
-          - File must be readable before deletion (read_before_result should NOT contain errors)
-          - Delete operation must succeed (delete_result should indicate success)
-          - File must NOT be readable after deletion (read_after_result MUST contain error/not found)
+          - File must be readable before deletion (read_before_result should NOT contain "not found")
+          - Delete operation must succeed (delete_result should contain "deleted successfully")
+          - File must NOT be readable after deletion: read_after_result MUST contain "not found" OR "does not exist" OR "no such file" OR "404" OR "error" — a plain string like "File 'xxx' not found." counts as the expected not-found indicator
+          
+          IMPORTANT: The readFile tool returns a plain string "File 'filename' not found." when a file does not exist. This string IS the expected error indicator — it is NOT an empty or missing response. If read_after_result contains "not found", the deletion is confirmed.
           
           Evaluate:
-          1. Was the file accessible before deletion?
-          2. Did the delete operation succeed?
-          3. Is the file inaccessible after deletion (read returns error)?
+          1. Was the file accessible before deletion (read_before_result has actual content, not "not found")?
+          2. Did the delete operation succeed (delete_result contains "deleted successfully")?
+          3. Is the file inaccessible after deletion (read_after_result contains "not found" or similar indicator)?
           4. Are there any unexpected errors?
           
           Return a JSON object with:

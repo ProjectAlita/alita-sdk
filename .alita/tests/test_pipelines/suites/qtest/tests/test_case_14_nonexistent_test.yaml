@@ -5,9 +5,9 @@ description: |
   Objective: Test error handling when querying a test case ID that doesn't exist
 
   Expected Behavior (NEGATIVE TEST):
-  - Tool returns error for non-existent test case
-  - Error message mentions test case not found
-  - Proper error handling without crashing
+  - Tool returns empty result for non-existent test case
+  - Response indicates 0 test cases found
+  - Proper handling without crashing
   - No test case data is returned
 
 toolkits:
@@ -23,9 +23,9 @@ state:
     value: "TC-999999999"
   find_result:
     type: str
-  expected_error_indicators:
+  empty_result_indicators:
     type: list
-    value: ["not found", "does not exist", "error", "failed", "Unable to find"]
+    value: ["Found 0", "[]", "empty"]
   unexpected_success_indicators:
     type: list
     value: ["QTest Id", "Name", "Description", "Steps"]
@@ -54,7 +54,7 @@ nodes:
     input:
       - find_result
       - nonexistent_test_id
-      - expected_error_indicators
+      - empty_result_indicators
       - unexpected_success_indicators
     input_mapping:
       chat_history:
@@ -68,29 +68,29 @@ nodes:
         value: |
           Analyze the output from the 'find_test_case_by_id' tool execution.
           
-          This is a NEGATIVE test - we EXPECT an error for non-existent test case.
+          This is a NEGATIVE test - we EXPECT an empty result for non-existent test case.
 
           Find Result: {find_result}
           Non-existent Test ID Used: {nonexistent_test_id}
-          Expected Error Indicators: {expected_error_indicators}
+          Empty Result Indicators: {empty_result_indicators}
           Unexpected Success Indicators: {unexpected_success_indicators}
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. tool_executed: Tool was called (even if it returned an error)
-          2. returned_error: Output contains error message
-          3. mentions_not_found: Error message indicates test case was not found
-          4. no_test_data: Output does NOT contain test case data structures
-          5. no_success_indicators: Output does NOT contain success indicators
+          1. tool_executed: Tool was called successfully
+          2. returns_empty_result: Output indicates 0 test cases found or empty list
+          3. no_test_data: Output does NOT contain actual test case data (QTest Id, Name, Description, Steps)
+          4. no_success_indicators: Output does NOT contain test case field data
+          5. graceful_handling: Tool handled non-existent ID gracefully without exception
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (true only if ALL criteria pass - proper error handling),
+            "test_passed": boolean (true only if ALL criteria pass - proper empty result handling),
             "tool_executed": boolean,
-            "returned_error": boolean,
-            "mentions_not_found": boolean,
+            "returns_empty_result": boolean,
             "no_test_data": boolean,
             "no_success_indicators": boolean,
-            "error_indicator_found": "which error indicator was found or 'none'",
+            "graceful_handling": boolean,
+            "empty_indicator_found": "which empty indicator was found or 'none'",
             "unexpected_success_found": "which success indicator was found or 'none' (should be 'none')",
             "error": string | null
           }}

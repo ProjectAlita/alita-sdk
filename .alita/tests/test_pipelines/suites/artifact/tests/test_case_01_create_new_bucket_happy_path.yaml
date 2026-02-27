@@ -30,9 +30,25 @@ state:
   test_results:
     type: dict
 
-entry_point: create_bucket
+entry_point: generate_bucket_name
 
 nodes:
+  - id: generate_bucket_name
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+        bucket_name = f"test-bucket-{int(time.time())}-{suffix}"
+        {"bucket_name": bucket_name}
+    output:
+      - bucket_name
+    structured_output: true
+    transition: create_bucket
+
   - id: create_bucket
     type: toolkit
     tool: createNewBucket

@@ -95,7 +95,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: create_issue
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: extract_issue_number
 
 
@@ -141,7 +141,7 @@ nodes:
       - issues_list
     structured_output: true
     tool: get_issues
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_list_issues
     
   - id: validate_list_issues
@@ -195,7 +195,7 @@ nodes:
       - issue_details
     structured_output: true
     tool: get_issue
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_get_issue
 
 
@@ -255,7 +255,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: comment_on_issue
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_plain_comment
   - id: validate_plain_comment
     type: llm
@@ -304,7 +304,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: comment_on_issue
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_code_comment
 
   - id: validate_code_comment
@@ -354,7 +354,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: comment_on_issue
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_markdown_comment
   - id: validate_markdown_comment
     type: llm

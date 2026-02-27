@@ -55,6 +55,11 @@ on:
         required: false
         type: boolean
         default: false
+      enable_rp_reporting:
+        description: 'Enable ReportPortal/OneTest reporting (sends test results to TMS)'
+        required: false
+        type: boolean
+        default: false
       
 jobs:
   configure-matrix:
@@ -120,4 +125,5 @@ jobs:
       environment: ${{ github.event.inputs.environment }}
       enable_parallel: ${{ inputs.enable_parallel }}
       enable_bug_reporting: ${{ inputs.enable_bug_reporting }}
+      enable_rp_reporting: ${{ inputs.enable_rp_reporting }}
     secrets: inherit

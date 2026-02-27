@@ -62,9 +62,9 @@ from logger import TestLogger
 DEFAULT_BASE_URL = "http://192.168.68.115"
 DEFAULT_PROJECT_ID = 2
 DEFAULT_LLM_SETTINGS = {
-    "model_name": "gpt-4o-2024-11-20",
-    "temperature": 0.5,
-    "max_tokens": 4096,
+    "model_name": "gpt-5-mini",
+    "temperature": 0.2,
+    "max_tokens": 16000,
 }
 
 
@@ -859,8 +859,8 @@ def main():
     )
     parser.add_argument(
         "--model-name",
-        default="gpt-4o-2024-11-20",
-        help="LLM model name (default: gpt-4o-2024-11-20)",
+        default=load_from_env("DEFAULT_LLM_MODEL") or "gpt-5-mini",
+        help="LLM model name (default: gpt-5-mini)",
     )
     parser.add_argument(
         "--temperature",

@@ -56,23 +56,24 @@ nodes:
 
           Tool Result: {tool_result}
 
-          This tool retrieves attachment metadata and content (NOT image descriptions).
-          
+          This tool extracts text content from attachments on a Jira issue.
+          IMPORTANT: Only text-parsable attachments (e.g. .txt, .md, .csv) will have non-empty content.
+          Binary files such as images (.png, .jpg, .gif) are NOT parsable without an LLM and will have
+          empty content arrays (e.g. content: ['']). This is correct and expected behavior.
+
           Perform the following checks:
-          1. Confirm the tool executed successfully (result is not empty or null).
-          2. If attachments exist, result should contain attachment metadata such as:
-             - filename or file information
-             - content or base64 data
-             - size, mime type, or content type information
-          3. Empty list or "no attachments" message is acceptable if issue has no attachments.
-          4. This tool does NOT process images with LLM descriptions (that's a different tool's job).
+          1. Confirm the tool executed successfully — result is not an error message.
+          2. If attachments are listed, each entry must have a "filename" field. This is sufficient.
+          3. Content may be empty ('') for binary/image files — this is VALID and must NOT cause failure.
+          4. Text-based files (e.g. README.md) should have non-empty content if present.
+          5. No size, mime-type, or base64 data is expected — the tool does not return these fields.
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean (true if tool executed and returned valid attachment data or empty list),
+            "test_passed": boolean (true if tool executed without error and returned attachment entries with filenames),
             "summary": "brief description of outcome",
-            "error": "error details if failed, null if passed"
+            "error": "error details if the tool returned an error or no attachment entries at all, null otherwise"
           }}
 
           Return **ONLY** the JSON object. No markdown, no additional text.

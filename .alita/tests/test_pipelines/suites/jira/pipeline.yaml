@@ -23,7 +23,7 @@ setup:
       toolkit_type: jira
       overrides:
         jira_configuration:
-          private: true
+          private: false
           alita_title: ${JIRA_SECRET_NAME:jira}
       toolkit_name: ${JIRA_TOOLKIT_NAME:testing-jira}
     save_to_env:

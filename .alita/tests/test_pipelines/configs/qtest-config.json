@@ -4,7 +4,7 @@
   "id": 1,
   "qtest_configuration": {
     "alita_title": "qtest",
-    "private": true
+    "private": false
   },
   "qtest_project_id": 1,
   "selected_tools": [

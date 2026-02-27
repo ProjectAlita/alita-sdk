@@ -31,9 +31,15 @@ state:
     type: dict
   tool_result:
     type: str
+  trimmed_branch_data:
+    type: dict
+  trimmed_dir_file:
+    type: dict
   validation_results:
     type: dict
+
 entry_point: list_files_in_branch
+
 nodes:
   - id: list_files_in_branch
     type: toolkit
@@ -43,52 +49,36 @@ nodes:
       - files_in_branch
     structured_output: true
     tool: list_files_in_main_branch
-    toolkit_name: testing
-    transition: validate_branch_files
-  - id: validate_branch_files
-    type: llm
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    transition: trim_branch_files
+
+  - id: trim_branch_files
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        raw = alita_state.get("files_in_branch", "")
+        known = alita_state.get("known_file", ".gitignore")
+        files = []
+        try:
+            if isinstance(raw, list):
+                files = raw
+            elif isinstance(raw, str):
+                files = json.loads(raw)
+        except Exception:
+            pass
+        file_paths = [f if isinstance(f, str) else str(f) for f in files]
+        data = {"list_branch_files": len(file_paths) > 0, "branch_files_count": len(file_paths), "has_known_file": known in file_paths, "branch_files_sample": file_paths[:10]}
+        {"trimmed_branch_data": data}
     input:
       - files_in_branch
       - known_file
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a quality assurance validator.
-      task:
-        type: fstring
-        value: |
-          Analyze the output from the 'list_files_in_main_branch' tool.
-
-          Tool Result: {files_in_branch}
-          Known File to Check: {known_file}
-
-          Perform the following checks:
-
-          1. Confirm the tool executed successfully (the result is not empty or null).
-          2. Determine if any files were found (files count > 0).
-          3. Check if the known file '{known_file}' exists in the list.
-          4. Extract the first 10 file paths as a sample.
-
-          Return a JSON object named validation_results with the following structure:
-
-          {{
-            "list_branch_files": boolean (true if files were found),
-            "branch_files_count": integer (total number of files),
-            "has_known_file": boolean (true if known file is in the list),
-            "branch_files_sample": list of strings (first 10 file paths)
-          }}
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the `validation_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
-    model: gpt-4o
     output:
-      - validation_results
+      - trimmed_branch_data
     structured_output: true
-    structured_output_dict:
-      validation_results: dict
     transition: get_files_from_directory
+
   - id: get_files_from_directory
     type: toolkit
     input:
@@ -101,63 +91,55 @@ nodes:
       - files_in_directory
     structured_output: true
     tool: get_files_from_directory
-    toolkit_name: testing
-    transition: validate_directory_files
-  - id: validate_directory_files
-    type: llm
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    transition: trim_dir_and_pick_file
+
+  - id: trim_dir_and_pick_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        raw = alita_state.get("files_in_directory", "")
+        dir_path = alita_state.get("directory_path", "test-data")
+        branch_data = alita_state.get("trimmed_branch_data", {})
+        files = []
+        try:
+            if isinstance(raw, list):
+                files = raw
+            elif isinstance(raw, str):
+                files = json.loads(raw)
+        except Exception:
+            pass
+        file_paths = [f if isinstance(f, str) else str(f) for f in files]
+        file_to_read = None
+        for fp in file_paths:
+            if fp.endswith(".txt") or fp.endswith(".md"):
+                file_to_read = fp
+                break
+        if file_to_read is None and file_paths:
+            file_to_read = file_paths[0]
+        vr = {
+            "list_branch_files": branch_data.get("list_branch_files", False),
+            "branch_files_count": branch_data.get("branch_files_count", 0),
+            "has_known_file": branch_data.get("has_known_file", False),
+            "branch_files_sample": branch_data.get("branch_files_sample", []),
+            "list_dir_files": len(file_paths) > 0,
+            "dir_files_count": len(file_paths),
+            "dir_files_sample": file_paths[:10],
+            "directory_path": dir_path
+        }
+        {"validation_results": vr, "file_to_read": file_to_read}
     input:
       - files_in_directory
       - directory_path
-      - validation_results
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a quality assurance validator.
-      task:
-        type: fstring
-        value: |
-          Analyze the output from the 'get_files_from_directory' tool.
-
-          Tool Result: {files_in_directory}
-          Directory Path: {directory_path}
-          Previous Validation Results: {validation_results}
-
-          Perform the following tasks:
-
-          1. Confirm the tool executed successfully and files were found.
-          2. Count the number of files returned.
-          3. Extract the first 10 file paths as a sample.
-          4. Pick a file to read: prefer files ending with '.txt' or '.md', otherwise pick the first file.
-
-          Return a JSON object with the following structure:
-
-          {{
-            "validation_results": {{
-              "list_branch_files": boolean (from previous results),
-              "branch_files_count": integer (from previous results),
-              "has_known_file": boolean (from previous results),
-              "branch_files_sample": list (from previous results),
-              "list_dir_files": boolean (true if directory files were found),
-              "dir_files_count": integer (total number of files in directory),
-              "dir_files_sample": list of strings (first 10 file paths),
-              "directory_path": string (the directory path checked)
-            }},
-            "file_to_read": string (the selected file path to read, or null if no files found)
-          }}
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the JSON object with both validation_results and file_to_read. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
-    model: gpt-4o
+      - trimmed_branch_data
     output:
       - validation_results
       - file_to_read
     structured_output: true
-    structured_output_dict:
-      file_to_read: str
-      validation_results: dict
     transition: read_known_file
+
   - id: read_known_file
     type: toolkit
     input:
@@ -170,62 +152,39 @@ nodes:
       - file_content
     structured_output: true
     tool: read_file
-    toolkit_name: testing
-    transition: validate_known_file
-  - id: validate_known_file
-    type: llm
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    transition: trim_known_file
+
+  - id: trim_known_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        content = alita_state.get("file_content", "")
+        expected = alita_state.get("expected_content", "")
+        prev = alita_state.get("validation_results", {})
+        if isinstance(content, str):
+            has_content = len(content) > 0
+            has_expected = expected in content
+            content_len = len(content)
+        else:
+            has_content = False
+            has_expected = False
+            content_len = 0
+        updated = dict(prev) if isinstance(prev, dict) else {}
+        updated["read_known_file"] = has_content
+        updated["known_file_has_expected"] = has_expected
+        updated["known_file_length"] = content_len
+        {"validation_results": updated}
     input:
       - file_content
-      - known_file
       - expected_content
       - validation_results
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a quality assurance validator.
-      task:
-        type: fstring
-        value: |
-          Analyze the output from the 'read_file' tool for the known file.
-
-          File Content: {file_content}
-          Known File: {known_file}
-          Expected Content: {expected_content}
-          Previous Validation Results: {validation_results}
-
-          Perform the following checks:
-
-          1. Confirm the file was read successfully (content is not empty).
-          2. Check if the expected content '{expected_content}' appears in the file.
-          3. Determine the length of the file content.
-
-          Return a JSON object named validation_results that merges with the previous validation results and adds:
-
-          {{
-            "list_branch_files": boolean (from previous results),
-            "branch_files_count": integer (from previous results),
-            "has_known_file": boolean (from previous results),
-            "branch_files_sample": list (from previous results),
-            "list_dir_files": boolean (from previous results),
-            "dir_files_count": integer (from previous results),
-            "dir_files_sample": list (from previous results),
-            "directory_path": string (from previous results),
-            "read_known_file": boolean (true if file was read successfully and has content),
-            "known_file_has_expected": boolean (true if expected content found in file),
-            "known_file_length": integer (length of file content)
-          }}
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the `validation_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
-    model: gpt-4o
     output:
       - validation_results
     structured_output: true
-    structured_output_dict:
-      validation_results: dict
     transition: read_directory_file
+
   - id: read_directory_file
     type: toolkit
     input:
@@ -238,14 +197,40 @@ nodes:
       - file_content
     structured_output: true
     tool: read_file
-    toolkit_name: testing
-    transition: process_results
-  - id: process_results
-    type: llm
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    transition: trim_dir_file
+
+  - id: trim_dir_file
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        content = alita_state.get("file_content", "")
+        file_path = alita_state.get("file_to_read", "")
+        prev = alita_state.get("validation_results", {})
+        dir_file_len = len(content) if isinstance(content, str) else 0
+        dir_file_read = dir_file_len > 0
+        summary = {
+            "validation_results": prev,
+            "dir_file_path": file_path,
+            "dir_file_length": dir_file_len,
+            "dir_file_read": dir_file_read
+        }
+        {"trimmed_dir_file": summary}
     input:
       - file_content
       - file_to_read
       - validation_results
+    output:
+      - trimmed_dir_file
+    structured_output: true
+    transition: process_results
+
+  - id: process_results
+    type: llm
+    input:
+      - trimmed_dir_file
     input_mapping:
       chat_history:
         type: fixed
@@ -256,36 +241,44 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the final results from the file reading workflow.
+          Analyze the pre-processed results from the file reading workflow.
 
-          Directory File Content: {file_content}
-          Directory File Path: {file_to_read}
-          Validation Results: {validation_results}
+          Summary Data: {trimmed_dir_file}
 
-          Perform the following tasks:
+          The summary contains:
+          - validation_results.list_branch_files: bool
+          - validation_results.branch_files_count: int
+          - validation_results.has_known_file: bool
+          - validation_results.list_dir_files: bool
+          - validation_results.dir_files_count: int
+          - validation_results.read_known_file: bool
+          - validation_results.known_file_has_expected: bool
+          - validation_results.known_file_length: int
+          - dir_file_path: string
+          - dir_file_length: int
+          - dir_file_read: bool
 
-          1. Validate that the directory file was read successfully (content is not empty).
-          2. Determine the length of the directory file content.
-          3. Evaluate overall test success:
-             - Test passes if: list_files_in_main_branch succeeded AND read_known_file succeeded
-             - Directory operations are bonus (may fail if test-data doesn't exist)
+          Test passes if: list_branch_files is true AND read_known_file is true.
+          Directory operations are bonus (may fail if test-data does not exist).
+
+          Do NOT echo back the full summary. Keep response under 300 tokens.
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean (true if list_branch_files AND read_known_file are both true),
+            "test_passed": boolean (true if validation_results.list_branch_files AND validation_results.read_known_file are both true),
             "operations": {{
-              "list_files_in_main_branch": boolean (from validation_results.list_branch_files),
-              "get_files_from_directory": boolean (from validation_results.list_dir_files),
-              "read_known_file": boolean (from validation_results.read_known_file),
-              "read_directory_file": boolean (true if directory file was read successfully)
+              "list_files_in_main_branch": boolean,
+              "get_files_from_directory": boolean,
+              "read_known_file": boolean,
+              "read_directory_file": boolean
             }},
             "details": {{
-              "branch_files_count": integer (from validation_results.branch_files_count),
-              "dir_files_count": integer (from validation_results.dir_files_count),
-              "known_file_length": integer (from validation_results.known_file_length),
-              "dir_file_path": string (the directory file path),
-              "dir_file_length": integer (length of directory file content)
+              "branch_files_count": integer,
+              "dir_files_count": integer,
+              "known_file_length": integer,
+              "dir_file_path": string,
+              "dir_file_length": integer
             }},
             "error": string | null
           }}
@@ -294,7 +287,6 @@ nodes:
     model: gpt-4o
     output:
       - test_results
-    structured_output: false
     structured_output_dict:
       test_results: dict
     transition: END

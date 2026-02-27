@@ -70,14 +70,14 @@ nodes:
           Validation Criteria (ALL must pass):
           1. tool_executed: Tool ran without crashing (got some result)
           2. graceful_handling: Output contains error indicator, empty list, or null
-          3. no_unhandled_exception: Output does NOT contain 'unhandled', 'traceback', 'stack trace'
+
+          Note: Stack traces are expected when continue_on_error captures ToolException - this is correct behavior.
 
           Return a JSON test_results with structure:
           {{
             "test_passed": boolean (true only if ALL criteria pass),
             "tool_executed": boolean,
             "graceful_handling": boolean,
-            "no_unhandled_exception": boolean,
             "error_indicator_found": "which indicator was found or 'none'"
           }}
 

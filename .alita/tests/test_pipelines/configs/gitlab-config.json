@@ -2,7 +2,7 @@
   "repository": "Aliaksei_Breilian/alita-automation",
   "branch": "main",
   "gitlab_configuration": {
-    "private": true,
+    "private": false,
     "alita_title": "gitlab"
   },
   "selected_tools": [

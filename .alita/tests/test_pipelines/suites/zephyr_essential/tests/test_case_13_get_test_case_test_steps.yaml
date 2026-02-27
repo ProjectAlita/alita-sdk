@@ -224,9 +224,11 @@ nodes:
 
           This is a POSITIVE test - we expect successful test step retrieval.
 
+          IMPORTANT: Error indicators must only be checked in the top-level tool response fields (e.g., error messages, status codes, exception text). Do NOT flag error indicators found inside step content fields such as 'description', 'expectedResult', or 'testData' — those are user-defined strings and may legitimately contain words like 'error' or 'exception' as part of the step text.
+
           Validation Criteria (ALL must pass for test_passed=true):
           1. tool_executed: All tools ran and returned results
-          2. no_errors: Output does NOT contain any error indicators
+          2. no_errors: Tool responses do NOT contain error indicators at the response level (ignore step content fields)
           3. testcase_created: Test case was created successfully
           4. testcase_retrieved: Test case was retrieved successfully
           5. steps_created: Test steps were created successfully
@@ -245,7 +247,7 @@ nodes:
             "has_steps": boolean,
             "step_count": number (count of steps found, 0 if none),
             "success_indicator_found": "which indicator was found or 'none'",
-            "error_indicator_found": "which error indicator was found or 'none'",
+            "error_indicator_found": "which error indicator was found at response level or 'none'",
             "error": string | null
           }}
 

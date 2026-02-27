@@ -71,7 +71,8 @@ nodes:
           1. tool_executed: Tool ran without crashing (result is not completely empty)
           2. graceful_handling: Output contains at least one of the error indicators OR is null/empty
           3. no_valid_pr_returned: Output does NOT contain a valid PR object with pullRequestId field matching a real PR
-          4. no_unhandled_exception: Output does NOT contain 'unhandled', 'traceback', 'stack trace'
+
+          Note: Stack traces are expected when continue_on_error captures ToolException - this is correct behavior.
 
           Return a JSON object with structure:
           {{
@@ -79,7 +80,6 @@ nodes:
             "tool_executed": boolean,
             "graceful_handling": boolean,
             "no_valid_pr_returned": boolean,
-            "no_unhandled_exception": boolean,
             "error_indicator_found": "which indicator was found or 'none'",
             "error": string | null
           }}

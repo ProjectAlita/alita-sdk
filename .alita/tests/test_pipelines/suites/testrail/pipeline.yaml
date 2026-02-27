@@ -30,7 +30,7 @@ setup:
       overrides:
         # Credentials must use secret reference format (platform requirement)
         testrail_configuration:
-          private: true
+          private: false
           alita_title: ${TESTRAIL_SECRET_NAME:testrail}
       # Name for the toolkit on platform
       toolkit_name: ${TESTRAIL_TOOLKIT_NAME:testrail-testing}

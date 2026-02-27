@@ -18,7 +18,7 @@ toolkits:
 state:
   file_path:
     type: str
-    value: "/sites/YourSite/Shared Documents/NonExistent_File_12345.txt"
+    value: "/sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles/NonExistent_File_12345.txt"
   document_content:
     type: dict
   test_results:
@@ -40,6 +40,7 @@ nodes:
     output:
       - document_content
     structured_output: true
+    continue_on_error: true
     transition: validate_result
 
   - id: validate_result

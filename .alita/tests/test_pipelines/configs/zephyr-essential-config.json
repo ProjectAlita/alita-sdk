@@ -4,7 +4,7 @@
   "id": 1,
   "zephyr_essential_configuration": {
     "alita_title": "zephyr_essential",
-    "private": true
+    "private": false
   },
   "selected_tools": [
     "list_projects",

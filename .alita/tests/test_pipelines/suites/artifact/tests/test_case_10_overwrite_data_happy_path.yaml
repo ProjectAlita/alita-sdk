@@ -78,7 +78,7 @@ nodes:
     name: overwrite_data
     type: toolkit
     toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
-    tool: overwriteData
+    tool: createFile
     input:
       - filename
       - bucket_name
@@ -134,7 +134,7 @@ nodes:
         value: |
           Analyze the overwrite and read results to verify complete content replacement.
           
-          Tool executed: overwriteData → readFile
+          Tool executed: createFile (overwrite mode) → readFile
           Original content: "This is the original content that will be replaced"
           New content: "This is the completely new content"
           
