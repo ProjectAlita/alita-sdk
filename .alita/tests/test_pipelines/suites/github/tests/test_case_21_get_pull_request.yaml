@@ -1,0 +1,79 @@
+name: "GH21 - Get Pull Request"
+description: "Test get_pull_request retrieves specific PR details by number"
+priority: High
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  pr_number:
+    type: int
+    value: 163
+  tool_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: invoke_get_pr
+
+nodes:
+  - id: invoke_get_pr
+    type: toolkit
+    tool: get_pull_request
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - pr_number
+    input_mapping:
+      pr_number:
+        type: variable
+        value: pr_number
+    output:
+      - tool_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - tool_result
+      - pr_number
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the get_pull_request operation results.
+
+          tool result: {tool_result}
+          requested pr number: {pr_number}
+
+          perform the following checks:
+
+          1. verify tool executed successfully
+          2. confirm pr details retrieved (has number field)
+          3. verify number matches requested pr
+          4. check has title, body, state, head, base fields
+          5. extract key details
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "pr_number": integer or null,
+            "has_required_fields": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

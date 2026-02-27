@@ -20,6 +20,8 @@ from .schemas import (
     GitHubAuthConfig,
     GitHubRepoConfig,
     NoInput,
+    ListBranchesInput,
+    ListPullRequestsInput,
     BranchName,
     CreateBranchName,
     DeleteBranchName,
@@ -1030,6 +1032,9 @@ class GitHubClient(BaseModel):
             add_to_dict(response_dict, "number", int(pr_number))  # Ensure number is an integer
             add_to_dict(response_dict, "body", str(pull.body))
             add_to_dict(response_dict, "pr_url", str(pull.html_url))
+            add_to_dict(response_dict, "state", pull.state)
+            add_to_dict(response_dict, "head", pull.head.ref)
+            add_to_dict(response_dict, "base", pull.base.ref)
 
             comments: List[str] = []
             page = 0
@@ -1291,7 +1296,7 @@ class GitHubClient(BaseModel):
             )
             return f"Created file {file_path}" + (" (copied from artifact)" if filepath else "")
         except Exception as e:
-            return f"Unable to create file due to error:\n{str(e)}"
+            raise ToolException(f"Unable to create file due to error:\n{str(e)}")
 
     def update_file(self, file_query: str, repo_name: Optional[str] = None, commit_message: Optional[str] = None) -> str:
         """Updates a file with new content using OLD/NEW markers and edit_file.
@@ -1574,28 +1579,51 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
 
-    def _read_file(self, file_path: str, branch: str, repo_name: Optional[str] = None, **kwargs) -> str:
+    def _read_file(self, file_path: str, branch: str, repo_name: Optional[str] = None, max_retries: int = 3, retry_delay: float = 0.5, **kwargs) -> str:
         """
-        Read a file from specified branch with optional partial read support.
+        Read a file from specified branch with retry logic for eventual consistency.
         
         Parameters:
             file_path(str): the file path
             branch(str): the branch to read the file from
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            max_retries (int): Number of retry attempts for consistency (default: 3)
+            retry_delay (float): Initial delay between retries in seconds (default: 0.5, exponential backoff)
             **kwargs: Additional parameters (offset, limit, head, tail) - currently ignored,
                      partial read handled client-side by base class methods
 
         Returns:
-            str: The file decoded as a string, or an error message if not found
+            str: The file decoded as a string, or raises ToolException if not found
         """
-        try:
-            # Prefer temporary repo set by update_file, then explicit repo_name
-            effective_repo = getattr(self, "_tmp_repo_for_edit", None) or repo_name
-            repo = self.github_api.get_repo(effective_repo) if effective_repo else self.github_repo_instance
-            file = repo.get_contents(file_path, ref=branch)
-            return file.decoded_content.decode("utf-8")
-        except Exception as e:
-            return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
+        import time
+        
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                # Prefer temporary repo set by update_file, then explicit repo_name
+                effective_repo = getattr(self, "_tmp_repo_for_edit", None) or repo_name
+                repo = self.github_api.get_repo(effective_repo) if effective_repo else self.github_repo_instance
+                file = repo.get_contents(file_path, ref=branch)
+                file_content = file.decoded_content.decode("utf-8")
+                
+                # On retry attempts, log success
+                if attempt > 0:
+                    logger.debug(f"Successfully read file '{file_path}' on attempt {attempt + 1}")
+                
+                return file_content
+                
+            except Exception as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    # Exponential backoff: 0.5s, 1.0s, 2.0s, ...
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.debug(f"Read attempt {attempt + 1}/{max_retries} failed for '{file_path}', retrying in {wait_time}s: {e}")
+                    time.sleep(wait_time)
+                    continue
+        
+        # All retries exhausted
+        raise ToolException(f"File not found `{file_path}` on branch `{branch}` after {max_retries} attempts. Error: {str(last_exception)}")
 
     def read_file(self, file_path: str, branch: Optional[str] = None, repo_name: Optional[str] = None) -> str:
         """
@@ -1716,12 +1744,13 @@ class GitHubClient(BaseModel):
         except ImportError as e:
             return f"Error processing code files: {str(e)}"
 
-    def list_branches_in_repo(self, repo_name: Optional[str] = None) -> str:
+    def list_branches_in_repo(self, repo_name: Optional[str] = None, max_count: Optional[int] = 100) -> str:
         """
-        Lists all branches in the repository.
+        Lists branches in the repository.
 
         Parameters:
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            max_count (Optional[int]): Maximum number of branches to return (default: 100, max: 100)
 
         Returns:
             str: JSON string containing a list of branches
@@ -1729,7 +1758,16 @@ class GitHubClient(BaseModel):
         try:
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
             branches = repo.get_branches()
-            branch_list = [{"name": branch.name, "protected": branch.protected} for branch in branches]
+            
+            # Limit the number of branches based on max_count
+            branch_list = []
+            count = 0
+            for branch in branches:
+                if count >= max_count:
+                    break
+                branch_list.append({"name": branch.name, "protected": branch.protected})
+                count += 1
+            
             return branch_list
         except Exception as e:
             return f"Failed to list branches: {str(e)}"
@@ -2023,12 +2061,13 @@ class GitHubClient(BaseModel):
         except Exception as e:
             return f"Failed to get issues: {str(e)}"
 
-    def list_open_pull_requests(self, repo_name: Optional[str] = None) -> str:
+    def list_open_pull_requests(self, repo_name: Optional[str] = None, max_count: Optional[int] = 100) -> str:
         """
-        Lists all open pull requests for a repository.
+        Lists open pull requests for a repository.
 
         Parameters:
             repo_name (Optional[str]): Name of the repository in format 'owner/repo'
+            max_count (Optional[int]): Maximum number of pull requests to return (default: 100, max: 100)
 
         Returns:
             str: A JSON string containing a list of open pull requests and their details
@@ -2037,8 +2076,12 @@ class GitHubClient(BaseModel):
             repo = self.github_api.get_repo(repo_name) if repo_name else self.github_repo_instance
             open_prs = repo.get_pulls(state='open')
 
+            # Limit the number of pull requests based on max_count
             pr_list = []
+            count = 0
             for pr in open_prs:
+                if count >= max_count:
+                    break
                 pr_data = {
                     "number": pr.number,
                     "title": pr.title,
@@ -2051,6 +2094,7 @@ class GitHubClient(BaseModel):
                     "base": pr.base.ref
                 }
                 pr_list.append(pr_data)
+                count += 1
 
             return pr_list
         except Exception as e:
@@ -2326,7 +2370,7 @@ class GitHubClient(BaseModel):
                 "name": "list_open_pull_requests",
                 "mode": "list_open_pull_requests",
                 "description": LIST_PRS_PROMPT,
-                "args_schema": NoInput,
+                "args_schema": ListPullRequestsInput,
             },
             {
                 "ref": self.get_pull_request,
@@ -2396,7 +2440,7 @@ class GitHubClient(BaseModel):
                 "name": "list_branches_in_repo",
                 "mode": "list_branches_in_repo",
                 "description": LIST_BRANCHES_IN_REPO_PROMPT,
-                "args_schema": NoInput,
+                "args_schema": ListBranchesInput,
             },
             {
                 "ref": self.set_active_branch,
