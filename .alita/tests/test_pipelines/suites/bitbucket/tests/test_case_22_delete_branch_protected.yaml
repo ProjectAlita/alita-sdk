@@ -97,7 +97,7 @@ nodes:
           REQUIRED (ALL must pass):
           1. main_deletion_blocked: Deletion of 'main' failed with appropriate error
           2. error_message_appropriate: Error message contains one of the expected error indicators
-          3. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
+          3. no_unhandled_exception: No truly unhandled Python exception occurred. NOTE: The SDK wraps errors in ToolException and includes a formatted 'Stack Trace:' section in the tool output - this is EXPECTED and HANDLED behavior. Set no_unhandled_exception=true if the error was caught and returned as a ToolException (even if the output contains 'Stack Trace:' or 'Traceback'). Only set false if there is evidence of a crash or uncaught exception outside the tool handler.
 
           OPTIONAL (nice to have, but don't fail test if missing):
           - branch_list_retrieved: List of branches was retrieved (may fail due to rate limiting)
