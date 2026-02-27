@@ -22,7 +22,7 @@ state:
     type: str
   expected_success_indicators:
     type: list
-    value: ["id", "name", "module"]
+    value: ["Found", "module", "'id':", "'name':"]
   error_indicators:
     type: list
     value: ["error", "failed", "exception", "Unable to retrieve"]
@@ -74,10 +74,10 @@ nodes:
           TASK: Determine if module retrieval was successful.
 
           SUCCESS CRITERIA:
-          1. At least ONE expected_success_indicator is present in modules_result OR result shows empty list (valid result)
-          2. NONE of the error_indicators are present in modules_result
-          3. The tool executed without raising exceptions
-          4. Module data is present (even if empty, should show structure)
+          1. Output contains "Found" and "module" keywords (SDK returns "Found X module(s):" format)
+          2. Output contains module data structure with 'id': and 'name': keys OR "No modules found" message
+          3. NONE of the error_indicators are present in modules_result
+          4. The tool executed without raising exceptions
 
           Return ONLY a JSON object:
           {{
