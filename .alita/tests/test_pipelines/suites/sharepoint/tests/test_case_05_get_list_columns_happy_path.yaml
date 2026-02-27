@@ -78,15 +78,16 @@ nodes:
           - each column contains name, displayname, columntype, and required fields
           - columntypes include text, number, boolean, datetime, or choice
           - choice columns include choice field with array of valid values
-          - no system or hidden columns in results
+          - system columns (e.g. ContentType, Attachments) may be present and are acceptable
 
           evaluate:
           1. did the tool execute successfully?
           2. are there any error indicators in the output?
           3. is the result an array of column objects?
-          4. do columns contain all expected fields?
+          4. do columns contain all expected fields (name, displayName, columnType, required)?
           5. are columntypes valid (text, number, boolean, datetime, choice)?
           6. for choice fields, is the choice array present?
+          note: system columns such as ContentType and Attachments may be present in results and are acceptable.
 
           return a json object with:
           {{
