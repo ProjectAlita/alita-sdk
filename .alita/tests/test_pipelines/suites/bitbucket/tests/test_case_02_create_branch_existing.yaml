@@ -97,7 +97,7 @@ nodes:
           This is an EDGE CASE test - we expect graceful handling of duplicate branch creation.
 
           Validation Criteria (ALL must pass for test_passed=true):
-          1. tools_executed: All three tools ran and returned results
+          1. tools_executed: Both tools ran and returned results (create_branch and list_branches_in_repo)
           2. duplicate_handled: creation contains duplicate indicator OR sets branch as active
           3. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
           4. branch_exists: Branch appears in the branch list after operations
@@ -121,3 +121,19 @@ nodes:
     structured_output_dict:
       test_results: dict
     transition: cleanup_delete_branch
+
+  - id: cleanup_delete_branch
+    type: toolkit
+    continue_on_error: true
+    input:
+      - branch_name
+    input_mapping:
+      branch_name:
+        type: variable
+        value: branch_name
+    output:
+      - delete_result
+    structured_output: true
+    tool: delete_branch
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+    transition: END
