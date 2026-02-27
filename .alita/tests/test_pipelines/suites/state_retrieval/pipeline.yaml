@@ -23,6 +23,8 @@ execution:
     timeout: 120
     parallel: 1  # Sequential for dependent tests
     stop_on_failure: false
+  substitutions:
+    DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-5-mini}
 
 # Composable pipelines - RCA for failure analysis
 composable_pipelines: []
