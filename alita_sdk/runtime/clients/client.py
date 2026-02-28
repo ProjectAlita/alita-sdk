@@ -1836,7 +1836,7 @@ class AlitaClient:
         import time
         # Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters) instead of custom McpClient
         from ..utils.mcp_adapter import UnifiedMcpClient as McpClient
-        from ..utils.mcp_oauth import canonical_resource
+        from ..utils.mcp_oauth import canonical_resource, substitute_mcp_placeholders
 
         toolkit_name = toolkit_config.get('toolkit_name', 'unknown')
         settings = toolkit_config.get('settings', {})
@@ -1853,6 +1853,16 @@ class AlitaClient:
             }
 
         headers = settings.get('headers') or {}
+
+        # Substitute {{secret.xxx}} placeholders in headers
+        if headers:
+            headers = substitute_mcp_placeholders(headers, user_config={}, client=self)
+
+        # Capture whether the DB-configured headers contain an Authorization header,
+        # before any OAuth token is merged in. Used to distinguish "bad static token"
+        # (should raise ValueError) from "OAuth token needed" (should raise McpAuthorizationRequired).
+        configured_auth = any(k.lower() == 'authorization' for k in headers)
+
         session_id = settings.get('session_id')
 
         # Apply OAuth token if available
@@ -1882,7 +1892,8 @@ class AlitaClient:
                 url=url,
                 session_id=session_id,
                 headers=headers,
-                timeout=60  # Reasonable timeout for connection test
+                timeout=60,  # Reasonable timeout for connection test
+                configured_auth=configured_auth
             )
 
             async with client:
@@ -1940,7 +1951,7 @@ class AlitaClient:
             logger.error(f"[MCP Auth Check] Connection failed to '{toolkit_name}': {str(e)}")
             return {
                 "success": False,
-                "error": f"MCP connection failed: {str(e)}",
+                "error": str(e),
                 "toolkit_config": toolkit_config,
                 "tools": [],
                 "tools_count": 0,

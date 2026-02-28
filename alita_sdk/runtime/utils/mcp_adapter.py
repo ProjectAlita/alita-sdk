@@ -45,7 +45,8 @@ class UnifiedMcpClient:
         headers: Optional[Dict[str, str]] = None,
         timeout: int = 300,
         transport: str = "auto",
-        ssl_verify: bool = True
+        ssl_verify: bool = True,
+        configured_auth: bool = False
     ):
         """
         Initialize the unified MCP client.
@@ -57,6 +58,10 @@ class UnifiedMcpClient:
             timeout: Request timeout in seconds
             transport: Transport type - "auto", "sse", "streamable_http", "stdio"
             ssl_verify: Whether to verify SSL certificates (default: True)
+            configured_auth: True when the Authorization header came from the toolkit's
+                database configuration (not an OAuth token acquired at runtime). When True,
+                a 401 raises ValueError asking the user to fix their credentials instead of
+                triggering the OAuth flow.
         """
         self.url = url
         self.session_id = session_id or str(uuid.uuid4())
@@ -64,6 +69,7 @@ class UnifiedMcpClient:
         self.timeout = timeout
         self.transport = transport
         self.ssl_verify = ssl_verify
+        self.configured_auth = configured_auth
 
         # Internal state
         self._client = None
@@ -113,7 +119,25 @@ class UnifiedMcpClient:
 
         # Create persistent session
         self._session_context = self._client.session(self._server_name)
-        self._session = await self._session_context.__aenter__()
+        try:
+            self._session = await self._session_context.__aenter__()
+        except BaseException as e:
+            # langchain-mcp-adapters uses asyncio.TaskGroup internally, which wraps
+            # exceptions in ExceptionGroup. Unwrap it so callers see the real error.
+            if hasattr(e, 'exceptions') and e.exceptions:
+                inner = e.exceptions[0]
+                inner_str = str(inner).lower()
+                # If auth was configured in DB and the error looks like 401/auth failure,
+                # raise a clear ValueError instead of the raw wrapped exception.
+                if self.configured_auth and any(
+                    kw in inner_str for kw in ['401', 'unauthorized', 'forbidden', '403', 'authentication']
+                ):
+                    raise ValueError(
+                        "Authorization credentials are invalid. "
+                        "Please check the credentials in the toolkit settings."
+                    ) from inner
+                raise inner from e
+            raise
 
         self._detected_transport = detected_transport
         logger.info(f"[Unified MCP] Connected using {detected_transport} transport")
@@ -242,8 +266,10 @@ class UnifiedMcpClient:
                             raise
                     # Not a 401, auth check passed (or server will handle auth differently)
 
-        except McpAuthorizationRequired:
-            # Re-raise McpAuthorizationRequired - this is expected and should propagate
+        except (McpAuthorizationRequired, ValueError):
+            # Re-raise auth-related exceptions so callers can handle them properly:
+            # - McpAuthorizationRequired: triggers the OAuth flow
+            # - ValueError: configured credentials are invalid (user must fix them)
             raise
         except Exception as e:
             # If pre-flight check fails for non-auth reasons, log but don't block
@@ -262,7 +288,8 @@ class UnifiedMcpClient:
             response: aiohttp.ClientResponse with 401 status
 
         Raises:
-            McpAuthorizationRequired: Always, with OAuth metadata
+            ValueError: When configured_auth=True (DB-configured credentials are invalid)
+            McpAuthorizationRequired: When configured_auth=False (OAuth flow needed)
         """
         from ..utils.mcp_oauth import (
             McpAuthorizationRequired,
@@ -275,6 +302,44 @@ class UnifiedMcpClient:
         )
 
         auth_header = response.headers.get('WWW-Authenticate', '')
+
+        # If Authorization was configured in the toolkit's database settings, the credentials
+        # are wrong — never start an OAuth flow, just report the error so the user can fix them.
+        if self.configured_auth:
+            # Default message; try to extract a more specific description from WWW-Authenticate
+            error_desc = "Authorization credentials are invalid or insufficient"
+            auth_lower = auth_header.lower()
+
+            invalid_token_indicators = [
+                'error="invalid_token"',
+                'error=invalid_token',
+                'token is not authorized',
+                'token is expired',
+                'token has expired',
+                'invalid access token',
+                'access token expired',
+                'token invalid',
+            ]
+
+            if any(indicator in auth_lower for indicator in invalid_token_indicators):
+                error_desc = "Token is invalid or has expired"
+
+            if 'error_description="' in auth_header:
+                start = auth_header.index('error_description="') + len('error_description="')
+                end = auth_header.index('"', start)
+                error_desc = auth_header[start:end]
+            elif 'error_description=' in auth_header:
+                parts = auth_header.split('error_description=')
+                if len(parts) > 1:
+                    desc_part = parts[1].split(',')[0].strip(' "')
+                    if desc_part:
+                        error_desc = desc_part
+
+            logger.error(f"[Unified MCP] Authentication failed with configured credentials: {error_desc}")
+            raise ValueError(
+                f"Authorization failed: {error_desc}. "
+                f"Please check the credentials in the toolkit settings."
+            )
         resource_metadata_url = extract_resource_metadata_url(auth_header, self.url)
 
         # First, try authorization_uri from WWW-Authenticate header (preferred)
