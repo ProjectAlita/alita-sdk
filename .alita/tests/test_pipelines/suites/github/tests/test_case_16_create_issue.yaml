@@ -84,9 +84,10 @@ nodes:
 
           perform the following checks:
 
-          1. verify issue was created (result contains issue number)
-          2. extract issue number from result
-          3. confirm no errors in response
+          1. verify issue was created (result contains issue number or "ID:" pattern)
+          2. extract issue number from result (look for "ID:NNN" or "ID: NNN" pattern in string responses)
+          3. confirm no error text in response
+          4. note: tool returns a success string like "Issue created successfully! ID:NNN, URL: ..." - this is the expected format
 
           return a json object with:
           {{
@@ -112,21 +113,26 @@ nodes:
       type: fixed
       value: |
         import json
-        
+        import re
+
         test_results = alita_state.get('test_results', {})
-        issue_number = test_results.get('issue_number')
-        
+        issue_number = None
+        if isinstance(test_results, dict):
+            issue_number = test_results.get('issue_number')
+
         if not issue_number:
-            tool_result = alita_state.get('tool_result', {})
+            tool_result = alita_state.get('tool_result', '')
             if isinstance(tool_result, dict):
                 issue_number = tool_result.get('number')
             elif isinstance(tool_result, str):
                 try:
                     parsed = json.loads(tool_result)
                     issue_number = parsed.get('number')
-                except:
-                    pass
-        
+                except Exception:
+                    match = re.search(r'ID[:\s]+(\d+)', tool_result)
+                    if match:
+                        issue_number = int(match.group(1))
+
         {"issue_number": issue_number}
     input:
       - test_results
