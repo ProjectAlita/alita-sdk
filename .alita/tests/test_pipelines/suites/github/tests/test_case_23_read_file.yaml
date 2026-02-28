@@ -12,7 +12,7 @@ state:
     value: "README.md"
   expected_content:
     type: str
-    value: "alita"
+    value: "elitea"
   tool_result:
     type: str
   test_results:
