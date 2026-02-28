@@ -156,10 +156,10 @@ nodes:
 
           perform the following checks:
 
-          1. verify pr was created (result contains pr number)
-          2. extract pr number
-          3. confirm no errors in response
-          4. verify pr has required fields
+          1. verify pr was created (result contains pr number or "PR #" pattern)
+          2. extract pr number from result (look for "PR #NNN" pattern in string responses)
+          3. confirm no error text in response
+          4. note: tool returns a success string like "Pull request created successfully! PR #NNN, URL: ..." - this is the expected format
 
           return a json object with:
           {{
@@ -185,21 +185,26 @@ nodes:
       type: fixed
       value: |
         import json
-        
+        import re
+
         test_results = alita_state.get('test_results', {})
-        pr_number = test_results.get('pr_number')
-        
+        pr_number = None
+        if isinstance(test_results, dict):
+            pr_number = test_results.get('pr_number')
+
         if not pr_number:
-            tool_result = alita_state.get('tool_result', {})
+            tool_result = alita_state.get('tool_result', '')
             if isinstance(tool_result, dict):
                 pr_number = tool_result.get('number')
             elif isinstance(tool_result, str):
                 try:
                     parsed = json.loads(tool_result)
                     pr_number = parsed.get('number')
-                except:
-                    pass
-        
+                except Exception:
+                    match = re.search(r'PR\s*#(\d+)', tool_result)
+                    if match:
+                        pr_number = int(match.group(1))
+
         {"pr_number": pr_number}
     input:
       - test_results
