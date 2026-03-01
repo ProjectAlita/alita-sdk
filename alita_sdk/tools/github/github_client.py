@@ -1032,6 +1032,9 @@ class GitHubClient(BaseModel):
             add_to_dict(response_dict, "number", int(pr_number))  # Ensure number is an integer
             add_to_dict(response_dict, "body", str(pull.body))
             add_to_dict(response_dict, "pr_url", str(pull.html_url))
+            add_to_dict(response_dict, "state", pull.state)
+            add_to_dict(response_dict, "head", pull.head.ref)
+            add_to_dict(response_dict, "base", pull.base.ref)
 
             comments: List[str] = []
             page = 0
@@ -1293,7 +1296,7 @@ class GitHubClient(BaseModel):
             )
             return f"Created file {file_path}" + (" (copied from artifact)" if filepath else "")
         except Exception as e:
-            return f"Unable to create file due to error:\n{str(e)}"
+            raise ToolException(f"Unable to create file due to error:\n{str(e)}")
 
     def update_file(self, file_query: str, repo_name: Optional[str] = None, commit_message: Optional[str] = None) -> str:
         """Updates a file with new content using OLD/NEW markers and edit_file.
@@ -1597,7 +1600,7 @@ class GitHubClient(BaseModel):
             file = repo.get_contents(file_path, ref=branch)
             return file.decoded_content.decode("utf-8")
         except Exception as e:
-            return f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}"
+            raise ToolException(f"File not found `{file_path}` on branch `{branch}`. Error: {str(e)}")
 
     def read_file(self, file_path: str, branch: Optional[str] = None, repo_name: Optional[str] = None) -> str:
         """

@@ -158,10 +158,14 @@ nodes:
     toolkit_name: ${GITHUB_TOOLKIT_NAME}
     input:
       - file_path
+      - target_branch
     input_mapping:
       file_path:
         type: variable
         value: file_path
+      branch:
+        type: variable
+        value: target_branch
     output:
       - verified_content
     structured_output: true
