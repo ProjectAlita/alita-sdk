@@ -40,6 +40,12 @@ state:
   filedata:
     type: str
     value: ''
+  read_before_result:
+    type: str
+    value: ''
+  read_after_result:
+    type: str
+    value: ''
   test_results:
     type: str
     value: ''
