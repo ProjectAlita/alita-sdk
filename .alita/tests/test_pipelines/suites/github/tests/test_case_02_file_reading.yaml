@@ -1,0 +1,22 @@
+name: "GH02 - File Reading (Deprecated)"
+description: "Deprecated test - replaced by GH23 read_file, GH24 list_files_branch, GH25 get_files_from_dir"
+priority: Low
+
+state:
+  test_results:
+    type: dict
+
+entry_point: validate_result
+
+nodes:
+  - id: validate_result
+    type: code
+    code:
+      type: fixed
+      value: |
+        {"test_results": {"test_passed": True, "summary": "Deprecated test - replaced by GH23/GH24/GH25", "error": None}}
+    input: []
+    output:
+      - test_results
+    structured_output: true
+    transition: END

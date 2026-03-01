@@ -1,0 +1,22 @@
+name: "GH03 - Issue Workflow (Deprecated)"
+description: "Deprecated test - replaced by GH16 create_issue, GH17 comment_on_issue, GH18 list_issues, GH19 get_issue"
+priority: Low
+
+state:
+  test_results:
+    type: dict
+
+entry_point: validate_result
+
+nodes:
+  - id: validate_result
+    type: code
+    code:
+      type: fixed
+      value: |
+        {"test_results": {"test_passed": True, "summary": "Deprecated test - replaced by GH16/GH17/GH18/GH19", "error": None}}
+    input: []
+    output:
+      - test_results
+    structured_output: true
+    transition: END
