@@ -273,12 +273,14 @@ class LocalSetupStrategy(SetupStrategy):
             )
             logger.info(f"[TOOLKIT CREATE] get_tools returned {len(tools)} tools")
             
-            ctx.log(f"[LOCAL] Created {toolkit_type} toolkit '{toolkit_name}' with {len(tools)} tools", "success")
+            if ctx:
+                ctx.log(f"[LOCAL] Created {toolkit_type} toolkit '{toolkit_name}' with {len(tools)} tools", "success")
             return tools
             
         except Exception as e:
             logger.error(f"[TOOLKIT CREATE] Exception in get_tools: {e}", exc_info=True)
-            ctx.log(f"[LOCAL] Failed to create {toolkit_type} toolkit: {e}", "error")
+            if ctx:
+                ctx.log(f"[LOCAL] Failed to create {toolkit_type} toolkit: {e}", "error")
             return []
     
     def _build_toolkit_settings(self, toolkit_type: str, config: Dict[str, Any], load_from_env) -> Dict[str, Any]:
