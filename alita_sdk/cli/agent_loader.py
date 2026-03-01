@@ -68,10 +68,12 @@ def load_agent_definition(file_path: str) -> Dict[str, Any]:
         if content.startswith('---'):
             parts = content.split('---', 2)
             if len(parts) >= 3:
-                frontmatter = yaml.safe_load(parts[1])
+                # Apply environment variable substitution to frontmatter YAML
+                frontmatter_text = substitute_env_vars(parts[1])
+                frontmatter = yaml.safe_load(frontmatter_text)
                 system_prompt = parts[2].strip()
                 
-                # Apply environment variable substitution
+                # Apply environment variable substitution to system prompt
                 system_prompt = substitute_env_vars(system_prompt)
                 
                 return {
