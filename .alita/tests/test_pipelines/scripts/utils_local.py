@@ -654,6 +654,8 @@ class IsolatedPipelineTestRunner:
             alita_client=None,
             llm=None,
             sdk_log_level: str = 'error',
+            local_strategy: Optional[Any] = None,
+            isolate_toolkits_per_test: bool = False,
     ):
         """
         Initialize the test runner.
@@ -666,12 +668,16 @@ class IsolatedPipelineTestRunner:
             llm: Optional pre-created LLM instance
             sdk_log_level: Log level for alita_sdk loggers
                            (debug, info, warning, error - default: error)
+            local_strategy: LocalSetupStrategy instance for creating fresh toolkits
+            isolate_toolkits_per_test: If True, create fresh toolkit instance per test
         """
         self._tools = tools or []
         self.env_vars = env_vars or {}
         self.verbose = verbose
         self.alita_client = alita_client
         self.llm = llm
+        self.local_strategy = local_strategy
+        self.isolate_toolkits_per_test = isolate_toolkits_per_test
 
         # Note: SDK logging is configured ONCE in run_suite_local() via configure_file_logging()
         # Do NOT call configure_alita_sdk_logging() here, as it would reset logger levels
@@ -895,8 +901,27 @@ class IsolatedPipelineTestRunner:
         except Exception as e:
             logger.debug(f"Could not parse YAML to check for toolkit nodes: {e}")
         
+        # Get tools for this test execution
+        if self.isolate_toolkits_per_test and self.local_strategy:
+            # Create fresh toolkit instance for complete isolation
+            logger.info("Creating fresh toolkit instance for test isolation")
+            
+            # Get all toolkit names and create fresh instances
+            # Pass None for ctx - _create_toolkit_tools handles optional ctx
+            toolkit_names = self.local_strategy.get_toolkit_names()
+            test_tools = []
+            for tk_name in toolkit_names:
+                fresh_tools = self.local_strategy.create_fresh_toolkit_instance(tk_name, ctx=None)
+                test_tools.extend(fresh_tools)
+            
+            logger.info(f"Created {len(test_tools)} fresh tools for this test")
+            tools_to_use = test_tools
+        else:
+            # Use shared tools (existing behavior)
+            tools_to_use = self._tools
+        
         # Only require tools if test uses toolkit nodes
-        if uses_toolkit_nodes and not self._tools:
+        if uses_toolkit_nodes and not tools_to_use:
             return PipelineResult(
                 success=False,
                 pipeline_id=0,
@@ -904,8 +929,8 @@ class IsolatedPipelineTestRunner:
                 error="No toolkit tools provided. Tools must be created by LocalSetupStrategy."
             )
         
-        if self._tools:
-            logger.info(f"Using {len(self._tools)} toolkit tools")
+        if tools_to_use:
+            logger.info(f"Using {len(tools_to_use)} toolkit tools")
         else:
             logger.info("No toolkit tools (test uses only code/llm nodes)")
 
@@ -955,7 +980,7 @@ class IsolatedPipelineTestRunner:
         )
 
         # Wrap all tools to return formatted error messages instead of raising exceptions
-        wrapped_tools = [error_handler.wrap_tool(tool) for tool in self._tools]
+        wrapped_tools = [error_handler.wrap_tool(tool) for tool in tools_to_use]
         logger.info(f"Wrapped {len(wrapped_tools)} tools with error handling")
 
         # Create graph (same as backend does)

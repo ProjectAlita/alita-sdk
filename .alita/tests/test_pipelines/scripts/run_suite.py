@@ -962,6 +962,8 @@ def run_suite_local(
         env_vars=env_vars,  # Pass setup env_vars for substitution
         verbose=logger.verbose if logger else False,
         sdk_log_level=sdk_log_level,  # Control alita_sdk logging verbosity
+        local_strategy=local_strategy,  # Pass strategy for toolkit factory
+        isolate_toolkits_per_test=True,  # Enable per-test isolation
     )
 
     # Define test execution function for both sequential and parallel modes

@@ -162,6 +162,41 @@ class LocalSetupStrategy(SetupStrategy):
         logger.info(f"[GET_TOOLS] Tool names: {[t.name if hasattr(t, 'name') else str(type(t)) for t in self.created_tools]}")
         return self.created_tools
     
+    def create_fresh_toolkit_instance(self, toolkit_name: str, ctx: Optional["SetupContext"] = None) -> List[Any]:
+        """
+        Create a fresh toolkit instance with the same configuration.
+        
+        This method recreates toolkit tools from stored configuration,
+        providing complete isolation for parallel test execution.
+        
+        Args:
+            toolkit_name: Name of the toolkit to recreate
+            ctx: Optional SetupContext for logging
+            
+        Returns:
+            List of freshly created BaseTool instances
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if toolkit_name not in self.created_toolkits:
+            logger.warning(f"Toolkit '{toolkit_name}' not found in created_toolkits")
+            return []
+        
+        toolkit_info = self.created_toolkits[toolkit_name]
+        logger.info(f"Creating fresh instance of toolkit '{toolkit_name}' (type: {toolkit_info['type']})")
+        
+        # Create fresh tools using saved configuration
+        # Note: ctx is optional for _create_toolkit_tools, only used for logging
+        tools = self._create_toolkit_tools(toolkit_info, ctx)
+        logger.info(f"Created {len(tools)} fresh tools for '{toolkit_name}'")
+        
+        return tools
+    
+    def get_toolkit_names(self) -> List[str]:
+        """Get list of toolkit names that were created during setup."""
+        return list(self.created_toolkits.keys())
+    
     def _create_toolkit_tools(self, toolkit_info: Dict[str, Any], ctx: "SetupContext") -> List[Any]:
         """
         Create actual toolkit tool instances from toolkit configuration.
