@@ -143,7 +143,7 @@ nodes:
           - Search finds the match in line 3
           - Context line 2 is included (before)
           - Context line 4 is included (after)
-          - Match line is clearly marked
+          - Match line is clearly marked (e.g. prefixed with '>' or similar indicator)
           - Result indicates 1 match found
           - No errors
           
@@ -151,7 +151,7 @@ nodes:
           1. Does result indicate a match was found?
           2. Is the match line identified (line 3)?
           3. Are context lines included (lines 2 and 4)?
-          4. Is the pattern "TARGET" highlighted in the context?
+          4. Is the match line distinguished from context lines (e.g. '>' prefix or any marker)?
           5. Is there any error or empty result?
           
           Return a JSON object with:
