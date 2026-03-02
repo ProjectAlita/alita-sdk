@@ -1,0 +1,29 @@
+{
+  "summary": {"fixed": 0, "flaky": 2, "blocked": 21, "pr_regressions": 0, "committed": false},
+  "fixed": [],
+  "flaky": [
+    {
+      "test_ids": ["BB09", "BB16"],
+      "reason": "Passed on rerun without changes — toolkit init hit 429 on first run due to shared API rate limit exhaustion; recovered on second attempt"
+    }
+  ],
+  "blocked": [
+    {
+      "test_ids": ["BB01","BB02","BB03","BB04","BB05","BB06","BB07","BB08","BB10","BB11","BB12","BB13","BB14","BB15","BB17","BB18","BB19","BB20","BB21","BB22","BB23"],
+      "blocker_type": "sdk_bug",
+      "bug_report_needed": true,
+      "pr_feedback_needed": false,
+      "sdk_component": "alita_sdk/tools/bitbucket/cloud_api_wrapper.py",
+      "affected_methods": ["BitbucketCloudApi.__init__", "list_branches", "get_files_list", "get_file", "_get_branch"],
+      "bug_description": "The Bitbucket toolkit has two distinct 429 failure modes: (1) Toolkit initialization crash — BitbucketCloudApi.__init__ calls workspace.repositories.get() at construction time with no retry or backoff. A 429 response raises ToolException immediately, leaving the test with 'No toolkit tools provided'. (2) Mid-execution 429 — list_branches, get_files_list, _get_branch, and delete_branch all propagate 429 HTTPError directly as ToolException with no retry. The shared Bitbucket API token is rate-limited across concurrent test runs, causing the entire suite to fail.",
+      "expected_behavior": "Toolkit initialization and all API calls should implement exponential backoff with at least 3 retries on 429 responses before raising ToolException",
+      "actual_behavior": "Any 429 response immediately raises ToolException — at init time this leaves the toolkit with zero tools; during execution it fails the test step",
+      "error_location": "cloud_api_wrapper.py:343 (__init__), cloud_api_wrapper.py:349 (list_branches), cloud_api_wrapper.py:452 (get_files_list), cloud_api_wrapper.py:408 (_get_branch via get_file), api_wrapper.py:286 (delete_branch)"
+    }
+  ],
+  "pr_regressions": [],
+  "committed": false,
+  "commit_details": {
+    "skip_reason": "No test code fixes applied — all 23 failures are caused by Bitbucket API rate limiting (429). 2 tests are flaky (passed on rerun), 21 are blocked by SDK-level missing retry logic. No YAML changes were made."
+  }
+}
