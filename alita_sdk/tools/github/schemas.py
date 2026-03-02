@@ -21,6 +21,16 @@ class GitHubRepoConfig(BaseModel):
 # Schemas for API methods
 NoInput = create_model("NoInput")
 
+ListBranchesInput = create_model(
+    "ListBranchesInput",
+    max_count=(Optional[int], Field(default=100, description="Maximum number of branches to return (default: 100, max: 100)"))
+)
+
+ListPullRequestsInput = create_model(
+    "ListPullRequestsInput",
+    max_count=(Optional[int], Field(default=100, description="Maximum number of pull requests to return (default: 100, max: 100)"))
+)
+
 BranchName = create_model(
     "BranchName",
     branch_name=(str, Field(description="The name of the branch, e.g. `main`"))

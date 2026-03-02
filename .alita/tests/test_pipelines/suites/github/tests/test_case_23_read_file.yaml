@@ -1,0 +1,109 @@
+name: "GH23 - Read File"
+description: "Test read_file retrieves file content from repository"
+priority: Critical
+
+toolkits:
+  - id: ${GITHUB_TOOLKIT_ID}
+    name: ${GITHUB_TOOLKIT_NAME}
+
+state:
+  file_path:
+    type: str
+    value: "README.md"
+  expected_content:
+    type: str
+    value: "elitea"
+  tool_result:
+    type: str
+  trimmed_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_read_file
+
+nodes:
+  - id: invoke_read_file
+    type: toolkit
+    tool: read_file
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
+    input:
+      - file_path
+    input_mapping:
+      file_path:
+        type: variable
+        value: file_path
+    output:
+      - tool_result
+    structured_output: true
+    transition: trim_result
+
+  - id: trim_result
+    type: code
+    code:
+      type: fixed
+      value: |
+        content = alita_state.get('tool_result', '') or ''
+        expected = alita_state.get('expected_content', '')
+        content_length = len(content)
+        has_expected_content = expected.lower() in content.lower()
+        snippet = content[:300]
+        {"trimmed_result": {"content_length": content_length, "has_expected_content": has_expected_content, "snippet": snippet}}
+    input:
+      - tool_result
+      - expected_content
+    output:
+      - trimmed_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - trimmed_result
+      - file_path
+      - expected_content
+    input_mapping:
+      system:
+        type: fixed
+        value: "you are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          analyze the read_file operation results.
+
+          file path: {file_path}
+          expected content pattern: {expected_content}
+          pre-computed result: {trimmed_result}
+
+          the pre-computed result already contains:
+          - content_length: number of characters in the file
+          - has_expected_content: whether the expected pattern was found (case insensitive)
+          - snippet: first 300 chars of file content
+
+          perform the following checks:
+
+          1. verify tool executed successfully (content_length > 0)
+          2. confirm file content retrieved (content_length > 0)
+          3. check has_expected_content is true
+          4. verify content_length > 0
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "content_length": integer,
+            "has_expected_content": true/false,
+            "summary": "brief outcome description",
+            "error": null or "error description"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

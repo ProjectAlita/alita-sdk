@@ -1,4 +1,4 @@
-name: "GH04 - Commits Workflow"
+name: "GH02 - Commits Workflow"
 description: "Test commit operations: get_commits to retrieve history, then get_commits_diff to compare adjacent commits"
 
 toolkits:
