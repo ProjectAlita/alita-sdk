@@ -1,0 +1,8 @@
+{
+  "file_path": "../files/markdown_empty.md",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 1024}
+  ]
+}

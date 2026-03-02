@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "name,emoji,language\nAlice,😀,English\nBob,🎉,Español\nCharlie,🌟,中文\nمريم,🌙,العربية",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_unicode.csv",
+      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_unicode.csv"
+    }
+  }
+]

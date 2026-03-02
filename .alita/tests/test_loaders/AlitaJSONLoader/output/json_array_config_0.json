@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "{\"0\": {\"id\": 1, \"product\": \"Laptop\", \"price\": 999.99, \"in_stock\": true}, \"1\": {\"id\": 2, \"product\": \"Mouse\", \"price\": 29.99, \"in_stock\": false}, \"2\": {\"id\": 3, \"product\": \"Keyboard\", \"price\": 79.99, \"in_stock\": true}}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLoader/files/json_array.json",
+      "chunk_id": 1
+    }
+  }
+]

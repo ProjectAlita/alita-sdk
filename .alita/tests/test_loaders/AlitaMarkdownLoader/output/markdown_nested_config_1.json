@@ -1,0 +1,12 @@
+[
+  {
+    "page_content": "# Web Development\n\n## Frontend Development\n\n### HTML Basics\n\nHTML (HyperText Markup Language) is the standard markup language for creating web pages. It provides the structure of the page.\n\n### CSS Styling\n\nCSS (Cascading Style Sheets) is used to describe the presentation of HTML documents. It controls layout, colors, and fonts.\n\n### JavaScript Programming\n\nJavaScript adds interactivity to web pages. It runs in the browser and enables dynamic content updates.\n\n## Backend Development\n\n### Server-Side Languages\n\nPopular server-side languages include Python, Java, Node.js, and Ruby. Each has its strengths and use cases.\n\n### Database Management\n\nDatabases store and organize data. Common options include MySQL, PostgreSQL, MongoDB, and Redis.\n\n### API Design\n\nRESTful APIs provide a standardized way for frontend and backend to communicate using HTTP methods.",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaMarkdownLoader/files/markdown_nested.md",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "text"
+    }
+  }
+]

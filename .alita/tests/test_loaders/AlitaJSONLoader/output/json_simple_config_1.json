@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "{\"name\": \"John Doe\", \"age\": 30, \"email\": \"john.doe@example.com\", \"active\": true, \"department\": \"Engineering\", \"role\": \"Senior Software Engineer\", \"location\": \"San Francisco\", \"hire_date\": \"2020-01-15\"}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLoader/files/json_simple.json",
+      "chunk_id": 1
+    }
+  }
+]

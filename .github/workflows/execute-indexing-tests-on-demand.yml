@@ -1,0 +1,159 @@
+name: Execute Indexing Tests on Demand
+run-name: "Loader Tests on Demand: ${{ inputs.test_suites == 'custom' && inputs.custom_suites || inputs.test_suites }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_suites:
+        description: 'Loader tests to execute (all will execute all loaders, custom allows specifying comma-separated list, or choose specific loader)'
+        required: true
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - custom
+          - AlitaCSVLoader
+          - AlitaJSONLoader
+          - AlitaMarkdownLoader
+          - AlitaTextLoader
+      custom_suites:
+        description: 'Comma-separated loader names (used only when test_suites is "custom")'
+        required: false
+        type: string
+        default: ''
+      exclude_suites:
+        description: 'Comma-separated loader names to exclude from execution (applies to "all" mode)'
+        required: false
+        type: string
+        default: 'AlitaPDFLoader,AlitaExcelLoader,AlitaDocxMammothLoader,AlitaImageLoader'
+
+jobs:
+  configure-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      loader_matrix: ${{ steps.set-matrix.outputs.loader_matrix }}
+      has-tests: ${{ steps.set-matrix.outputs.has-tests }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .alita/tests/test_loaders/
+          sparse-checkout-cone-mode: false
+      
+      - name: Generate loader test matrix
+        id: set-matrix
+        shell: bash
+        run: |
+          # Determine which loaders to test
+          if [[ "${{ inputs.test_suites }}" == "all" ]]; then
+            # Find all loader directories
+            loaders=$(find .alita/tests/test_loaders -maxdepth 1 -type d -name "Alita*Loader" -exec basename {} \; | sort)
+          elif [[ "${{ inputs.test_suites }}" == "custom" ]]; then
+            # Use custom comma-separated list
+            loaders=$(echo "${{ inputs.custom_suites }}" | tr ',' '\n')
+          else
+            # Single loader specified
+            loaders="${{ inputs.test_suites }}"
+          fi
+          
+          # Apply exclusions if specified
+          if [[ -n "${{ inputs.exclude_suites }}" && "${{ inputs.test_suites }}" != "custom" ]]; then
+            exclude_list="${{ inputs.exclude_suites }}"
+            for exclude in ${exclude_list//,/ }; do
+              loaders=$(echo "$loaders" | grep -v "^${exclude}$" || true)
+            done
+          fi
+          
+          # Build JSON matrix
+          matrix_json="["
+          first=true
+          for loader in $loaders; do
+            # Check if loader directory exists
+            if [[ -d ".alita/tests/test_loaders/$loader" ]]; then
+              if [[ "$first" == "false" ]]; then
+                matrix_json+=","
+              fi
+              matrix_json+="{\"loader\":\"$loader\"}"
+              first=false
+            fi
+          done
+          matrix_json+="]"
+          
+          # Check if we have any tests
+          if [[ "$matrix_json" == "[]" ]]; then
+            echo "has-tests=false" >> $GITHUB_OUTPUT
+            echo "loader_matrix=[]" >> $GITHUB_OUTPUT
+          else
+            echo "has-tests=true" >> $GITHUB_OUTPUT
+            echo "loader_matrix=$matrix_json" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "Generated matrix: $matrix_json"
+
+  test-execution:
+    needs: configure-matrix
+    if: needs.configure-matrix.outputs.has-tests == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        data: ${{ fromJson(needs.configure-matrix.outputs.loader_matrix) }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[loaders]'
+      
+      - name: Run loader tests
+        id: run-tests
+        run: |
+          echo "::group::Running tests for ${{ matrix.data.loader }}"
+          python .alita/tests/test_loaders/run_tests.py run ${{ matrix.data.loader }}
+          exit_code=$?
+          echo "::endgroup::"
+          
+          if [[ $exit_code -ne 0 ]]; then
+            echo "::error::Tests failed for ${{ matrix.data.loader }}"
+            exit $exit_code
+          fi
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.data.loader }}
+          path: .alita/tests/test_loaders/test_results/
+          retention-days: 30
+
+  summary:
+    needs: [configure-matrix, test-execution]
+    if: always() && needs.configure-matrix.outputs.has-tests == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate test summary
+        run: |
+          echo "# Loader Test Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Suites**: ${{ inputs.test_suites }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Execution Mode**: Parallel (max 10 concurrent)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ needs.test-execution.result }}" == "success" ]]; then
+            echo "✅ All loader tests passed successfully" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.test-execution.result }}" == "failure" ]]; then
+            echo "❌ Some loader tests failed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⚠️ Test execution status: ${{ needs.test-execution.result }}" >> $GITHUB_STEP_SUMMARY
+          fi
