@@ -1,0 +1,43 @@
+[
+  {
+    "page_content": "id\tname\tdescription",
+    "metadata": {
+      "header": "true"
+    }
+  },
+  {
+    "page_content": "1\nAlice\nSoftware engineer at Acme Corp",
+    "metadata": {
+      "columns": "['id', 'name', 'description']",
+      "og_data": "{\"id\": \"1\", \"name\": \"Alice\", \"description\": \"Software engineer at Acme Corp\"}"
+    }
+  },
+  {
+    "page_content": "2\nBob\nProduct manager with 10 years experience",
+    "metadata": {
+      "columns": "['id', 'name', 'description']",
+      "og_data": "{\"id\": \"2\", \"name\": \"Bob\", \"description\": \"Product manager with 10 years experience\"}"
+    }
+  },
+  {
+    "page_content": "3\nCarol\nDesigner focused on UX and accessibility",
+    "metadata": {
+      "columns": "['id', 'name', 'description']",
+      "og_data": "{\"id\": \"3\", \"name\": \"Carol\", \"description\": \"Designer focused on UX and accessibility\"}"
+    }
+  },
+  {
+    "page_content": "4\nDave\nDevOps engineer specializing in Kubernetes",
+    "metadata": {
+      "columns": "['id', 'name', 'description']",
+      "og_data": "{\"id\": \"4\", \"name\": \"Dave\", \"description\": \"DevOps engineer specializing in Kubernetes\"}"
+    }
+  },
+  {
+    "page_content": "5\nEve\nData scientist working on NLP models",
+    "metadata": {
+      "columns": "['id', 'name', 'description']",
+      "og_data": "{\"id\": \"5\", \"name\": \"Eve\", \"description\": \"Data scientist working on NLP models\"}"
+    }
+  }
+]

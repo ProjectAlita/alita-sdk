@@ -1,0 +1,26 @@
+[
+  {
+    "page_content": "Introduction to Machine Learning  \nMachine learning is a subset of artificial intelligence that enables systems to learn and improve from experience without being explicitly programmed. It focuses on developing computer programs that can access data and use it to learn for themselves.  \nThe process begins with observations or data, such as examples, direct experience, or instruction, so that computers can look for patterns in data and make better decisions in the future. The primary aim is to allow computers to learn automatically without human intervention or assistance.  \nTypes of Machine LTypes of Machine LTypes of Machine LTypes of Machine ng Types of MacsuTypes of Machine LTypes of Machine LTypes of Machine LTypes of Machine ng Types of MacsuTypes of Machine LTypes of Machine LTypes of Machine LTypes of Machine ng Types of MacsuTypes of Machine LTypes of Machine LTypes of Machine LTypes ninTypes of Machine LTypes of Machine LTypes of Machine L a labeled dataset, which means the training data includes both the input data and the",
+    "metadata": {
+      "headers": "",
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " the training data includes both the input data and the correct output. The goal is to learn a mapping from inputs to outputs that can be applied to new, unseen data.  \nCommon supervised learning algorithms include linear regression, logistic regression, decision trees, random forests, support vector machines, and neural networks. Each has its own strengths and weaknesses depending on the problem type.  \nUnsupervised Learning Overview  \nUnsupervised learning algorithms are applied to unlabeled data. The goal is to find hidden patterns or intrinsic structures in input data. Unlike supervised learning, there is no guide or predetermined answer available.  \nClustering and dimensionality reduction are the two main categories of unsupervised learning. K-means and hierarchical clustering are popular clustering algorithms. PCA and autoencoders are widely used for dimensionality reduction tasks.  \nReinforcement Learning Basics  \nReinforcement learning is fundamentally different from supervised and unsupervised learning. It involves an agent learning to interact with an environment to maximize cumulative rewards. The",
+    "metadata": {
+      "headers": "",
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " interact with an environment to maximize cumulative rewards. The agent learns through trial and error, improving its strategy over time.  \nApplications of Machine Learning  \nMachine learning is transforming many industries. In healthcare, it helps with disease diagnosis and drug discovery. In finance, it powers fraud detection and algorithmic trading. In transportation, it enables autonomous vehicles and route optimization.  \nNatural language processing, computer vision, and speech recognition are among the most impactful machine learning applications in everyday life. Virtual assistants, recommendation systems, and search engines all rely heavily on machine learning algorithms.  \nConclusion  \nThe field of machine learning continues to evolve rapidly. With increasing computational power, larger datasets, and better algorithms, the potential applications are virtually limitless. Understanding the fundamentals of machine learning is becoming an essential skill for professionals across many domains.",
+    "metadata": {
+      "headers": "",
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  }
+]

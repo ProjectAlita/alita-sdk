@@ -1,0 +1,11 @@
+id,name,value,category,tags
+1,Alpha,100,A,tag1;tag2
+2,Bravo,200,B,tag2;tag3
+3,Charlie,300,A,tag1;tag3
+4,Delta,400,C,tag4
+5,Echo,500,B,tag1;tag4
+6,Foxtrot,600,A,tag2
+7,Golf,700,C,tag3;tag4
+8,Hotel,800,B,tag1;tag2;tag3
+9,India,900,A,tag4
+10,Juliet,1000,C,tag1;tag2;tag3;tag4

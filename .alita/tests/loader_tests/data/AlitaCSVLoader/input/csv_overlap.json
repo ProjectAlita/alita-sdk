@@ -1,0 +1,7 @@
+{
+    "file_path": "../../../files/csv_overlap.csv",
+    "configs": [
+        {},
+        {"raw_content": false, "cleanse": false}
+    ]
+}
