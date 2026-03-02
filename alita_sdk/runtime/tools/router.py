@@ -20,7 +20,8 @@ class RouterNode(BaseTool):
         input_data = {}
         for field in self.input_variables or []:
             input_data[field] = state.get(field, "")
-        template = EvaluateTemplate(self.condition, input_data)
+        # if input_data is empty, we can also pass the whole state as input for backward compatibility
+        template = EvaluateTemplate(self.condition, input_data if input_data else state)
         result = template.evaluate()
         logger.info(f"RouterNode evaluated condition '{self.condition}' with input {input_data} => {result}")
         result = clean_string(str(result))
