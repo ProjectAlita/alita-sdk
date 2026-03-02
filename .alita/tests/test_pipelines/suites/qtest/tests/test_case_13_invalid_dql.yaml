@@ -28,7 +28,7 @@ state:
     value: ["error", "Invalid DQL", "syntax", "parse", "failed"]
   unexpected_success_indicators:
     type: list
-    value: ["TC-", "found", "results"]
+    value: ["TC-", "found"]
   test_results:
     type: dict
 
