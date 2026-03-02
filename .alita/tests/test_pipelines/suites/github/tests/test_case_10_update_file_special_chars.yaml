@@ -125,7 +125,7 @@ nodes:
 
         nl = chr(10)
 
-        old_content = "line with special chars: @#$%^&*()" + nl
+        old_content = "line with special chars: @#$%^&*()"
 
         new_content = (
             "line with updated special chars: @#$%^&*()!~`[]{}|" + nl +
