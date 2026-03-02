@@ -194,7 +194,7 @@ nodes:
           3. error_indicates_exists: Duplicate result contains indicator that file exists
           4. original_content_preserved: Current content matches initial content (not duplicate)
           5. content_not_overwritten: Duplicate content does NOT appear in current file
-          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
+          6. no_unhandled_exception: No truly unhandled exception occurred. NOTE: The SDK wraps errors in ToolException and includes a formatted 'Stack Trace:' section in the tool output - this is EXPECTED and HANDLED behavior. Set no_unhandled_exception=true if the error was caught and returned as a ToolException (even if the output contains 'Stack Trace:' or 'Traceback'). Only set false if there is evidence of a crash or uncaught exception outside the tool handler.
           
           OPTIONAL (nice to have, but not required for test to pass):
           7. error_message_helpful: Error message provides useful information
