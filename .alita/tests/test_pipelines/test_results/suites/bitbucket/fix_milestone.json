@@ -1,0 +1,71 @@
+{
+  "timestamp": "2026-03-02T06:42:30Z",
+  "environment": "local",
+  "ci_target_branch": "at-all-local",
+  "suite": "suites/bitbucket",
+  "initial_failures": [
+    {"test_id": "BB01", "pipeline_name": "test_case_01_create_branch", "error_message": "429 in list_branches_in_repo and delete_branch after branch_created=true", "error_type": "FLAKY_429"},
+    {"test_id": "BB02", "pipeline_name": "test_case_02_create_branch_existing", "error_message": "429 in list_branches_in_repo after duplicate_handled=true", "error_type": "FLAKY_429"},
+    {"test_id": "BB03", "pipeline_name": "test_case_03_set_active_branch", "error_message": "429 in set_active_branch and list_files", "error_type": "FLAKY_429"},
+    {"test_id": "BB04", "pipeline_name": "test_case_04_set_active_branch_nonexistent", "error_message": "429 in list_branches_in_repo and set_active_branch", "error_type": "FLAKY_429"},
+    {"test_id": "BB05", "pipeline_name": "test_case_05_list_branches_in_repo", "error_message": "429 in both list_branches_in_repo calls", "error_type": "FLAKY_429"},
+    {"test_id": "BB06", "pipeline_name": "test_case_06_list_branches_with_wildcard", "error_message": "429 in list_branches_in_repo after branches created", "error_type": "FLAKY_429"},
+    {"test_id": "BB07", "pipeline_name": "test_case_07_list_files_root", "error_message": "429 in list_files (non-recursive) after recursive succeeded", "error_type": "FLAKY_429"},
+    {"test_id": "BB08", "pipeline_name": "test_case_08_list_files_subdirectory", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB09", "pipeline_name": "test_case_09_read_file", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB10", "pipeline_name": "test_case_10_read_file_nonexistent", "error_message": "429 in list_files and read_file", "error_type": "FLAKY_429"},
+    {"test_id": "BB11", "pipeline_name": "test_case_11_create_file", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB12", "pipeline_name": "test_case_12_create_file_duplicate", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB13", "pipeline_name": "test_case_13_update_file", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB14", "pipeline_name": "test_case_14_update_file_invalid_markers", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB15", "pipeline_name": "test_case_15_create_pull_request_cloud", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB16", "pipeline_name": "test_case_16_get_pull_request", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB17", "pipeline_name": "test_case_17_get_pull_requests_commits", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB18", "pipeline_name": "test_case_18_get_pull_requests_changes", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB19", "pipeline_name": "test_case_19_add_pull_request_comment", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB20", "pipeline_name": "test_case_20_add_pull_request_comment_inline", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB21", "pipeline_name": "test_case_21_delete_branch", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB22", "pipeline_name": "test_case_22_delete_branch_protected", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"},
+    {"test_id": "BB23", "pipeline_name": "test_case_23_close_pull_request", "error_message": "No toolkit tools provided. Tools must be created by LocalSetupStrategy.", "error_type": "FLAKY_429_INIT"}
+  ],
+  "flaky_tests_from_rerun": ["BB09", "BB16"],
+  "still_failing_after_rerun": ["BB01","BB02","BB03","BB04","BB05","BB06","BB07","BB08","BB10","BB11","BB12","BB13","BB14","BB15","BB17","BB18","BB19","BB20","BB21","BB22","BB23"],
+  "error_patterns": [
+    {
+      "pattern_id": "P1",
+      "test_ids": ["BB01","BB02","BB03","BB04","BB05","BB06","BB07","BB08","BB10","BB11","BB12","BB13","BB14","BB15","BB17","BB18","BB19","BB20","BB21","BB22","BB23"],
+      "root_cause": "Bitbucket API 429 Too Many Requests — rate limit hit during toolkit initialization (cloud_api_wrapper.py:343 __init__) or during tool execution. The entire Bitbucket test suite is throttled by the shared API token.",
+      "category": "FLAKY"
+    }
+  ],
+  "rerun_attempts": [
+    {
+      "attempt": 1,
+      "results_per_test": {
+        "BB01": "FAILED", "BB02": "FAILED", "BB03": "FAILED", "BB04": "FAILED",
+        "BB05": "FAILED", "BB06": "FAILED", "BB07": "ERROR_429_INIT", "BB08": "FAILED",
+        "BB09": "PASSED", "BB10": "ERROR_429_INIT", "BB11": "FAILED", "BB12": "FAILED",
+        "BB13": "FAILED", "BB14": "FAILED", "BB15": "FAILED", "BB16": "PASSED",
+        "BB17": "ERROR_429_INIT", "BB18": "ERROR_429_INIT", "BB19": "ERROR_429_INIT",
+        "BB20": "ERROR_429_INIT", "BB21": "FAILED", "BB22": "ERROR_429_INIT", "BB23": "FAILED"
+      },
+      "flaky_identified": ["BB09", "BB16"],
+      "still_failing": ["BB01","BB02","BB03","BB04","BB05","BB06","BB07","BB08","BB10","BB11","BB12","BB13","BB14","BB15","BB17","BB18","BB19","BB20","BB21","BB22","BB23"]
+    }
+  ],
+  "intent_analysis": [],
+  "fix_attempts": [],
+  "pr_change_context": {"available": false, "pr_number": null, "pr_branch": null, "changed_sdk_files": [], "changed_methods_by_file": {}},
+  "blocked": [
+    {
+      "test_ids": ["BB01","BB02","BB03","BB04","BB05","BB06","BB07","BB08","BB10","BB11","BB12","BB13","BB14","BB15","BB17","BB18","BB19","BB20","BB21","BB22","BB23"],
+      "blocker_type": "sdk_bug",
+      "title": "Bitbucket toolkit initialization crashes on 429 — no retry/backoff in cloud_api_wrapper.__init__",
+      "affected_component": "alita_sdk/tools/bitbucket/cloud_api_wrapper.py",
+      "description": "BitbucketCloudApi.__init__ calls workspace.repositories.get() at construction time with no retry logic. A 429 response causes an immediate ToolException, leaving the toolkit with no tools. All 21 tests are blocked by this shared rate-limit exhaustion.",
+      "pr_feedback_needed": false
+    }
+  ],
+  "commit_info": {"committed": false, "branch": "at-all-local", "files_committed": [], "pr_number": null, "skip_reason": "No test code fixes applied — all failures are rate-limit driven (flaky or sdk_bug)"},
+  "summary": {"fixed": 0, "flaky": 2, "blocked": 21}
+}
