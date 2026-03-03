@@ -16,8 +16,27 @@ env_mapping:
   project: ${BITBUCKET_PROJECT:alita-automation}
   repository: ${BITBUCKET_REPOSITORY:automation}
   cloud: ${BITBUCKET_CLOUD:true}
+  run_id: ${RUN_ID}
 
 setup:
+  - name: Generate Run ID
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        
+        # Generate unique run identifier
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        run_id = f"{timestamp}-{random_suffix}"
+        
+        {"run_id": run_id}
+    save_to_env:
+      - key: RUN_ID
+        value: $.run_id
   - name: Setup Bitbucket Configuration
     type: configuration
     config:
@@ -41,6 +60,34 @@ setup:
       - key: BITBUCKET_TOOLKIT_NAME
         value: $.name
 
+  # Pre-create all test branches to reduce API calls and avoid 429 rate limiting
+  - name: Create Test Branch BB02 (duplicate test)
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: create_branch
+    parameters:
+      branch_name: test-branch-bb02-duplicate-${RUN_ID}
+    continue_on_error: true
+
+  - name: Create Test Branch BB03 (switch test)
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: create_branch
+    parameters:
+      branch_name: test-branch-bb03-switch-${RUN_ID}
+      from_branch: main
+    continue_on_error: true
+
+  - name: Add Marker File to BB03 Branch
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: create_file
+    parameters:
+      file_path: test.txt
+      file_contents: "Marker file for BB03 branch switch test - RUN_ID: ${RUN_ID}"
+      branch: test-branch-bb03-switch-${RUN_ID}
+    continue_on_error: true
+
 composable_pipelines: []
 
 execution:
@@ -53,6 +100,7 @@ execution:
     BITBUCKET_TOOLKIT_NAME: ${BITBUCKET_TOOLKIT_NAME}
     ACTIVE_BRANCH: ${ACTIVE_BRANCH:main}
     TIMESTAMP: ${TIMESTAMP}
+    RUN_ID: ${RUN_ID}
     DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
 
   settings:
@@ -61,6 +109,50 @@ execution:
     stop_on_failure: false
 
 cleanup:
+  # Delete all test branches created during this run
+  - name: List All Test Branches
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: list_branches_in_repo
+    parameters:
+      branch_wildcard: "test-*-${RUN_ID}*"
+    save_to_env:
+      - key: TEST_BRANCHES_LIST
+        value: $.result
+    continue_on_error: true
+
+  - name: Delete BB02 Duplicate Branch
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: delete_branch
+    parameters:
+      branch_name: test-branch-bb02-duplicate-${RUN_ID}
+    continue_on_error: true
+
+  - name: Delete BB03 Switch Branch
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: delete_branch
+    parameters:
+      branch_name: test-branch-bb03-switch-${RUN_ID}
+    continue_on_error: true
+
+  - name: Delete Feature Branches
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: list_branches_in_repo
+    parameters:
+      branch_wildcard: "feature/*-${RUN_ID}*"
+    continue_on_error: true
+
+  - name: Delete Test File Branches
+    type: toolkit_tool
+    toolkit_name: ${BITBUCKET_TOOLKIT_NAME:bitbucket-testing}
+    tool: list_branches_in_repo
+    parameters:
+      branch_wildcard: "test/*-${RUN_ID}*"
+    continue_on_error: true
+
   - name: Delete Test Pipelines
     type: pipeline
     config:

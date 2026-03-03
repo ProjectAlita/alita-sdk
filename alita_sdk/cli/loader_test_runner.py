@@ -92,9 +92,12 @@ def _run_dir_name(timestamp: str) -> str:
 
 
 def find_all_run_dirs(root: Path) -> List[Path]:
-    """Return all output_[TIMESTAMP] dirs at loader_tests root, sorted oldest-first."""
+    """Return all output_[TIMESTAMP] dirs inside test_results/, sorted oldest-first."""
+    results_dir = root / "test_results"
+    if not results_dir.is_dir():
+        return []
     return sorted(
-        (d for d in root.iterdir() if d.is_dir() and d.name.startswith(OUTPUT_DIR_PREFIX)),
+        (d for d in results_dir.iterdir() if d.is_dir() and d.name.startswith(OUTPUT_DIR_PREFIX)),
         key=lambda d: d.name,
     )
 
@@ -267,7 +270,7 @@ def run_all_tests(
 ) -> Tuple[Dict[str, List[TestResult]], Path]:
     """Discover and run all matching tests.
 
-    Creates a single output_[TIMESTAMP] dir at loader_tests root with
+    Creates a single output_[TIMESTAMP] dir inside test_results/ with
     [LOADER]/ subdirs for actual outputs.
 
     Returns (all_results, run_dir).
@@ -276,7 +279,7 @@ def run_all_tests(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     root = base_dir.parent
-    run_dir = root / _run_dir_name(timestamp)
+    run_dir = root / "test_results" / _run_dir_name(timestamp)
     discovery = discover_loader_tests(base_dir)
     all_results: Dict[str, List[TestResult]] = {}
 

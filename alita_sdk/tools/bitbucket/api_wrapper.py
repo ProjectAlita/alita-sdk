@@ -261,12 +261,13 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
         self._active_branch = branch_name
         return f"Branch {branch_name} created successfully and set as active"
 
-    def delete_branch(self, branch_name: str) -> str:
+    def delete_branch(self, branch_name: str, retry: int = 3) -> str:
         """
         Delete a branch from the repository.
         
         Parameters:
             branch_name (str): The name of the branch to delete
+            retry (int): Number of retry attempts in case of failure
             
         Returns:
             str: Success message if branch is deleted, or ToolException if branch cannot be deleted
@@ -282,6 +283,9 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
             )
         
         try:
+            if retry > 0:
+                sleep_time = 2 ** (3 - retry)  # Exponential backoff: 1s, 2s, 4s
+                time.sleep(sleep_time)
             # Fetch all branches to verify the branch exists
             branches = self._bitbucket.list_branches()
             

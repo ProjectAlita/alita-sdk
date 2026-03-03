@@ -114,7 +114,7 @@ def run_tests(loader_name, input_name, run_all, config_index, data_dir, output_f
     else:
         from datetime import datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_dir = base_dir.parent / f"output_{timestamp}"
+        run_dir = base_dir.parent / "test_results" / f"output_{timestamp}"
         input_json_path = base_dir / loader_name / "input" / f"{input_name}.json"
         if not input_json_path.exists():
             click.echo(f"Input file not found: {input_json_path}", err=True)

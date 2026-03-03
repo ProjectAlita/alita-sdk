@@ -17,15 +17,15 @@ toolkits:
 state:
   test_branch_name:
     type: str
+    value: test/bb14-invalid-update-${RUN_ID}
   source_branch:
     type: str
     value: main
   create_branch_result:
     type: str
-  cleanup_branch_result:
-    type: str
   test_file_path:
     type: str
+    value: test-files/bb14-invalid-update-${RUN_ID}.txt
   initial_content:
     type: str
     value: |
@@ -61,34 +61,8 @@ state:
   test_results:
     type: dict
 
-entry_point: prepare_test_data
+entry_point: create_branch
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-
-        # Generate unique identifiers
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-
-        # Generate unique branch name
-        test_branch_name = f"test/bb14-invalid-update-{timestamp}-{random_suffix}"
-
-        # Generate unique file path
-        test_file_path = f"test-files/bb14-invalid-update-{timestamp}-{random_suffix}.txt"
-
-        {"test_branch_name": test_branch_name, "test_file_path": test_file_path}
-    output:
-      - test_branch_name
-      - test_file_path
-    structured_output: true
-    transition: create_branch
-
   - id: create_branch
     type: toolkit
     input:

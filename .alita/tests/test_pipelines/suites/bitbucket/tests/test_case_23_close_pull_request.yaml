@@ -19,8 +19,10 @@ toolkits:
 state:
   source_branch:
     type: str
+    value: feature/bb23-close-pr-${RUN_ID}
   test_file_path:
     type: str
+    value: test-files/bb23-close-test-${RUN_ID}.txt
   test_file_content:
     type: str
     value: |
@@ -70,33 +72,9 @@ state:
   test_results:
     type: dict
 
-entry_point: prepare_test_data
+entry_point: create_source_branch
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-
-        # Generate unique identifiers
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-
-        # Generate unique branch and file names
-        source_branch = f"feature/bb23-close-pr-{timestamp}-{random_suffix}"
-        test_file_path = f"test-files/bb23-close-pr-test-{timestamp}-{random_suffix}.txt"
-
-        {"source_branch": source_branch, "test_file_path": test_file_path}
-    output:
-      - source_branch
-      - test_file_path
-    structured_output: true
-    transition: create_source_branch
-
-  - id: create_source_branch
+  - id: create_source_branch  - id: create_source_branch
     type: toolkit
     input:
       - source_branch

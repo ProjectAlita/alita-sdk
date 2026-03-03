@@ -20,7 +20,7 @@ state:
     value: main
   test_branch_name:
     type: str
-    value: test-branch-bb03-switch
+    value: test-branch-bb03-switch-${RUN_ID}
   test_file_path:
     type: str
     value: test.txt

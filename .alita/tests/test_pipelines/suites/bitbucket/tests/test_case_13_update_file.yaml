@@ -17,15 +17,15 @@ toolkits:
 state:
   test_branch_name:
     type: str
+    value: test/bb13-update-file-${RUN_ID}
   source_branch:
     type: str
     value: main
   create_branch_result:
     type: str
-  cleanup_branch_result:
-    type: str
   test_file_path:
     type: str
+    value: test-files/bb13-update-test-${RUN_ID}.py
   initial_content:
     type: str
     value: |
@@ -67,92 +67,9 @@ state:
   test_results:
     type: dict
 
-entry_point: prepare_test_data
-state:
-  cleanup_branch_result:
-    type: str
-  create_branch_result:
-    type: str
-  create_result:
-    type: str
-  error_indicators:
-    type: list
-    value:
-      - error
-      - failed
-      - not found
-      - exception
-  expected_new_content:
-    type: str
-    value: Welcome
-  expected_unchanged:
-    type: str
-    value: calculate
-  initial_content:
-    type: str
-    value: |
-      # Test file for BB13
-      def greet(name):
-          return f"Hello, {name}!"
-
-      def calculate(a, b):
-          return a + b
-
-      # Main execution
-      if __name__ == "__main__":
-          print(greet("World"))
-          print(calculate(5, 3))
-  source_branch:
-    type: str
-    value: main
-  test_branch_name:
-    type: str
-  test_file_path:
-    type: str
-  test_results:
-    type: dict
-  update_query:
-    type: str
-    value: |
-      OLD
-      def greet(name):
-          return f"Hello, {name}!"
-      NEW
-      def greet(name):
-          return f"Welcome, {name}! How are you today?"
-  update_result:
-    type: str
-  updated_content:
-    type: str
-entry_point: prepare_test_data
+entry_point: create_branch
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-
-        # Generate unique identifiers
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
-
-        # Generate unique branch name
-        test_branch_name = f"test/bb13-update-file-{timestamp}-{random_suffix}"
-
-        # Generate unique file path
-        test_file_path = f"test-files/bb13-update-test-{timestamp}-{random_suffix}.py"
-
-        {"test_branch_name": test_branch_name, "test_file_path": test_file_path}
-    output:
-      - test_branch_name
-      - test_file_path
-    structured_output: true
-    transition: create_branch
-
   - id: create_branch
     type: toolkit
     input:
@@ -298,22 +215,7 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_branch
-
-  - id: cleanup_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - test_branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: test_branch_name
-    output:
-      - cleanup_branch_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: bitbucket-testing
     transition: END
+
 
 
