@@ -9,9 +9,51 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 
 
-# Fields excluded from comparison AND from saved baselines.
-# Absolute paths (table_source, source) are machine-specific and must be ignored.
-DEFAULT_IGNORE_METADATA = frozenset({"chunk_id", "source", "table_source"})
+# Map loader types to fields requiring special comparison logic
+LOADER_SPECIAL_FIELDS = {
+    "AlitaTextLoader": {
+        "source": "path_suffix",  # actual must end with expected (OS-agnostic)
+    },
+    "AlitaMarkdownLoader": {
+        "source": "path_suffix",
+    },
+    "AlitaCSVLoader": {
+        "source": "path_suffix",
+        "table_source": "path_suffix",
+    },
+    "AlitaExcelLoader": {
+        "source": "path_suffix",
+        "table_source": "path_suffix",
+    },
+    "AlitaJSONLoader": {
+        "source": "path_suffix",
+    },
+    "AlitaJSONLinesLoader": {
+        "source": "path_suffix",
+    },
+    "AlitaYamlLoader": {
+        "source": "path_suffix",
+    },
+    "AlitaXMLLoader": {
+        "source": "path_suffix",
+    },
+    "AlitaHTMLLoader": {
+        "source": "path_suffix",
+    },
+}
+
+# Default: compare all fields (no ignoring)
+DEFAULT_IGNORE_METADATA = frozenset()
+
+
+def _normalize_path(path: str) -> str:
+    """Normalize path separators for cross-platform comparison."""
+    if not isinstance(path, str):
+        return path
+    # Convert backslashes to forward slashes and collapse multiple slashes
+    normalized = path.replace('\\', '/').replace('//', '/')
+    # Remove trailing slash
+    return normalized.rstrip('/')
 
 
 def serialize_document(
@@ -27,7 +69,7 @@ def serialize_document(
     return {
         "page_content": doc.page_content,
         "metadata": {
-            k: str(v) if not isinstance(v, (str, int, float, bool, type(None))) else v
+            k: v if isinstance(v, (str, int, float, bool, type(None), list, dict)) else str(v)
             for k, v in doc.metadata.items()
             if k not in skip
         },
@@ -83,10 +125,17 @@ class DocumentDiff:
     field: str
     actual: Any
     expected: Any
+    diff_type: str = "value"  # value | missing_key | extra_key | type_mismatch
 
     def __str__(self) -> str:
+        tag = {
+            "missing_key":   "MISSING KEY   ",
+            "extra_key":     "EXTRA KEY     ",
+            "type_mismatch": "TYPE MISMATCH ",
+            "value":         "",
+        }.get(self.diff_type, "")
         lines = [
-            f"  [doc #{self.index}] {self.field}:",
+            f"  [doc #{self.index}] {tag}{self.field}:",
             f"    actual  : {repr(self.actual)[:200]}",
             f"    expected: {repr(self.expected)[:200]}",
         ]
@@ -111,13 +160,104 @@ class ComparisonResult:
         return msg
 
 
+def _compare_metadata(
+    actual_meta: Dict[str, Any],
+    expected_meta: Dict[str, Any],
+    doc_index: int,
+    ignore: set,
+    loader_name: Optional[str] = None,
+) -> List[DocumentDiff]:
+    """Compare metadata dicts checking schema structure (keys + types) and values."""
+    diffs: List[DocumentDiff] = []
+    a = {k: v for k, v in actual_meta.items() if k not in ignore}
+    e = {k: v for k, v in expected_meta.items() if k not in ignore}
+    
+    # Get special field rules for this loader
+    special_fields = LOADER_SPECIAL_FIELDS.get(loader_name, {}) if loader_name else {}
+
+    # Keys in baseline but absent in actual output → missing field
+    for key in sorted(e):
+        if key not in a:
+            diffs.append(DocumentDiff(
+                index=doc_index, field=f"metadata.{key}",
+                actual="<missing>", expected=e[key],
+                diff_type="missing_key",
+            ))
+
+    # Keys in actual output but absent in baseline → unexpected field
+    for key in sorted(a):
+        if key not in e:
+            diffs.append(DocumentDiff(
+                index=doc_index, field=f"metadata.{key}",
+                actual=a[key], expected="<not present>",
+                diff_type="extra_key",
+            ))
+
+    # Keys present in both → check type then value
+    for key in sorted(set(a) & set(e)):
+        av, ev = a[key], e[key]
+        
+        # Type check first
+        if type(av) is not type(ev):
+            diffs.append(DocumentDiff(
+                index=doc_index, field=f"metadata.{key}",
+                actual=f"{av!r} (type={type(av).__name__})",
+                expected=f"{ev!r} (type={type(ev).__name__})",
+                diff_type="type_mismatch",
+            ))
+            continue
+        
+        # Value comparison with special rules for this loader
+        comparison_type = special_fields.get(key)
+        
+        if comparison_type == "path_suffix":
+            # For path fields: actual should end with expected (normalized)
+            if isinstance(av, str) and isinstance(ev, str):
+                actual_normalized = _normalize_path(av)
+                expected_normalized = _normalize_path(ev)
+                if not actual_normalized.endswith(expected_normalized):
+                    diffs.append(DocumentDiff(
+                        index=doc_index, field=f"metadata.{key}",
+                        actual=f"{av} (normalized: ...{actual_normalized[-50:]})",
+                        expected=f"{ev} (should end with: {expected_normalized})",
+                        diff_type="value",
+                    ))
+            else:
+                # Not strings, compare normally
+                if av != ev:
+                    diffs.append(DocumentDiff(
+                        index=doc_index, field=f"metadata.{key}",
+                        actual=av, expected=ev,
+                        diff_type="value",
+                    ))
+        else:
+            # Default comparison
+            if av != ev:
+                diffs.append(DocumentDiff(
+                    index=doc_index, field=f"metadata.{key}",
+                    actual=av, expected=ev,
+                    diff_type="value",
+                ))
+
+    return diffs
+
+
 def compare_documents(
     actual: List[Document],
     expected: List[Document],
     ignore_metadata_fields=None,
     normalize: bool = True,
+    loader_name: Optional[str] = None,
 ) -> ComparisonResult:
-    """Deep-compare two Document lists."""
+    """Deep-compare two Document lists: count, page_content, and metadata schema+values.
+    
+    Args:
+        actual: Documents produced by the loader
+        expected: Documents from baseline
+        ignore_metadata_fields: Fields to exclude from comparison (deprecated, use loader-specific rules)
+        normalize: Whether to normalize whitespace in page_content
+        loader_name: Loader class name (e.g., "AlitaTextLoader") for loader-specific comparison rules
+    """
     ignore = set(ignore_metadata_fields) if ignore_metadata_fields is not None else DEFAULT_IGNORE_METADATA
     diffs: List[DocumentDiff] = []
 
@@ -130,18 +270,18 @@ def compare_documents(
         )
 
     for i, (a_doc, e_doc) in enumerate(zip(actual, expected)):
+        # page_content
         a_content = normalize_text(a_doc.page_content) if normalize else a_doc.page_content
         e_content = normalize_text(e_doc.page_content) if normalize else e_doc.page_content
         if a_content != e_content:
-            diffs.append(DocumentDiff(index=i, field="page_content", actual=a_content, expected=e_content))
+            diffs.append(DocumentDiff(
+                index=i, field="page_content",
+                actual=a_content, expected=e_content,
+                diff_type="value",
+            ))
 
-        a_meta = {k: v for k, v in a_doc.metadata.items() if k not in ignore}
-        e_meta = {k: v for k, v in e_doc.metadata.items() if k not in ignore}
-        for key in sorted(set(a_meta) | set(e_meta)):
-            av = a_meta.get(key)
-            ev = e_meta.get(key)
-            if str(av) != str(ev):
-                diffs.append(DocumentDiff(index=i, field=f"metadata.{key}", actual=av, expected=ev))
+        # metadata structure + values
+        diffs.extend(_compare_metadata(a_doc.metadata, e_doc.metadata, i, ignore, loader_name))
 
     return ComparisonResult(
         passed=len(diffs) == 0,

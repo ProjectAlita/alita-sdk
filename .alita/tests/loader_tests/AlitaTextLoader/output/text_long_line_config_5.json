@@ -1,0 +1,22 @@
+[
+  {
+    "page_content": "This is a single very long line without any newline characters that continues for quite some time and is designed to test how the text loader handles content that exceeds the maximum token limit when there are no natural break points such as newlines or paragraph boundaries and the chunker must split it mid-sentence using the TokenTextSplitter which should respect the token_overlap parameter to ensure continuity between chunks and this sentence keeps going to ensure we definitely exceed even generous token limits like 100 or 200 tokens so that we",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_long_line.txt",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " parameter to ensure continuity between chunks and this sentence keeps going to ensure we definitely exceed even generous token limits like 100 or 200 tokens so that we can observe the overlap behavior in action.",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_long_line.txt",
+      "headers": "",
+      "chunk_id": 2,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  }
+]

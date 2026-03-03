@@ -1,0 +1,12 @@
+[
+  {
+    "page_content": "Short text.  \nAnother short fragment.  \nYet another tiny piece.  \nOne more small chunk.  \nFinal small section.",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_fragments.txt",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "text"
+    }
+  }
+]

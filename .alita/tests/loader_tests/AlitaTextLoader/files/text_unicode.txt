@@ -1,0 +1,19 @@
+Unicode Test Document
+
+This document contains various Unicode characters to test encoding handling.
+
+Greek: Αλφάβητο (Alphabeto)
+Cyrillic: Алфавит (Alfavit)
+Chinese: 中文文本 (Chinese text)
+Japanese: 日本語のテキスト (Japanese text)
+Arabic: النص العربي (Arabic text)
+Emoji: 🚀 🌟 💡 🎨 📚
+
+Mathematical symbols: ∑ ∫ ∂ √ ∞ ≈ ≠ ≤ ≥
+Currency: € £ ¥ ₹ ₽ ₿
+
+Quotes: "English" «Français» „Deutsch" 「日本語」
+
+Special characters: © ® ™ § ¶ † ‡
+
+This text should be handled correctly regardless of encoding auto-detection settings.

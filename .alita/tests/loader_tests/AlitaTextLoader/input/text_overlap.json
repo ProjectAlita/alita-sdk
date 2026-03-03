@@ -1,0 +1,11 @@
+{
+    "file_path": "../files/text_overlap.txt",
+    "configs": [
+        {"max_tokens": 100, "token_overlap": 0},
+        {"max_tokens": 100, "token_overlap": 10},
+        {"max_tokens": 100, "token_overlap": 20},
+        {"max_tokens": 100, "token_overlap": 40},
+        {"max_tokens": 150, "token_overlap": 50},
+        {"max_tokens": 50, "token_overlap": 15}
+    ]
+}

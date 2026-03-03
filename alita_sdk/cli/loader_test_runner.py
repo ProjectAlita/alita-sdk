@@ -65,6 +65,7 @@ class TestResult:
     expected_doc_count: int = 0
     error: Optional[str] = None
     diffs_summary: Optional[str] = None
+    baseline_path: Optional[Path] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -182,6 +183,7 @@ def run_single_config_test(
         config_index=config_index,
         config=config,
         passed=False,
+        baseline_path=baseline_path,
     )
 
     if not baseline_path.exists():
@@ -215,7 +217,7 @@ def run_single_config_test(
     except Exception as exc:
         logger.warning(f"Could not save actual output to {actual_output_path}: {exc}")
 
-    cmp = compare_documents(actual_docs, expected_docs)
+    cmp = compare_documents(actual_docs, expected_docs, loader_name=loader_name)
     result.passed = cmp.passed
     result.diffs_summary = cmp.summary() if not cmp.passed else None
     return result
@@ -379,7 +381,11 @@ def format_results_text(all_results: Dict[str, List[TestResult]], run_dir: Optio
             lines.append(f"{label:<45} {detail}")
             if r.error:
                 lines.append(f"       ERROR: {r.error}")
+                if r.baseline_path:
+                    lines.append(f"       Baseline: {r.baseline_path}")
             elif r.diffs_summary:
+                if r.baseline_path:
+                    lines.append(f"       Baseline: {r.baseline_path}")
                 for dl in r.diffs_summary.splitlines():
                     lines.append(f"       {dl}")
 

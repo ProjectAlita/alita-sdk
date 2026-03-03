@@ -1,0 +1,8 @@
+{
+    "file_path": "../files/text_empty.txt",
+    "configs": [
+        {},
+        {"max_tokens": 100},
+        {"max_tokens": 1024, "token_overlap": 0}
+    ]
+}

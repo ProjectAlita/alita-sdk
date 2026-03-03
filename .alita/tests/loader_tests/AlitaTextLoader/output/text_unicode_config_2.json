@@ -1,0 +1,52 @@
+[
+  {
+    "page_content": "Unicode Test Document  \nThis document contains various Unicode characters to test encoding handling.  \nGreek: Αλφάβητο (Alphabeto)\nCyrillic: Алфавит (Alfavit)\nChinese: 中",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "авит (Alfavit)\nChinese: 中文文本 (Chinese text)\nJapanese: 日本語のテキスト (Japanese text)\nArabic: النص العربي (Arabic text)\nEmoji: �",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 2,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "بي (Arabic text)\nEmoji: 🚀 🌟 💡 🎨 📚  \nMathematical symbols: ∑ ∫ ∂ √ ∞ ≈ ≠ ≤ ≥\nCurrency: € £ ¥",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 3,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "� ≠ ≤ ≥\nCurrency: € £ ¥ ₹ ₽ ₿  \nQuotes: \"English\" «Français» „Deutsch\" 「日本語」  \nSpecial characters: © ® ™ § ¶ †",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 4,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " characters: © ® ™ § ¶ † ‡  \nThis text should be handled correctly regardless of encoding auto-detection settings.",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 5,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  }
+]

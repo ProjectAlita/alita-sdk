@@ -1,0 +1,12 @@
+[
+  {
+    "page_content": "Unicode Test Document  \nThis document contains various Unicode characters to test encoding handling.  \nGreek: Αλφάβητο (Alphabeto)\nCyrillic: Алфавит (Alfavit)\nChinese: 中文文本 (Chinese text)\nJapanese: 日本語のテキスト (Japanese text)\nArabic: النص العربي (Arabic text)\nEmoji: 🚀 🌟 💡 🎨 📚  \nMathematical symbols: ∑ ∫ ∂ √ ∞ ≈ ≠ ≤ ≥\nCurrency: € £ ¥ ₹ ₽ ₿  \nQuotes: \"English\" «Français» „Deutsch\" 「日本語」  \nSpecial characters: © ® ™ § ¶ † ‡  \nThis text should be handled correctly regardless of encoding auto-detection settings.",
+    "metadata": {
+      "source": ".alita/tests/loader_tests/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "text"
+    }
+  }
+]

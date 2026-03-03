@@ -1,0 +1,7 @@
+Token Boundary Test
+
+This document is carefully crafted to test behavior at exact token boundaries. The content length is designed to align with common token counts. When max_tokens is set to specific values we want to observe whether the chunker handles exact boundaries correctly or if it creates an extra tiny chunk.
+
+Section two continues with more content that should help us reach specific token counts when combined with the first section. This tests the edge case where content length exactly matches or is just one token over the limit.
+
+The third section adds additional text to ensure we have enough content for multiple boundary tests with different max_tokens settings while maintaining readability and structure.

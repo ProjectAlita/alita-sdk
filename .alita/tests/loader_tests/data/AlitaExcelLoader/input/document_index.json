@@ -1,9 +1,0 @@
-{
-    "file_path": "../../../files/Document_Index.xlsx",
-    "configs": [
-        {},
-        {"sheet_name": "Sheet1"},
-        {"sheet_name": "Sheet2"},
-        {"add_header_to_chunks": true}
-    ]
-}
