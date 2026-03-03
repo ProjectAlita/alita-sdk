@@ -437,13 +437,17 @@ class McpToolkit(BaseToolkit):
         if connection_config.headers:
             headers.update(connection_config.headers)
 
+        # True when the user has an Authorization header in their DB toolkit config
+        configured_auth = any(k.lower() == 'authorization' for k in headers)
+
         # Create unified MCP client (auto-detects SSE vs Streamable HTTP)
         client = McpClient(
             url=connection_config.url,
             session_id=session_id,
             headers=headers,
             timeout=timeout,
-            ssl_verify=ssl_verify
+            ssl_verify=ssl_verify,
+            configured_auth=configured_auth
         )
         
         server_session_id = None

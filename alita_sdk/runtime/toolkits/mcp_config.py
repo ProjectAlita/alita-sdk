@@ -40,13 +40,14 @@ mcp_servers:
 import asyncio
 import logging
 import os
-import re
 import threading
 from typing import List, Optional, Dict, Any
 
 import yaml
 from langchain_core.tools import BaseToolkit, BaseTool
 from pydantic import BaseModel, Field
+
+from ..utils.mcp_oauth import substitute_mcp_placeholders
 
 logger = logging.getLogger(__name__)
 
@@ -276,20 +277,6 @@ def get_all_mcp_server_configs() -> Dict[str, Any]:
     if _server_configs is None:
         _server_configs = load_mcp_servers_config()
     return _server_configs
-
-
-def _substitute_placeholders(value: Any, user_config: Dict[str, Any]) -> Any:
-    """Substitute {param} placeholders with values from user_config."""
-    if isinstance(value, str):
-        def replacer(match):
-            key = match.group(1)
-            return str(user_config.get(key, match.group(0)))
-        return re.sub(r'{(\w+)}', replacer, value)
-    elif isinstance(value, dict):
-        return {k: _substitute_placeholders(v, user_config) for k, v in value.items()}
-    elif isinstance(value, list):
-        return [_substitute_placeholders(v, user_config) for v in value]
-    return value
 
 
 class McpConfigToolkit(BaseToolkit):
@@ -604,9 +591,9 @@ class McpConfigToolkit(BaseToolkit):
         if mcp_tokens is None:
             mcp_tokens = {}
 
-        # Substitute placeholders in URL and headers
-        url = _substitute_placeholders(server_config.get('url', ''), user_config)
-        headers = _substitute_placeholders(server_config.get('headers', {}), user_config)
+        # Substitute {param} placeholders in URL and headers from user_config
+        url = substitute_mcp_placeholders(server_config.get('url', ''), user_config)
+        headers = substitute_mcp_placeholders(server_config.get('headers', {}), user_config)
         timeout = server_config.get('timeout', 60)
         ssl_verify = user_config.get('ssl_verify', server_config.get('ssl_verify', True))
 
@@ -840,8 +827,8 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
         # Get ssl_verify from settings (user config) or server_config, default to True
         ssl_verify = settings.get('ssl_verify', server_config.get('ssl_verify', True))
 
-        # Substitute placeholders in headers with user-provided values
-        headers = _substitute_placeholders(headers_template, settings)
+        # Substitute {param} placeholders from settings.
+        headers = substitute_mcp_placeholders(headers_template, settings)
 
         logger.info(f"[MCP Config] Discovering tools from {server_name} at {url} (ssl_verify={ssl_verify})")
 

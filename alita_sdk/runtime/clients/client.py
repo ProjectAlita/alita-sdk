@@ -1853,6 +1853,12 @@ class AlitaClient:
             }
 
         headers = settings.get('headers') or {}
+
+        # Capture whether the DB-configured headers contain an Authorization header,
+        # before any OAuth token is merged in. Used to distinguish "bad static token"
+        # (should raise ValueError) from "OAuth token needed" (should raise McpAuthorizationRequired).
+        configured_auth = any(k.lower() == 'authorization' for k in headers)
+
         session_id = settings.get('session_id')
 
         # Apply OAuth token if available
@@ -1882,7 +1888,8 @@ class AlitaClient:
                 url=url,
                 session_id=session_id,
                 headers=headers,
-                timeout=60  # Reasonable timeout for connection test
+                timeout=60,  # Reasonable timeout for connection test
+                configured_auth=configured_auth
             )
 
             async with client:
@@ -1940,7 +1947,7 @@ class AlitaClient:
             logger.error(f"[MCP Auth Check] Connection failed to '{toolkit_name}': {str(e)}")
             return {
                 "success": False,
-                "error": f"MCP connection failed: {str(e)}",
+                "error": str(e),
                 "toolkit_config": toolkit_config,
                 "tools": [],
                 "tools_count": 0,
