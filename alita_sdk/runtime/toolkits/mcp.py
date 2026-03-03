@@ -24,7 +24,6 @@ from ..utils.mcp_oauth import (
     extract_resource_metadata_url,
     fetch_resource_metadata,
     infer_authorization_servers_from_realm,
-    substitute_mcp_placeholders,
 )
 
 logger = logging.getLogger(__name__)
@@ -244,10 +243,6 @@ class McpToolkit(BaseToolkit):
         elif headers is not None and not isinstance(headers, dict):
             logger.error(f"Headers must be a dictionary or JSON string, got: {type(headers)}")
             raise ValueError(f"Headers must be a dictionary or JSON string, got: {type(headers)}")
-
-        # Substitute {param} and {{secret.name}} placeholders in headers
-        if parsed_headers and client:
-            parsed_headers = substitute_mcp_placeholders(parsed_headers, user_config={}, client=client)
 
         # Extract session_id from kwargs if provided
         session_id = kwargs.get('session_id')

@@ -591,10 +591,9 @@ class McpConfigToolkit(BaseToolkit):
         if mcp_tokens is None:
             mcp_tokens = {}
 
-        # Substitute placeholders in URL and headers
-        # Pass client to enable {{secret.name}} placeholder resolution
-        url = substitute_mcp_placeholders(server_config.get('url', ''), user_config, client)
-        headers = substitute_mcp_placeholders(server_config.get('headers', {}), user_config, client)
+        # Substitute {param} placeholders in URL and headers from user_config
+        url = substitute_mcp_placeholders(server_config.get('url', ''), user_config)
+        headers = substitute_mcp_placeholders(server_config.get('headers', {}), user_config)
         timeout = server_config.get('timeout', 60)
         ssl_verify = user_config.get('ssl_verify', server_config.get('ssl_verify', True))
 
@@ -828,9 +827,8 @@ def _create_check_connection_for_http(server_name: str, server_config: Dict[str,
         # Get ssl_verify from settings (user config) or server_config, default to True
         ssl_verify = settings.get('ssl_verify', server_config.get('ssl_verify', True))
 
-        # Substitute {param} placeholders from settings. {{secret.name}} patterns require a client
-        # (available at runtime in get_toolkit) and are left unresolved here.
-        headers = substitute_mcp_placeholders(headers_template, settings, client=None)
+        # Substitute {param} placeholders from settings.
+        headers = substitute_mcp_placeholders(headers_template, settings)
 
         logger.info(f"[MCP Config] Discovering tools from {server_name} at {url} (ssl_verify={ssl_verify})")
 

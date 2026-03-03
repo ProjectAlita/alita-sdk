@@ -203,115 +203,47 @@ def canonical_resource(server_url: str) -> str:
     return resource
 
 
-def substitute_mcp_placeholders(value: Any, user_config: Dict[str, Any], client=None) -> Any:
+def substitute_mcp_placeholders(value: Any, user_config: Dict[str, Any]) -> Any:
     """
-    Substitute placeholders with values from user_config or secrets store.
+    Substitute {param} placeholders in MCP config values with values from user_config.
 
-    Supports two placeholder patterns:
-    - {param}: Replaced with value from user_config
-    - {{secret.name}}: Replaced with value from secrets store via client.unsecret()
-
-    Examples:
-        # Simple parameter from user_config
-        "https://api.example.com/{environment}" -> "https://api.example.com/production"
-
-        # Secret from secrets store
-        "Bearer {{secret.github_pat}}" -> "Bearer ghp_abc123..."
-        "Bearer {{secret.api-token-v2}}" -> "Bearer sk-xyz789..."
-
-    Supported secret name patterns:
-        - Alphanumeric: {{secret.token}}
-        - Underscore: {{secret.github_pat}}
-        - Dash: {{secret.api-token}}
-        - Dot: {{secret.api.key}}
-        - Mixed: {{secret.my-api_key.v2}}
+    Secret resolution ({{secret.name}} patterns) is intentionally NOT handled here.
+    Secrets are resolved at the platform level (elitea_core / indexer_worker) before
+    the configuration reaches the SDK, following the established architecture where
+    VaultClient.unsecret() is applied to the full task payload before dispatch.
 
     Args:
         value: Value to process (string, dict, list, or other)
         user_config: Dictionary containing user-provided configuration values
-        client: Optional AlitaClient instance for fetching secrets
 
     Returns:
-        Value with placeholders replaced. If client is None or secret not found,
-        original placeholder is preserved.
+        Value with {param} placeholders replaced from user_config.
+        Unknown placeholders are left as-is.
     """
     if isinstance(value, str):
         original_value = value
 
-        # Handle {{secret.name}} pattern first (more specific)
-        def secret_replacer(match):
-            placeholder = match.group(0)  # Full match: {{secret.name}}
-            secret_name = match.group(1)  # Captured group: name
-
-            logger.debug(f"[MCP] Processing secret placeholder: {placeholder}, secret_name: {secret_name}")
-
-            # First, check if secret was pre-resolved in user_config (e.g., by pylon_main.unsecret())
-            # This allows check_connection to work even without a client
-            if secret_name in user_config:
-                secret_value = user_config[secret_name]
-                if secret_value is not None and secret_value != '':
-                    logger.debug(f"[MCP] Found pre-resolved secret '{secret_name}' in user_config")
-                    return str(secret_value)
-
-            # If not pre-resolved, try using client.unsecret()
-            if not client:
-                logger.warning(f"[MCP] No client available to fetch secret '{secret_name}', and not found in user_config. Keeping placeholder: {placeholder}")
-                return placeholder
-
-            if not hasattr(client, 'unsecret'):
-                logger.error(f"[MCP] Client does not have 'unsecret' method, keeping placeholder: {placeholder}")
-                return placeholder
-
-            try:
-                secret_value = client.unsecret(secret_name)
-                if secret_value is not None:
-                    logger.debug(f"[MCP] Successfully replaced {{{{secret.{secret_name}}}}} with secret value from client")
-                    return str(secret_value)
-                else:
-                    logger.warning(f"[MCP] Secret '{secret_name}' not found in secrets store, keeping placeholder: {placeholder}")
-                    return placeholder
-            except Exception as e:
-                logger.error(f"[MCP] Failed to fetch secret '{secret_name}': {e}", exc_info=True)
-                return placeholder
-
-        # Handle {param} pattern (simpler placeholder)
         def param_replacer(match):
             placeholder = match.group(0)  # Full match: {param}
-            key = match.group(1)  # Captured group: param
-
-            # Check if this looks like it should be a secret pattern (has 'secret.' in it)
-            # This catches malformed patterns like {secret.name} instead of {{secret.name}}
-            if 'secret.' in key:
-                secret_key = key.split('.')[-1] if '.' in key else key
-                # Use double braces in message to show literal braces
-                logger.warning(f"[MCP] Found malformed secret placeholder '{placeholder}' - should use double braces: {{{{secret.{secret_key}}}}}")
-
-            value = user_config.get(key)
-            if value is not None:
+            key = match.group(1)          # Captured group: param
+            resolved = user_config.get(key)
+            if resolved is not None:
                 logger.debug(f"[MCP] Replaced {{{key}}} with value from user_config")
-                return str(value)
-            else:
-                logger.debug(f"[MCP] Key '{key}' not found in user_config, keeping placeholder: {placeholder}")
-                return placeholder
+                return str(resolved)
+            logger.debug(f"[MCP] Key '{key}' not found in user_config, keeping placeholder: {placeholder}")
+            return placeholder
 
-        # Apply secret pattern substitution first
-        # Pattern: {{secret.([\w.\-]+)}} - captures alphanumeric, underscore, dot, dash
-        # Supports secret names like: github_pat, my-secret, api.key, github-token-v2
-        result = re.sub(r'\{\{secret\.([\w.\-]+)\}\}', secret_replacer, value)
-
-        # Then apply simple parameter substitution
-        # Pattern: {(\w+)} - but NOT if preceded by another {
-        # Use negative lookbehind to avoid matching {{...}}
-        result = re.sub(r'(?<!\{)\{(\w+)\}(?!\})', param_replacer, result)
+        # Substitute {param} patterns, skipping {{ }} double-brace patterns
+        result = re.sub(r'(?<!\{)\{(\w+)\}(?!\})', param_replacer, value)
 
         if result != original_value:
             logger.debug(f"[MCP] Placeholder substitution: '{original_value}' -> '{result}'")
 
         return result
     elif isinstance(value, dict):
-        return {k: substitute_mcp_placeholders(v, user_config, client) for k, v in value.items()}
+        return {k: substitute_mcp_placeholders(v, user_config) for k, v in value.items()}
     elif isinstance(value, list):
-        return [substitute_mcp_placeholders(v, user_config, client) for v in value]
+        return [substitute_mcp_placeholders(v, user_config) for v in value]
     return value
 
 

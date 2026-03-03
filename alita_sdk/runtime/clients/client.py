@@ -1836,7 +1836,7 @@ class AlitaClient:
         import time
         # Migration: Use UnifiedMcpClient (wraps langchain-mcp-adapters) instead of custom McpClient
         from ..utils.mcp_adapter import UnifiedMcpClient as McpClient
-        from ..utils.mcp_oauth import canonical_resource, substitute_mcp_placeholders
+        from ..utils.mcp_oauth import canonical_resource
 
         toolkit_name = toolkit_config.get('toolkit_name', 'unknown')
         settings = toolkit_config.get('settings', {})
@@ -1853,10 +1853,6 @@ class AlitaClient:
             }
 
         headers = settings.get('headers') or {}
-
-        # Substitute {{secret.xxx}} placeholders in headers
-        if headers:
-            headers = substitute_mcp_placeholders(headers, user_config={}, client=self)
 
         # Capture whether the DB-configured headers contain an Authorization header,
         # before any OAuth token is merged in. Used to distinguish "bad static token"
