@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 # Use only the first 10 KB for chardet so it doesn't scan the whole file (slow for large files).
 _CHARDET_SAMPLE_SIZE = 10 * 1024
+# Minimum chardet confidence to trust its detected encoding; below this threshold fall back to UTF-8.
+_CHARDET_MIN_CONFIDENCE = 0.9
 
 class Artifact:
     def __init__(self, client: Any, bucket_name: str):
@@ -60,18 +62,34 @@ class Artifact:
 
     @staticmethod
     def _decode_text(data: bytes) -> str:
-        """Decode raw bytes to text using chardet detection. Raises ValueError if decoding fails."""
+        """Decode bytes to text. Raises ValueError if decoding fails.
+
+        Strategy: run chardet on the first _CHARDET_SAMPLE_SIZE bytes.
+        - If encoding detected with confidence >= _CHARDET_MIN_CONFIDENCE, use it.
+        - Otherwise fall back to UTF-8 (handles the common case where chardet is
+          uncertain about a valid UTF-8 file with few non-ASCII bytes).
+        """
         if len(data) == 0:
             return ""
         detected = chardet.detect(data[:_CHARDET_SAMPLE_SIZE])
-        if detected['encoding'] is not None:
+        encoding = detected.get('encoding')
+        confidence = detected.get('confidence') or 0.0
+        if encoding is not None and confidence >= _CHARDET_MIN_CONFIDENCE:
             try:
-                return data.decode(detected['encoding'])
+                return data.decode(encoding)
             except Exception as e:
                 raise ValueError(
-                    f"Could not decode bytes with detected encoding '{detected['encoding']}': {e}"
+                    f"Could not decode bytes with detected encoding '{encoding}' "
+                    f"(confidence {confidence:.2f}): {e}"
                 ) from e
-        raise ValueError("Could not detect encoding")
+        # Low confidence or no detection — try UTF-8 before giving up.
+        try:
+            return data.decode('utf-8')
+        except UnicodeDecodeError as e:
+            raise ValueError(
+                f"Could not decode bytes: chardet confidence too low "
+                f"({confidence:.2f} for '{encoding}') and UTF-8 decoding failed: {e}"
+            ) from e
 
     def get(self,
             artifact_name: str,
