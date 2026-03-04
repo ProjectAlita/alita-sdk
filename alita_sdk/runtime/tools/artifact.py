@@ -266,7 +266,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
 
         return {
             "read_multiple_files": ArtifactReadMultipleFilesInput,
-            "search_file": ArtifactSearchFileInput,
+            "grep_file": ArtifactSearchFileInput,
             "edit_file": ArtifactEditFileInput,
         }
 
