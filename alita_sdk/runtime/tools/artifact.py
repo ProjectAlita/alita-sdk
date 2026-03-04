@@ -794,9 +794,9 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""")),
     @extend_with_file_operations
     def get_available_tools(self):
         """Get available tools. Returns all tools for schema; filtering happens at toolkit level."""
-        bucket_name = (Optional[str], Field(description="Name of the bucket to work with."
-                                                        "If bucket is not specified by user directly, the name should be taken from chat history."
-                                                        "If bucket never mentioned in chat, the name will be taken from tool configuration."
+        bucket_name = (Optional[str], Field(description="Name of the bucket to work with. "
+                                                        "Leave null/omit to use the toolkit's configured default bucket. "
+                                                        "Only specify a bucket name when the user explicitly names one. "
                                                         " ***IMPORTANT*** Underscore `_` is prohibited in bucket name and should be replaced by `-`",
                                             default=None))
         
