@@ -1,0 +1,9 @@
+[
+    {
+        "page_content": "",
+        "metadata": {
+            "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_empty.csv:1",
+            "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_empty.csv"
+        }
+    }
+]

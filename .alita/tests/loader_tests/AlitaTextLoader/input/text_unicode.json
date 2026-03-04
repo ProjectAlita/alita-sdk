@@ -1,9 +1,0 @@
-{
-    "file_path": "../files/text_unicode.txt",
-    "configs": [
-        {},
-        {"max_tokens": 100},
-        {"max_tokens": 50, "token_overlap": 10},
-        {"max_tokens": 200, "token_overlap": 0}
-    ]
-}

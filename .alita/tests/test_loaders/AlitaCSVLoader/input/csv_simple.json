@@ -1,0 +1,7 @@
+{
+    "file_path": "../files/csv_simple.csv",
+    "configs": [
+        {},
+        {"max_tokens": 1024}
+    ]
+}

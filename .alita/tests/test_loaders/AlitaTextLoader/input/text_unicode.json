@@ -1,0 +1,7 @@
+{
+    "file_path": "../files/text_unicode.txt",
+    "configs": [
+        {},
+        {"max_tokens": 256}
+    ]
+}

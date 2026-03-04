@@ -1,8 +1,0 @@
-{
-    "file_path": "../files/text_medium.txt",
-    "configs": [
-        {},
-        {"max_tokens": 200},
-        {"max_tokens": 100}
-    ]
-}

@@ -1,0 +1,8 @@
+This is a simple test file for AlitaTextLoader.
+It contains multiple lines of plain text.
+
+The loader should handle this content correctly and preserve all text.
+Each line tests basic functionality without special characters.
+
+This file is intentionally small to fit in a single chunk with default max_tokens.
+Testing basic text loading and metadata generation.

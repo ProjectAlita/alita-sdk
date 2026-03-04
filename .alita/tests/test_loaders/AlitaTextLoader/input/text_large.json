@@ -1,0 +1,10 @@
+{
+    "file_path": "../files/text_large.txt",
+    "configs": [
+        {},
+        {"max_tokens": 50},
+        {"max_tokens": 100},
+        {"max_tokens": 256},
+        {"max_tokens": 2000}
+    ]
+}

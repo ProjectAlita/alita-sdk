@@ -1,9 +1,0 @@
-{
-    "file_path": "../files/text_fragments.txt",
-    "configs": [
-        {},
-        {"max_tokens": 50},
-        {"max_tokens": 200},
-        {"max_tokens": 100, "token_overlap": 20}
-    ]
-}

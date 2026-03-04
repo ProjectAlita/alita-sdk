@@ -136,13 +136,11 @@ def config(ctx):
 from . import toolkit
 from . import agents
 from . import inventory
-from . import loader_chunker
 
 # Register subcommands
 cli.add_command(toolkit.toolkit)
 cli.add_command(agents.agent)
 cli.add_command(inventory.inventory)
-cli.add_command(loader_chunker.loader_chunker)
 
 # Add top-level 'chat' command as alias to 'agent chat'
 cli.add_command(agents.agent_chat, name='chat')

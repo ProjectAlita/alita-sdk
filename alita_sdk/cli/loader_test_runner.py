@@ -1,16 +1,16 @@
 """
 Test runner engine for document loader tests.
 
-Directory layout (base_dir = .alita/tests/loader_tests/data):
+Directory layout (base_dir = .alita/tests/test_loaders/):
   base_dir/
     [LOADER]/
       input/   - input JSON definitions
       output/  - stable baseline files (committed, compared against actual)
-  base_dir/../          (loader_tests root)
-    files/               - shared test data
-    output_[TIMESTAMP]/  - actual run results, created each test run
-      [LOADER]/
-        [input_name]_config_[i].json
+      files/   - test data files for this loader
+    test_results/        - test run outputs
+      output_[TIMESTAMP]/  - actual run results, created each test run
+        [LOADER]/
+          [input_name]_config_[i].json
 """
 
 import json
@@ -21,6 +21,45 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _load_documents_with_production_config(file_path: Path, config: Dict[str, Any]) -> List:
+    """Load documents using production configuration logic.
+    
+    This replicates the logic from process_content_by_type but uses the actual
+    file path instead of creating a temp file, so metadata contains correct paths.
+    """
+    from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map, LoaderProperties
+    
+    extension = file_path.suffix.lower()
+    loader_config = loaders_map.get(extension)
+    if not loader_config:
+        raise ValueError(f"No loader found for extension: {extension}")
+    
+    loader_cls = loader_config['class']
+    loader_kwargs = dict(loader_config.get('kwargs', {}))
+    
+    # Apply chunking_config override logic (same as process_content_by_type)
+    allowed_to_override = loader_config.get('allowed_to_override', loader_kwargs)
+    
+    # Start with production defaults from allowed_to_override
+    loader_kwargs.update(allowed_to_override)
+    
+    # Apply user overrides (filtered by allowed_to_override keys)
+    if config:
+        for key in set(config.keys()) & set(allowed_to_override.keys()):
+            loader_kwargs[key] = config[key]
+    
+    # Handle LLM and prompt placeholders
+    if LoaderProperties.LLM.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.LLM.value):
+        loader_kwargs['llm'] = None  # No LLM in tests
+    if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value):
+        from alita_sdk.tools.utils.content_parser import image_processing_prompt
+        loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
+    
+    # Instantiate and load
+    loader = loader_cls(file_path=str(file_path), **loader_kwargs)
+    return list(loader.load())
 
 OUTPUT_DIR_PREFIX = "output_"
 
@@ -201,10 +240,8 @@ def run_single_config_test(
         return result
 
     try:
-        loader_cls, loader_config = _get_loader_class_and_config(loader_name, file_path)
-        kwargs = _build_kwargs(loader_config, config)
-        loader = loader_cls(file_path=str(file_path), **kwargs)
-        actual_docs = loader.load()
+        # Use production configuration logic while preserving file paths
+        actual_docs = _load_documents_with_production_config(file_path, config)
         result.actual_doc_count = len(actual_docs)
     except Exception as exc:
         result.error = f"Loader exception: {exc}"
@@ -280,7 +317,7 @@ def run_all_tests(
     if timestamp is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    root = base_dir.parent
+    root = base_dir
     run_dir = root / "test_results" / _run_dir_name(timestamp)
     discovery = discover_loader_tests(base_dir)
     all_results: Dict[str, List[TestResult]] = {}
@@ -310,52 +347,6 @@ def run_all_tests(
 
 
 # ---------------------------------------------------------------------------
-# Baseline generation  (writes to data/[LOADER]/output/)
-# ---------------------------------------------------------------------------
-
-def generate_expected_outputs(
-    loader_name: str,
-    input_name: str,
-    test_input: LoaderTestInput,
-    base_dir: Path,
-    input_json_path: Path,
-    config_index: Optional[int] = None,
-    force: bool = False,
-) -> Tuple[List[Path], Path]:
-    """Execute loader for each config and save stable baseline JSON files.
-
-    Writes to: base_dir/[LOADER]/output/[input_name]_config_[i].json
-
-    Returns (written_paths, baseline_dir).
-    """
-    from .loader_test_utils import save_documents
-
-    file_path = test_input.resolved_file_path(input_json_path)
-    baseline_dir = base_dir / loader_name / "output"
-    baseline_dir.mkdir(parents=True, exist_ok=True)
-    written: List[Path] = []
-
-    for i, cfg in enumerate(test_input.configs):
-        if config_index is not None and i != config_index:
-            continue
-        output_path = baseline_dir / f"{input_name}_config_{i}.json"
-
-        if output_path.exists() and not force:
-            logger.info(f"Skipping {output_path} (exists; use --force to overwrite)")
-            continue
-
-        loader_cls, loader_config = _get_loader_class_and_config(loader_name, file_path)
-        kwargs = _build_kwargs(loader_config, cfg)
-        loader = loader_cls(file_path=str(file_path), **kwargs)
-        docs = loader.load()
-        save_documents(docs, output_path)
-        written.append(output_path)
-        logger.info(f"Saved {len(docs)} docs -> {output_path}")
-
-    return written, baseline_dir
-
-
-# ---------------------------------------------------------------------------
 # Output formatting
 # ---------------------------------------------------------------------------
 
@@ -370,6 +361,10 @@ def format_results_text(all_results: Dict[str, List[TestResult]], run_dir: Optio
         lines.append(f"\n{loader_name}")
         lines.append("-" * len(loader_name))
         for r in results:
+            # Add delimiter before each test case for better readability
+            lines.append("")  # Blank line before each test case
+            lines.append(f"  ┌─ {r.input_name}[{r.config_index}] ─────────────────────────────────────")
+            
             if r.error:
                 icon, total_error = "E", total_error + 1
             elif r.passed:
