@@ -62,14 +62,14 @@ nodes:
 
           expected behavior:
           - tool executes successfully without errors
-          - returns issue details including title and description
-          - issue number matches the requested issue
+          - returns issue details including title and body/description fields
+          - comments field is present (may be a string representation of a list or an empty list)
 
           evaluate:
           1. did the tool execute successfully?
           2. are there any errors?
-          3. does the output contain issue details (title, description)?
-          4. is the issue data properly structured?
+          3. does the output contain issue details (title and body fields present and non-empty)?
+          4. is the comments field present (any format - string or list is acceptable)?
 
           return a json object with:
           {{
