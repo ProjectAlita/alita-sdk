@@ -21,13 +21,27 @@ state:
     type: dict
   test_results:
     type: dict
+  folder_name:
+    type: str
+  request_name:
+    type: str
+  folder_path:
+    type: str
   request_path:
     type: str
-    value: ${TEST_REQUEST_PATH}
   new_method:
     type: str
     value: "DELETE"
-entry_point: invoke_update_request_method
+  create_folder_result:
+    type: str
+  create_request_result:
+    type: str
+  delete_request_result:
+    type: str
+  delete_folder_result:
+    type: str
+
+entry_point: prepare_test_data
 
 nodes:
   - id: invoke_update_request_method
