@@ -19,7 +19,21 @@ from ...community import get_toolkits as community_toolkits, get_tools as commun
 from ...tools.memory import MemoryToolkit
 from ..utils.mcp_oauth import canonical_resource, McpAuthorizationRequired
 from ...tools.utils import clean_string
-from alita_sdk.tools import _inject_toolkit_id
+from alita_sdk.tools import _inject_toolkit_id, _inject_display_metadata, _patch_tool_invoke
+
+# Human-readable display names for all internal tools.
+# Labels mirror INTERNAL_TOOLS_LIST[*].title in the FE to stay in sync.
+# Tools that produce BaseTool objects (pyodide, data_analysis) use this for chip injection.
+# The remaining entries serve as a complete registry and backwards-compat fallback.
+INTERNAL_TOOL_DISPLAY_NAMES: dict = {
+    'attachments':     'Attachments',           # artifact bucket; no chip event
+    'image_generation': 'Image creation',       # provider toolkit; no chip event
+    'data_analysis':   'Data Analysis',         # DataAnalysisToolkit — chip injected
+    'planner':         'Planner',               # deprecated no-op; no chip event
+    'pyodide':         'Python sandbox',        # SandboxToolkit — chip injected
+    'swarm':           'Swarm Mode',            # mode flag; no chip event
+    'lazy_tools_mode': 'Smart Tools Selection', # mode flag; no chip event
+}
 from .security import is_toolkit_blocked, is_tool_blocked, get_blocked_tools_for_toolkit
 
 
@@ -193,16 +207,20 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     continue
             elif tool['type'] == 'memory':
                 tool_handled = True
-                tools += MemoryToolkit.get_toolkit(
+                memory_tools = MemoryToolkit.get_toolkit(
                     namespace=tool['settings'].get('namespace', str(tool['id'])),
                     pgvector_configuration=tool['settings'].get('pgvector_configuration', {}),
                     store=memory_store,
+                    toolkit_name=tool.get('name', ''),
                 ).get_tools()
+                _inject_display_metadata(tool, memory_tools)
+                tools += memory_tools
             # TODO: update configuration of internal tools
             elif tool['type'] == 'internal_tool':
                 tool_handled = True
+                internal_tools = []
                 if tool['name'] == 'pyodide':
-                    tools += SandboxToolkit.get_toolkit(
+                    internal_tools = SandboxToolkit.get_toolkit(
                         stateful=False,
                         allow_net=True,
                         alita_client=alita_client,
@@ -216,7 +234,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     settings = tool.get('settings', {})
                     bucket_name = settings.get('bucket_name')
                     if bucket_name:
-                        tools += DataAnalysisToolkit.get_toolkit(
+                        internal_tools = DataAnalysisToolkit.get_toolkit(
                             alita_client=alita_client,
                             llm=llm,
                             bucket_name=bucket_name,
@@ -225,6 +243,22 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                     else:
                         logger.warning("Data Analysis internal tool requested "
                                        "but no bucket_name provided in settings")
+                # Inject display metadata so FE chips show human-readable names
+                if internal_tools:
+                    internal_display_name = INTERNAL_TOOL_DISPLAY_NAMES.get(
+                        tool['name'], tool['name']
+                    )
+                    for t in internal_tools:
+                        if not hasattr(t, 'metadata'):
+                            continue
+                        if t.metadata is None:
+                            t.metadata = {}
+                        if isinstance(t.metadata, dict):
+                            t.metadata['toolkit_type'] = 'internal'
+                            t.metadata['toolkit_name'] = tool['name']           # raw code name; fallback key
+                            t.metadata['display_name'] = internal_display_name  # human-readable; chip label
+                            _patch_tool_invoke(t)  # forward metadata into LangGraph run config
+                tools.extend(internal_tools)
             elif tool['type'] == 'artifact':
                 tool_handled = True
                 toolkit_tools = ArtifactToolkit.get_toolkit(
@@ -242,14 +276,17 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 # Inject toolkit_id for artifact tools as well
                 # Pass settings as the tool config since that's where the id field is
                 _inject_toolkit_id(tool['settings'], toolkit_tools)
+                _inject_display_metadata(tool, toolkit_tools)
                 tools.extend(toolkit_tools)
 
             elif tool['type'] == 'vectorstore':
                 tool_handled = True
-                tools.extend(VectorStoreToolkit.get_toolkit(
+                vs_tools = VectorStoreToolkit.get_toolkit(
                     llm=llm,
                     toolkit_name=tool.get('toolkit_name', ''),
-                    **tool['settings']).get_tools())
+                    **tool['settings']).get_tools()
+                _inject_display_metadata(tool, vs_tools)
+                tools.extend(vs_tools)
             elif tool['type'] == 'planning':
                 tool_handled = True
                 # Planning is now provided via PlanningMiddleware, not as a toolkit type
@@ -304,10 +341,12 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                 if session_id:
                     settings['session_id'] = session_id
                     logger.info(f"[MCP Auth] Passing session_id to toolkit: {session_id}")
-                tools.extend(McpToolkit.get_toolkit(
+                mcp_tools = McpToolkit.get_toolkit(
                     toolkit_name=tool.get('toolkit_name', ''),
                     client=alita_client,
-                    **settings).get_tools())
+                    **settings).get_tools()
+                _inject_display_metadata(tool, mcp_tools)
+                tools.extend(mcp_tools)
             elif tool['type'] == 'mcp_config' or tool['type'].startswith('mcp_'):
                 tool_handled = True
                 # MCP Config toolkit - pre-configured MCP servers (stdio or http)
@@ -343,6 +382,7 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         mcp_tokens=mcp_tokens,
                     ).get_tools()
 
+                    _inject_display_metadata(tool, toolkit_tools)
                     tools.extend(toolkit_tools)
                     logger.info(f"✅ Successfully added {len(toolkit_tools)} tools from McpConfigToolkit ({server_name})")
                 except Exception as e:
