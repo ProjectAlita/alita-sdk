@@ -25,14 +25,8 @@ state:
     type: str
     value: ${TEST_REQUEST_PATH}
   headers:
-    type: list
-    value:
-      - key: "Authorization"
-        value: "Bearer test_token"
-        enabled: true
-      - key: "Content-Type"
-        value: "application/json"
-        enabled: true
+    type: str
+    value: "Authorization: Bearer test_token\nContent-Type: application/json"
 
 entry_point: invoke_update_request_headers
 
