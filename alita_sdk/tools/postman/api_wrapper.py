@@ -340,10 +340,12 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                 except:
                     error_details = f" Response status: {e.response.status_code}"
             logger.error(f"Request failed: {e}{error_details}")
-            raise ToolException(f"Postman API request failed: {str(e)}{error_details}")
+            return ToolException(f"Postman API request failed: {str(e)}{error_details}")
+        except ToolException:
+            pass
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode JSON response: {e}")
-            raise ToolException(
+            return ToolException(
                 f"Invalid JSON response from Postman API: {str(e)}")
 
     def _apply_authentication(self, headers, params, all_variables, native_auth, resolve_variables):

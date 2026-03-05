@@ -113,7 +113,13 @@ jobs:
           
           # Extract suites from matrix array (agent provides all suites when run_all=true)
           SUITES=$(jq -c '[.matrix[].suite] | unique' "$MATRIX_FILE")
+          
+          # Filter out excluded suites (e.g., postman, figma for external service instability)
+          EXCLUDED_SUITES='["postman", "figma"]'
+          SUITES=$(echo "$SUITES" | jq --argjson excluded "$EXCLUDED_SUITES" '[.[] | select(. as $item | $excluded | index($item) | not)]')
           SUITE_COUNT=$(echo "$SUITES" | jq 'length')
+          
+          echo "::notice::Excluded suites: $EXCLUDED_SUITES"
           
           # Agent must provide suites in matrix (even for run_all)
           if [ "$SUITE_COUNT" -eq 0 ]; then
@@ -121,8 +127,8 @@ jobs:
             exit 1
           fi
           
-          # Extract detailed test configuration for targeted tests
-          TESTS_CONFIG=$(jq -c '.matrix | map({suite: .suite, tests_to_run: .tests_to_run, run_all_tests: .run_all_tests})' "$MATRIX_FILE")
+          # Extract detailed test configuration for targeted tests (also filter excluded suites)
+          TESTS_CONFIG=$(jq -c --argjson excluded "$EXCLUDED_SUITES" '.matrix | map(select(.suite as $s | $excluded | index($s) | not)) | map({suite: .suite, tests_to_run: .tests_to_run, run_all_tests: .run_all_tests})' "$MATRIX_FILE")
           
           echo "matrix=$SUITES" >> $GITHUB_OUTPUT
           echo "has-tests=true" >> $GITHUB_OUTPUT
@@ -148,8 +154,16 @@ jobs:
             echo "| Suite | Tests to Run | Mode |"
             echo "|-------|--------------|------|"
             
-            # Generate table rows for each suite
-            jq -r '.matrix[] | "| `\(.suite)` | \(if .run_all_tests then "All tests" else (.tests_to_run | if length == 0 then "All tests" else (map("`\(.)`") | join(", ")) end) end) | \(if .run_all_tests then "🔄 Full Suite" else "🎯 Targeted" end) |"' "$MATRIX_FILE"
+            # Generate table rows for each suite (filter excluded suites from display)
+            jq -r --argjson excluded "$EXCLUDED_SUITES" '.matrix[] | select(.suite as $s | $excluded | index($s) | not) | "| `\(.suite)` | \(if .run_all_tests then "All tests" else (.tests_to_run | if length == 0 then "All tests" else (map("`\(.)`") | join(", ")) end) end) | \(if .run_all_tests then "🔄 Full Suite" else "🎯 Targeted" end) |"' "$MATRIX_FILE"
+            
+            # Show excluded suites if any were filtered
+            if [ "$(jq -r --argjson excluded "$EXCLUDED_SUITES" '[.matrix[] | select(.suite as $s | $excluded | index($s))] | length' "$MATRIX_FILE")" -gt 0 ]; then
+              echo ""
+              echo "### ⏭️ Excluded Suites"
+              echo ""
+              jq -r --argjson excluded "$EXCLUDED_SUITES" '.matrix[] | select(.suite as $s | $excluded | index($s)) | "- `\(.suite)` (excluded from PR testing)"' "$MATRIX_FILE"
+            fi
             
             echo ""
             echo "---"
