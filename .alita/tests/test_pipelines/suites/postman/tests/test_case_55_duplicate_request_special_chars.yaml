@@ -38,7 +38,7 @@ nodes:
       - request_path
       - new_name
     input_mapping:
-      request_path:
+      source_path:
         type: variable
         value: request_path
       new_name:
