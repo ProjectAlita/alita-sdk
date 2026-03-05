@@ -50,47 +50,23 @@ entry_point: generate_test_data
 interrupt_after: []
 nodes:
   - id: generate_test_data
-    type: llm
-    input:
-      - timestamp
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a test data generator. Generate random, unique test data for Confluence page testing.
-      task:
-        type: fstring
-        value: |
-          Generate random test data for a Confluence page update test using timestamp: {timestamp}
-
-          Create unique and randomized values for:
-          1. Page title - must include TC_10_Update and timestamp, plus a random UUID or random words
-          2. Initial body content - generate random HTML paragraph with diverse content (200-300 chars)
-          3. Updated body content - generate completely different random HTML content (200-300 chars)
-
-          Requirements:
-          - Use varied vocabulary and realistic content
-          - Make initial and updated content clearly different
-          - Include proper HTML paragraph tags
-          - Ensure page title is unique using timestamp and random elements
-
-              "page_title": "unique title with TC_10_Update_{timestamp}_randomid",
-              "initial_body": "<p>Random initial content here...</p>",
-              "updated_body": "<p>Completely different updated content here...</p>"
-
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the fields object. Do not use markdown ```json. Do not include explanations.
-    model: gpt-4o
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import uuid
+        ts = time.strftime('%Y%m%d-%H%M%S')
+        uid = str(uuid.uuid4())[:8]
+        page_title = f"TC_10_Update_{ts}_{uid}"
+        initial_body = "<p>Initial content for automated update test. This page was created to verify the update_page_by_id tool functionality in the Confluence toolkit integration test suite.</p>"
+        updated_body = "<p>Updated content after applying update_page_by_id. This replacement body confirms that the update operation successfully modified the page content and labels as expected.</p>"
+        {"page_title": page_title, "initial_body": initial_body, "updated_body": updated_body}
     output:
-      - test_data
       - page_title
       - initial_body
       - updated_body
     structured_output: true
-    structured_output_dict:
-      test_data: dict
     transition: create_page
   - id: create_page
     type: toolkit
@@ -222,7 +198,7 @@ nodes:
           Return a JSON object with the following structure:
 
           {{
-            "validation_results": {{
+            "test_results": {{
               "update_successful": boolean (true if update completed),
               "page_id_in_result": boolean (true if page ID is in update result),
               "content_updated": boolean (true if read result contains updated content),
@@ -234,6 +210,7 @@ nodes:
     model: gpt-4o
     output:
       - test_results
+    structured_output: true
     structured_output_dict:
       test_results: dict
     transition: delete_page
@@ -259,19 +236,19 @@ nodes:
 
           Perform the following checks:
 
-          1. Verify the page was deleted successfully.
-          2. Evaluate overall test success (create, update, read, delete all succeeded).
+          1. Verify the page was deleted successfully (delete result contains "deleted" or "success").
+          2. Evaluate overall test success based on validation results: update_successful, content_updated, has_labels must all be true.
 
           Return a JSON object named test_results with the following structure:
 
           {{
             "test_passed": boolean (true if all operations succeeded),
             "tool_executed": boolean (true if all tools ran without errors),
-            "page_created": boolean (true),
-            "page_updated": boolean (from validation_results),
-            "content_verified": boolean (from validation_results),
-            "page_deleted": boolean (true if delete was successful)
-            "failed_checks": [string] // list of failed assertions
+            "page_created": boolean (true - page was created in earlier step),
+            "page_updated": boolean (from test_results.update_successful),
+            "content_verified": boolean (from test_results.content_updated),
+            "page_deleted": boolean (true if delete was successful),
+            "failed_checks": [string]
           }}
 
           Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
