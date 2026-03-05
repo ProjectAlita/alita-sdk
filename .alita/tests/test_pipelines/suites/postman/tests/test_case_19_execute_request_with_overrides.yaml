@@ -13,8 +13,8 @@ description: |
   - Response reflects the overridden parameters
 
 toolkits:
-  - id: ${TOOLKIT_ID}
-    name: ${TOOLKIT_NAME}
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
   tool_result:
