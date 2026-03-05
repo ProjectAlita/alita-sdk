@@ -33,6 +33,8 @@ state:
     type: str
   create_request_result:
     type: str
+  update_script_result:
+    type: str
   delete_request_result:
     type: str
   delete_folder_result:
@@ -40,11 +42,6 @@ state:
   script_type:
     type: str
     value: "prerequest"
-  prerequest_script:
-    type: str
-    value: |
-      console.log("Pre-request script running");
-      pm.environment.set("timestamp", new Date().toISOString());
 entry_point: prepare_test_data
 
 nodes:
