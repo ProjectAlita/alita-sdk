@@ -90,7 +90,6 @@ nodes:
     input:
       - folder_path
       - request_name
-      - prerequest_script
     input_mapping:
       folder_path:
         type: variable
@@ -104,11 +103,26 @@ nodes:
       url:
         type: fixed
         value: "https://api.example.com/test"
-      pre_request_script:
-        type: variable
-        value: prerequest_script
     output:
       - create_request_result
+    structured_output: true
+    transition: add_prerequest_script
+
+  - id: add_prerequest_script
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: update_request_pre_script
+    input:
+      - request_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+      pre_request_script:
+        type: fixed
+        value: "console.log('pre-request script executed');"
+    output:
+      - update_script_result
     structured_output: true
     transition: invoke_get_request_script
 
