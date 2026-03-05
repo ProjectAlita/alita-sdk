@@ -21,7 +21,7 @@ state:
     type: dict
   test_results:
     type: dict
-  request_path:
+  source_path:
     type: str
     value: ${TEST_REQUEST_PATH}
   target_folder_path:
@@ -35,13 +35,13 @@ nodes:
     toolkit_name: ${TOOLKIT_NAME}
     tool: move_request
     input:
-      - request_path
+      - source_path
       - target_folder_path
     input_mapping:
       source_path:
         type: variable
-        value: request_path
-      target_folder_path:
+        value: source_path
+      target_path:
         type: variable
         value: target_folder_path
     output:
