@@ -75,7 +75,7 @@ runs:
           if [ -n "$exclude" ]; then
             EXCLUDE_ARRAY=$(echo "$exclude" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
             matrix=$(echo "$matrix" | jq -c --argjson ex "$EXCLUDE_ARRAY" 'map(select(. as $s | $ex | index($s) | not))')
-            echo "Excluded suites: $EXCLUDE_ARRAY"
+            echo "Excluded suites: $EXCLUDE_ARRAY" >&2
           fi
           echo "$matrix"
         }
