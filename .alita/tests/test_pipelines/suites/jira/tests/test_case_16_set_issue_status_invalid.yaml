@@ -78,7 +78,8 @@ nodes:
              - transition not allowed or not available
              - status does not exist for this issue type
              - http error codes 400 (bad request) or 404 (not found)
-          3. Determine if the error is about the invalid status/transition itself. Errors like "transition not allowed" are expected and correct. System errors unrelated to the status validation are failures.
+             - 'transition' identifier must be an integer (occurs when status name cannot be resolved to a valid transition ID)
+          3. Determine if the error is about the invalid status/transition itself. Errors like "transition not allowed" or "'transition' identifier must be an integer" are expected and correct — they indicate the invalid status name could not be resolved. System errors unrelated to the status validation are failures.
 
           Return a JSON object named test_results with the following structure:
 
