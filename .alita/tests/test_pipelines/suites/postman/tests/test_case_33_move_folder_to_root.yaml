@@ -21,15 +21,55 @@ state:
     type: dict
   test_results:
     type: dict
+  source_folder_name:
+    type: str
   source_path:
     type: str
-    value: ${TEST_FOLDER_PATH}
   target_path:
     type: str
     value: null
-entry_point: invoke_move_folder
+  create_source_result:
+    type: str
+  delete_source_result:
+    type: str
+
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        source_folder_name = f"PST33_Folder_{timestamp}_{suffix}"
+        source_path = source_folder_name
+        {"source_folder_name": source_folder_name, "source_path": source_path}
+    output:
+      - source_folder_name
+      - source_path
+    structured_output: true
+    transition: create_source_folder
+
+  - id: create_source_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - source_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: source_folder_name
+    output:
+      - create_source_result
+    structured_output: true
+    transition: invoke_move_folder
+
   - id: invoke_move_folder
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
@@ -45,7 +85,6 @@ nodes:
         type: variable
         value: target_path
     output:
-
       - tool_result
     structured_output: true
     transition: process_results
@@ -90,4 +129,20 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_delete_folder
+
+  - id: cleanup_delete_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - source_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: source_path
+    output:
+      - delete_source_result
+    structured_output: true
     transition: END
