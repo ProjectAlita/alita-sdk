@@ -107,8 +107,7 @@ jobs:
               echo ""
               echo "---"
               echo "*Analysis performed by AI agent on PR #${{ github.event.pull_request.number }}*"
-            } >> $GITHUB_STEP_SUMMARY
-            
+            } >> $GITHUB_STEP_SUMMARY        
             exit 0
           fi
           
