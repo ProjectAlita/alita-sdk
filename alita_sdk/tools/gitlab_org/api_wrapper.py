@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Optional, Any, List, Dict
+from typing import Optional, Any, ClassVar, List, Dict
 import fnmatch
 
 from gitlab import GitlabGetError
@@ -161,6 +161,7 @@ class GitLabWorkspaceAPIWrapper(BaseToolApiWrapper):
     _active_branch: Optional[str] = PrivateAttr(default='main')
 
     # Reuse common file helpers from BaseCodeToolApiWrapper where applicable
+    _excluded_file_operations: ClassVar[set] = {'edit_file'}
     edit_file = BaseCodeToolApiWrapper.edit_file
 
     class Config:

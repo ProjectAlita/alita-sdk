@@ -1,6 +1,6 @@
 # api_wrapper.py
 import fnmatch
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 
 from gitlab import GitlabGetError
 from langchain_core.tools import ToolException
@@ -125,6 +125,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
     _active_branch: Any = PrivateAttr()
     
     # Import file operation methods from BaseCodeToolApiWrapper
+    _excluded_file_operations: ClassVar[set] = {'edit_file'}
     read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
     read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
     search_file = BaseCodeToolApiWrapper.search_file

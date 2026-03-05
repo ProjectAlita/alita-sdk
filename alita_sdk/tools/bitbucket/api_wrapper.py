@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, Optional
 import fnmatch
 
 from langchain_core.tools import ToolException
@@ -134,7 +134,12 @@ class BitbucketAPIWrapper(CodeIndexerToolkit):
 
     _bitbucket: Any = PrivateAttr()
     _active_branch: Any = PrivateAttr()
-    
+
+    # Suppress the decorator-injected 'edit_file' tool: Bitbucket already exposes
+    # 'update_file' (which calls self.edit_file internally), so both tools would be
+    # functionally identical. The method itself is still available for internal use.
+    _excluded_file_operations: ClassVar[set] = {'edit_file'}
+
     # Import file operation methods from BaseCodeToolApiWrapper
     read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
     read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files

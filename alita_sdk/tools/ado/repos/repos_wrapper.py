@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from enum import Enum
 from json import dumps
-from typing import List, Union, Optional, Any, Dict
+from typing import ClassVar, List, Union, Optional, Any, Dict
 
 from azure.devops.v7_0.git.git_client import GitClient
 from azure.devops.v7_0.git.models import (
@@ -271,6 +271,7 @@ class ReposApiWrapper(CodeIndexerToolkit):
     ado_client_instance: Optional[GitClient] = Field(default=None, exclude=True)
 
     # Reuse common file helpers from BaseCodeToolApiWrapper
+    _excluded_file_operations: ClassVar[set] = {'edit_file'}
     edit_file = BaseCodeToolApiWrapper.edit_file
 
     class Config:

@@ -1084,6 +1084,13 @@ def extend_with_file_operations(method):
             if hasattr(self, '_get_file_operation_schemas') and callable(getattr(self, '_get_file_operation_schemas')):
                 custom_schemas = self._get_file_operation_schemas() or {}
 
+            # Collect names already registered to skip decorator duplicates.
+            # Toolkits can also declare _excluded_file_operations (a set/list of tool
+            # names) to suppress specific decorator-injected tools when they provide
+            # an equivalent tool under a different name
+            existing_tool_names = {t["name"] for t in tools}
+            excluded = set(getattr(self, '_excluded_file_operations', None) or [])
+
             file_operation_tools = [
                 {
                     "name": "read_multiple_files",
@@ -1108,7 +1115,10 @@ def extend_with_file_operations(method):
                 },
             ]
 
-            tools.extend(file_operation_tools)
+            tools.extend(
+                t for t in file_operation_tools
+                if t["name"] not in excluded and t["name"] not in existing_tool_names
+            )
 
         return tools
 

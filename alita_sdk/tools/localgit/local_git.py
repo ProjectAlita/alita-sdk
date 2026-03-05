@@ -2,7 +2,7 @@ import glob
 import logging
 import os
 from traceback import format_exc
-from typing import Any
+from typing import Any, ClassVar
 
 from git import Repo
 from pydantic import BaseModel, Field, create_model, model_validator
@@ -131,6 +131,7 @@ class LocalGit(BaseToolApiWrapper):
     path_pattern: str = '**/*.py'
     
     # Import file operation methods from BaseCodeToolApiWrapper
+    _excluded_file_operations: ClassVar[set] = {'edit_file'}
     read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
     read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
     search_file = BaseCodeToolApiWrapper.search_file
