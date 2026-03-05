@@ -62,15 +62,18 @@ nodes:
 
           expected behavior:
           - tool executes successfully without errors
-          - returns issue details including title and description
-          - issue number matches the requested issue
+          - returns issue details including title and body/description fields
+          - comments field is present (may be a list or a string representation of a list)
 
           evaluate:
-          1. did the tool execute successfully without errors?
-          2. does the output contain a title field with a non-empty string?
-          3. does the output contain a body/description field (may be empty string or null)?
-          note: the comments field may be returned as a string representation of a list - this is acceptable.
-          note: issue_number is an input parameter and is not required in the tool output.
+          1. did the tool execute successfully?
+          2. are there any errors?
+          3. does the output contain a non-empty title field?
+          4. does the output contain a body field (may be null/empty for issues without description)?
+          5. does the output contain a comments field (list or string)?
+
+          note: the tool does not return issue_number in its response - do not check for it.
+          note: comments may be serialized as a string representation of a list - this is acceptable.
 
           return a json object with:
           {{
