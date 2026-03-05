@@ -59,9 +59,9 @@ nodes:
              - Should return an error message
              - Error should indicate team not found or unauthorized
              - HTTP status should reflect the error (403/404)
-          3. Graceful Failure: Tool should handle invalid input gracefully
-
-          NOTE: The SDK error output may include a stack trace as part of its standard error format — this is expected and should NOT affect test_passed.
+          3. Graceful Failure: Tool should handle invalid input gracefully.
+             NOTE: A ToolException with a clear HTTP error message (e.g. 404 Not Found) IS considered graceful handling.
+             Stack traces in the tool output are part of the framework's standard error format and do NOT indicate ungraceful handling.
 
           Return a JSON object named test_results with this EXACT structure:
           {
