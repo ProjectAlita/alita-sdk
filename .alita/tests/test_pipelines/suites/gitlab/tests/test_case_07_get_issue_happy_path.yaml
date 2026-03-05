@@ -60,24 +60,24 @@ nodes:
           parameters: issue_number={issue_number}
           results: {tool_result}
 
-          expected behavior:
-          - tool executes successfully without errors
-          - returns issue details including title and body/description fields
-          - comments field is present (may be a list or a string representation of a list)
+          This is a POSITIVE test - we expect successful issue retrieval.
 
-          evaluate:
-          1. did the tool execute successfully?
-          2. are there any errors?
-          3. does the output contain a non-empty title field?
-          4. does the output contain a body field (may be null/empty for issues without description)?
-          5. does the output contain a comments field (list or string)?
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. tool_executed: get_issue tool ran and returned a result
+          2. no_errors: Output does NOT contain error indicators (e.g. "error", "not found", "exception")
+          3. title_present: Output contains a non-empty "title" field
+          4. body_present: Output contains a "body" field (may be empty string)
 
-          note: the tool does not return issue_number in its response - do not check for it.
-          note: comments may be serialized as a string representation of a list - this is acceptable.
+          NOTE: The "comments" field may be returned as a string representation of a list - this is acceptable and should NOT cause test failure.
+          NOTE: The response does not need to include an explicit issue_number field - the tool was called with the correct issue_number parameter.
 
           return a json object with:
           {{
-            "test_passed": true/false,
+            "test_passed": true/false (true only if ALL 4 criteria pass),
+            "tool_executed": true/false,
+            "no_errors": true/false,
+            "title_present": true/false,
+            "body_present": true/false,
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
