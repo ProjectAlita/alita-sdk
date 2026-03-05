@@ -1,5 +1,4 @@
 import logging
-import types
 from copy import deepcopy
 from importlib import import_module
 from typing import Optional
@@ -36,78 +35,6 @@ def _inject_toolkit_id(tool_conf: dict, toolkit_tools) -> None:
             f"Toolkit ID is missing or not an integer for tool "
             f"`{tool_conf.get('type', '')}` with name `{tool_conf.get('name', '')}`"
         )
-
-
-def _patch_tool_invoke(tool) -> None:
-    """Patch ``tool.invoke()`` to inject ``BaseTool.metadata`` into the LangGraph run config.
-
-    LangChain's ``BaseTool.run()`` only passes ``{"name": ..., "description": ...}`` to
-    ``on_tool_start`` callbacks — it never forwards ``BaseTool.metadata``.  The only path
-    that reaches ``AlitaCallback.on_tool_start`` as ``kwargs["metadata"]`` is the LangGraph
-    run-config metadata (``CallbackManager.metadata``).
-
-    This patch mirrors the approach used by ``Application.invoke()`` (nested agents/pipelines):
-    it merges ``self.metadata`` into ``config["metadata"]`` before delegating to the real
-    ``invoke()``, so all fields set by ``_inject_display_metadata`` and the internal-tool
-    metadata loop (``display_name``, ``toolkit_type``, ``toolkit_name``) are visible in the
-    callback and reach the Socket.IO chip event.
-
-    Uses ``object.__setattr__`` to bypass Pydantic's ``__setattr__`` validation (the field
-    ``invoke`` is not a declared model field).  The instance attribute shadows the class
-    method for non-data descriptors, which is standard Python MRO behaviour.
-
-    Args:
-        tool: An instantiated :class:`BaseTool` object whose ``metadata`` has already
-              been populated.
-    """
-    if getattr(tool, '_invoke_metadata_patched', False):
-        return  # Guard: do not double-patch
-
-    original_invoke = type(tool).invoke  # unbound class-level method
-
-    def _invoke_with_metadata(self_tool, input, config=None, **kwargs):
-        if self_tool.metadata:
-            if config is None:
-                config = {}
-            if 'metadata' not in config:
-                config['metadata'] = {}
-            for key, value in self_tool.metadata.items():
-                if key not in config['metadata']:
-                    config['metadata'][key] = value
-        return original_invoke(self_tool, input, config=config, **kwargs)
-
-    object.__setattr__(tool, '_invoke_metadata_patched', True)
-    object.__setattr__(tool, 'invoke', types.MethodType(_invoke_with_metadata, tool))
-
-
-def _inject_display_metadata(tool_conf: dict, toolkit_tools: list) -> None:
-    """Inject ``display_name`` from tool configuration into each tool's metadata.
-
-    ``display_name`` carries the user-friendly ``AlitaTool.name`` (e.g. "My Jira Project")
-    and is consumed directly by the FE chip label.  The sanitised ``toolkit_name`` key
-    (e.g. "myjira") is kept for pipeline routing and backwards-compatibility fallback.
-
-    Custom icons are only supported for agents/pipelines (``toolkit_type: 'application'``).
-    Regular toolkits always use the default type icon, so no ``icon_meta`` injection here.
-
-    Also patches each tool's ``invoke()`` via ``_patch_tool_invoke`` so the metadata is
-    forwarded into the LangGraph run-config and becomes visible in ``AlitaCallback``.
-
-    Args:
-        tool_conf:     Raw tool configuration dict from ``tools_list`` (one entry).
-        toolkit_tools: List of instantiated :class:`BaseTool` objects produced by a toolkit.
-    """
-    display_name = tool_conf.get('name')
-    if not display_name:
-        return
-    for t in toolkit_tools:
-        if not hasattr(t, 'metadata'):
-            continue
-        if t.metadata is None:
-            t.metadata = {}
-        if isinstance(t.metadata, dict):
-            t.metadata['display_name'] = display_name
-            _patch_tool_invoke(t)
 
 
 def _safe_import_tool(tool_name, module_path, get_tools_name=None, toolkit_class_name=None):
@@ -308,8 +235,6 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
 
         # Always inject toolkit_id to each tool
         _inject_toolkit_id(tool, toolkit_tools)
-        # Inject user-friendly display_name for chip label rendering
-        _inject_display_metadata(tool, toolkit_tools)
         tools.extend(toolkit_tools)
 
     return tools

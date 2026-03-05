@@ -3,6 +3,14 @@ priority: Critical
 description: |
   Validates that the update_request_auth tool successfully updates
   the authentication settings of an existing request.
+  
+  Objective: Verify request authentication update functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Request authentication is updated
+  - Auth settings include type and credentials
+  - Returns confirmation of the update
 
 toolkits:
   - id: ${TOOLKIT_ID}
@@ -13,14 +21,9 @@ state:
     type: dict
   test_results:
     type: dict
-  folder_name:
-    type: str
-  folder_path:
-    type: str
-  request_name:
-    type: str
   request_path:
     type: str
+    value: ${TEST_REQUEST_PATH}
   auth:
     type: dict
     value:
@@ -29,77 +32,10 @@ state:
         - key: "token"
           value: "test_bearer_token"
           type: "string"
-  create_folder_result:
-    type: str
-  create_request_result:
-    type: str
-  delete_request_result:
-    type: str
-  delete_folder_result:
-    type: str
 
-entry_point: prepare_test_data
+entry_point: invoke_update_request_auth
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time, random, string
-        ts = time.strftime('%Y%m%d-%H%M%S')
-        sfx = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-        folder_name = f"PST48_Folder_{ts}_{sfx}"
-        request_name = f"PST48_Request_{ts}_{sfx}"
-        {"folder_name": folder_name, "folder_path": folder_name, "request_name": request_name, "request_path": f"{folder_name}/{request_name}"}
-    output:
-      - folder_name
-      - folder_path
-      - request_name
-      - request_path
-    structured_output: true
-    transition: create_test_folder
-
-  - id: create_test_folder
-    type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: folder_name
-    output:
-      - create_folder_result
-    structured_output: true
-    transition: create_test_request
-
-  - id: create_test_request
-    type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
-    tool: create_request
-    input:
-      - folder_path
-      - request_name
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-      name:
-        type: variable
-        value: request_name
-      method:
-        type: fixed
-        value: "GET"
-      url:
-        type: fixed
-        value: "https://api.example.com/test"
-    output:
-      - create_request_result
-    structured_output: true
-    transition: invoke_update_request_auth
-
   - id: invoke_update_request_auth
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}

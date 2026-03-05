@@ -3,90 +3,36 @@ priority: Critical
 description: |
   Validates that the move_folder tool successfully moves a folder to a different
   location within the collection hierarchy.
+  
+  Objective: Verify folder move functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Folder is moved to the target location
+  - Folder structure is updated
+  - Returns confirmation of the move
 
 toolkits:
-  - id: ${POSTMAN_TOOLKIT_ID}
-    name: ${POSTMAN_TOOLKIT_NAME}
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
 
 state:
   tool_result:
     type: dict
   test_results:
     type: dict
-  source_folder_name:
-    type: str
-  target_folder_name:
-    type: str
   source_path:
     type: str
+    value: ${TEST_FOLDER_PATH}
   target_path:
     type: str
-  create_source_result:
-    type: str
-  create_target_result:
-    type: str
-  delete_target_result:
-    type: str
-
-entry_point: prepare_test_data
+    value: ${TARGET_FOLDER_PATH}
+entry_point: invoke_move_folder
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-        source_folder_name = f"PST32_Source_{timestamp}_{suffix}"
-        target_folder_name = f"PST32_Target_{timestamp}_{suffix}"
-        source_path = source_folder_name
-        target_path = target_folder_name
-        {"source_folder_name": source_folder_name, "target_folder_name": target_folder_name, "source_path": source_path, "target_path": target_path}
-    output:
-      - source_folder_name
-      - target_folder_name
-      - source_path
-      - target_path
-    structured_output: true
-    transition: create_source_folder
-
-  - id: create_source_folder
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - source_folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: source_folder_name
-    output:
-      - create_source_result
-    structured_output: true
-    transition: create_target_folder
-
-  - id: create_target_folder
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - target_folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: target_folder_name
-    output:
-      - create_target_result
-    structured_output: true
-    transition: invoke_move_folder
-
   - id: invoke_move_folder
     type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    toolkit_name: ${TOOLKIT_NAME}
     tool: move_folder
     input:
       - source_path
@@ -99,13 +45,14 @@ nodes:
         type: variable
         value: target_path
     output:
+
       - tool_result
     structured_output: true
     transition: process_results
 
   - id: process_results
     type: llm
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     input:
       - tool_result
     input_mapping:
@@ -119,17 +66,23 @@ nodes:
           
           Tool Result: {tool_result}
           
-          Perform the following checks:
-          1. Confirm the tool executed successfully (no ToolException).
-          2. Verify the result contains a success message indicating the folder was moved.
+          This test validates that move_folder moves a folder to a new location.
           
-          Return a JSON object:
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates folder was moved.
+          3. Check for success confirmation or updated collection structure.
+          4. Validate the folder is now at the target location.
+          
+          Return a JSON object named test_results with the following structure:
+          
           {{
             "test_passed": boolean (true if folder was moved successfully),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
-          Return **ONLY** the JSON object.
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed
         value: []
@@ -137,20 +90,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
-    transition: cleanup_delete_target
-
-  - id: cleanup_delete_target
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_folder
-    input:
-      - target_path
-    input_mapping:
-      folder_path:
-        type: variable
-        value: target_path
-    output:
-      - delete_target_result
-    structured_output: true
     transition: END

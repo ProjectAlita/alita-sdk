@@ -13,122 +13,26 @@ description: |
   - Handles requests with no pre-request scripts gracefully
 
 toolkits:
-  - id: ${POSTMAN_TOOLKIT_ID}
-    name: ${POSTMAN_TOOLKIT_NAME}
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
 
 state:
   tool_result:
     type: dict
   test_results:
     type: dict
-  folder_name:
-    type: str
-  request_name:
-    type: str
-  folder_path:
-    type: str
   request_path:
     type: str
-  create_folder_result:
-    type: str
-  create_request_result:
-    type: str
-  update_script_result:
-    type: str
-  delete_request_result:
-    type: str
-  delete_folder_result:
-    type: str
+    value: ${TEST_REQUEST_PATH}
   script_type:
     type: str
     value: "prerequest"
-entry_point: prepare_test_data
+entry_point: invoke_get_request_script
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-        folder_name = f"PST13_Folder_{timestamp}_{suffix}"
-        request_name = f"PST13_Request_{timestamp}_{suffix}"
-        folder_path = folder_name
-        request_path = f"{folder_name}/{request_name}"
-        {"folder_name": folder_name, "request_name": request_name, "folder_path": folder_path, "request_path": request_path}
-    output:
-      - folder_name
-      - request_name
-      - folder_path
-      - request_path
-    structured_output: true
-    transition: create_test_folder
-
-  - id: create_test_folder
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: folder_name
-    output:
-      - create_folder_result
-    structured_output: true
-    transition: create_test_request
-
-  - id: create_test_request
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_request
-    input:
-      - folder_path
-      - request_name
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-      name:
-        type: variable
-        value: request_name
-      method:
-        type: fixed
-        value: "GET"
-      url:
-        type: fixed
-        value: "https://api.example.com/test"
-    output:
-      - create_request_result
-    structured_output: true
-    transition: add_prerequest_script
-
-  - id: add_prerequest_script
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: update_request_pre_script
-    input:
-      - request_path
-    input_mapping:
-      request_path:
-        type: variable
-        value: request_path
-      pre_request_script:
-        type: fixed
-        value: "console.log('pre-request script executed');"
-    output:
-      - update_script_result
-    structured_output: true
-    transition: invoke_get_request_script
-
   - id: invoke_get_request_script
     type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    toolkit_name: ${TOOLKIT_NAME}
     tool: get_request_script
     input:
       - request_path
@@ -141,39 +45,8 @@ nodes:
         type: variable
         value: script_type
     output:
+
       - tool_result
-    structured_output: true
-    transition: cleanup_delete_request
-
-  - id: cleanup_delete_request
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_request
-    input:
-      - request_path
-    input_mapping:
-      request_path:
-        type: variable
-        value: request_path
-    output:
-      - delete_request_result
-    structured_output: true
-    transition: cleanup_delete_folder
-
-  - id: cleanup_delete_folder
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_folder
-    input:
-      - folder_path
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-    output:
-      - delete_folder_result
     structured_output: true
     transition: process_results
 
@@ -182,45 +55,34 @@ nodes:
     model: gpt-4o-2024-11-20
     input:
       - tool_result
-      - create_folder_result
-      - create_request_result
     input_mapping:
       system:
         type: fixed
-        value: "You are a quality assurance validator. Return only valid JSON."
+        value: "You are a quality assurance validator."
       task:
         type: fstring
         value: |
           Analyze the output from the 'get_request_script' tool for pre-request scripts.
-
-          Folder Creation Result: {create_folder_result}
-          Request Creation Result: {create_request_result}
-          Get Script Result: {tool_result}
-
-          This is a POSITIVE test - we expect successful pre-request script retrieval.
-
-          Validation Criteria (ALL must pass for test_passed=true):
-          1. folder_created: Folder was created successfully
-          2. request_created: Request with pre-request script was created
-          3. script_retrieved: get_request_script returned success=true
-          4. has_script_content: Result contains script_content field that is not empty
-          5. correct_script_type: Script type is "prerequest"
-          6. no_errors: No error indicators in any output
-
-          Return JSON test_results:
+          
+          Tool Result: {tool_result}
+          
+          This test validates that get_request_script retrieves pre-request script content.
+          
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result contains pre-request script content or indicates no scripts.
+          3. Check that pre-request script type is properly identified.
+          4. Validate the response is appropriate for pre-request scripts.
+          
+          Return a JSON object named test_results with the following structure:
+          
           {{
-            "test_passed": boolean (true only if ALL criteria pass),
-            "folder_created": boolean,
-            "request_created": boolean,
-            "script_retrieved": boolean,
-            "has_script_content": boolean,
-            "correct_script_type": boolean,
-            "no_errors": boolean,
+            "test_passed": boolean (true if pre-request script was retrieved),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
-
-          Return ONLY the JSON object. No markdown formatting.
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed
         value: []

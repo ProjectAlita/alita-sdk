@@ -771,13 +771,6 @@ class Assistant:
                 agent_name=main_agent_name,
                 description="Hand back to the main coordinating agent after completing the task"
             )
-            # Inject swarm metadata so the FE chip shows the destination with the Swarm Mode icon
-            if isinstance(handoff_back_tool.metadata, dict):
-                handoff_back_tool.metadata.update({
-                    'display_name': 'Swarm Mode',
-                    'toolkit_name': 'swarm',
-                    'toolkit_type': 'internal',
-                })
 
             def invoke_application(state: MessagesState, config: RunnableConfig = None):
                 messages = state["messages"]
@@ -889,8 +882,7 @@ class Assistant:
             original_agent_tool = self._unwrap_tool(agent_tool)
 
             agent_name = agent_tool.name
-            tool_metadata = agent_tool.metadata if hasattr(agent_tool, 'metadata') and isinstance(agent_tool.metadata, dict) else {}
-            original_name = tool_metadata.get('original_name', agent_name)
+            original_name = agent_tool.metadata.get('original_name', agent_name) if hasattr(agent_tool, 'metadata') else agent_name
 
             # Detect pipeline vs agent
             is_pipeline = getattr(original_agent_tool, 'is_subgraph', False)
@@ -938,19 +930,10 @@ class Assistant:
                     target_cfg = next((c for c in peer_configs if c['name'] == target_name), None)
                     desc = (f"Hand off to {target_cfg['original_name']}: {target_cfg['description']}"
                             if target_cfg else f"Hand off to {target_name}")
-                handoff = create_handoff_tool(
+                handoffs.append(create_handoff_tool(
                     agent_name=target_name,
                     description=desc,
-                )
-                # Inject swarm metadata so the FE chip shows "Swarm Mode" with the
-                # swarm icon for all handoff actions (toolkit_type='internal', toolkit_name='swarm')
-                if isinstance(handoff.metadata, dict):
-                    handoff.metadata.update({
-                        'display_name': 'Swarm Mode',
-                        'toolkit_name': 'swarm',
-                        'toolkit_type': 'internal',
-                    })
-                handoffs.append(handoff)
+                ))
             return handoffs
 
         # --- Main agent setup ---

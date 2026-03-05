@@ -144,13 +144,11 @@ class ApplicationToolkit(BaseToolkit):
                 if default_val is not None and default_val != '':
                     variable_defaults[var['name']] = default_val
 
-        # Build metadata with toolkit_type, agent_type, and display name for chip rendering.
-        # app_name is the human-readable agent/pipeline name shown on the chip label.
+        # Build metadata with toolkit_type and agent_type for nested agent/pipeline identification
+        # Note: application tools should not have toolkit_name
         metadata = {
             'toolkit_type': 'application',
             'agent_type': agent_type,
-            'toolkit_name': app_name,   # used by FE resolveToolkitType() and chip label fallback
-            'display_name': app_name,   # canonical display field consumed directly by chip label
         }
         if icon_meta:
             metadata['icon_meta'] = icon_meta

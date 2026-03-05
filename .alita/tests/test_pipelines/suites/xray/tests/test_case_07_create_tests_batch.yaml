@@ -22,7 +22,7 @@ state:
     type: list
     value:
       - Unable to create
-      - GraphQL error
+      - error
       - failed
       - exception
       - GraphQL errors

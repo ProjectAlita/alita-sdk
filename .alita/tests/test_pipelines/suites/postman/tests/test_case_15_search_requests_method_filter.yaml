@@ -76,18 +76,15 @@ nodes:
           This test validates that search_requests filters by HTTP method.
           
           Perform the following checks:
-          1. Confirm the tool executed successfully (no ToolException or error).
-          2. Verify the result contains a method_filter field showing the filter was applied.
-          3. Check that results_count is present (0 is acceptable - means no matching requests).
-          4. Validate the response structure is correct (query, search_in, method_filter, results_count, items).
-          
-          IMPORTANT: A result with results_count=0 is VALID - it means the filter was applied but no requests matched.
-          test_passed should be true as long as the tool ran without errors and returned a structured response.
+          1. Confirm the tool executed successfully.
+          2. Verify the result contains filtered search results.
+          3. Check that results only include POST method requests if applicable.
+          4. Validate the method filter was properly applied.
           
           Return a JSON object named test_results with the following structure:
           
           {{
-            "test_passed": boolean (true if tool ran without errors and returned structured response),
+            "test_passed": boolean (true if search with method filter executed successfully),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
