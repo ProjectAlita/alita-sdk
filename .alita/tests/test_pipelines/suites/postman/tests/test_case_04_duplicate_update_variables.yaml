@@ -7,8 +7,8 @@ description: |
   
   Expected Behavior:
   - Collection is duplicated successfully
-  - Variables are updated on the duplicate
-  - Updated variables are verified
+  - Variables are updated on the duplicate collection
+  - Updated variables are verified by retrieving the duplicate
   - Duplicate collection is deleted after test
 
 toolkits:
@@ -16,9 +16,6 @@ toolkits:
     name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
-  source_collection_id:
-    type: str
-    value: ${POSTMAN_COLLECTION_ID}
   duplicate_name:
     type: str
   new_variables_json:
