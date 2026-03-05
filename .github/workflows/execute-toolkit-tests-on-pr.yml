@@ -2,7 +2,7 @@ name: Execute toolkit AI tests on PR
 
 on:
   pull_request:
-     types: [opened, synchronize]
+     types: [opened]
      branches:
        - main
   workflow_dispatch:
@@ -107,8 +107,7 @@ jobs:
               echo ""
               echo "---"
               echo "*Analysis performed by AI agent on PR #${{ github.event.pull_request.number }}*"
-            } >> $GITHUB_STEP_SUMMARY
-            
+            } >> $GITHUB_STEP_SUMMARY        
             exit 0
           fi
           
