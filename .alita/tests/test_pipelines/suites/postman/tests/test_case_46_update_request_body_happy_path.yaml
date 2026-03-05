@@ -24,12 +24,11 @@ state:
   request_path:
     type: str
     value: ${TEST_REQUEST_PATH}
-  mode:
-    type: str
-    value: "raw"
-  raw:
-    type: str
-    value: '{"name": "Updated User", "email": "updated@example.com"}'
+  body:
+    type: dict
+    value:
+      mode: "raw"
+      raw: '{"name": "Updated User", "email": "updated@example.com"}'
 entry_point: invoke_update_request_body
 
 nodes:
