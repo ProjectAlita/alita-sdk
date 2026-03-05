@@ -2,106 +2,37 @@ name: "PST40 update request url happy"
 priority: Critical
 description: |
   Validates that the update_request_url tool successfully updates the URL
-  of an existing API request.
+  of an existing request.
+  
+  Objective: Verify request URL update functionality
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Request URL is updated
+  - Changes are persisted
+  - Returns confirmation of the update
 
 toolkits:
-  - id: ${POSTMAN_TOOLKIT_ID}
-    name: ${POSTMAN_TOOLKIT_NAME}
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
 
 state:
   tool_result:
     type: dict
   test_results:
     type: dict
-  folder_name:
-    type: str
-  folder_path:
-    type: str
-  request_name:
-    type: str
   request_path:
     type: str
+    value: ${TEST_REQUEST_PATH}
   new_url:
     type: str
-    value: "https://api.example.com/updated"
-  create_folder_result:
-    type: str
-  create_request_result:
-    type: str
-  delete_request_result:
-    type: str
-  delete_folder_result:
-    type: str
-
-entry_point: prepare_test_data
+    value: "https://api.example.com/v2/users"
+entry_point: invoke_update_request_url
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-        folder_name = f"PST40_Folder_{timestamp}_{suffix}"
-        request_name = f"PST40_Request_{timestamp}_{suffix}"
-        folder_path = folder_name
-        request_path = f"{folder_name}/{request_name}"
-        {"folder_name": folder_name, "request_name": request_name, "folder_path": folder_path, "request_path": request_path}
-    output:
-      - folder_name
-      - request_name
-      - folder_path
-      - request_path
-    structured_output: true
-    transition: create_test_folder
-
-  - id: create_test_folder
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: folder_name
-    output:
-      - create_folder_result
-    structured_output: true
-    transition: create_test_request
-
-  - id: create_test_request
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_request
-    input:
-      - folder_path
-      - request_name
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-      name:
-        type: variable
-        value: request_name
-      method:
-        type: fixed
-        value: "GET"
-      url:
-        type: fixed
-        value: "https://api.example.com/original"
-    output:
-      - create_request_result
-    structured_output: true
-    transition: invoke_update_request_url
-
   - id: invoke_update_request_url
     type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    toolkit_name: ${TOOLKIT_NAME}
     tool: update_request_url
     input:
       - request_path
@@ -114,6 +45,7 @@ nodes:
         type: variable
         value: new_url
     output:
+
       - tool_result
     structured_output: true
     transition: process_results
@@ -134,17 +66,23 @@ nodes:
           
           Tool Result: {tool_result}
           
-          Perform the following checks:
-          1. Confirm the tool executed successfully (no ToolException).
-          2. Verify the result indicates URL was updated.
+          This test validates that update_request_url updates the request URL.
           
-          Return a JSON object:
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the result indicates URL was updated.
+          3. Check for success confirmation.
+          4. Validate the URL change was applied.
+          
+          Return a JSON object named test_results with the following structure:
+          
           {{
             "test_passed": boolean (true if request URL was updated successfully),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
-          Return **ONLY** the JSON object.
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed
         value: []
@@ -152,36 +90,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
-    transition: cleanup_delete_request
-
-  - id: cleanup_delete_request
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_request
-    input:
-      - request_path
-    input_mapping:
-      request_path:
-        type: variable
-        value: request_path
-    output:
-      - delete_request_result
-    structured_output: true
-    transition: cleanup_delete_folder
-
-  - id: cleanup_delete_folder
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_folder
-    input:
-      - folder_path
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-    output:
-      - delete_folder_result
-    structured_output: true
     transition: END

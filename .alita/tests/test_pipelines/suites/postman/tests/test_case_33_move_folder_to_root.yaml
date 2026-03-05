@@ -3,111 +3,56 @@ priority: High
 description: |
   Validates that the move_folder tool can move a folder to the root level
   of the collection by setting target_path to null or empty.
+  
+  Objective: Verify moving folder to root level
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Folder is moved to collection root
+  - Folder becomes a top-level folder
+  - Returns confirmation of the move
 
 toolkits:
-  - id: ${POSTMAN_TOOLKIT_ID}
-    name: ${POSTMAN_TOOLKIT_NAME}
+  - id: ${TOOLKIT_ID}
+    name: ${TOOLKIT_NAME}
 
 state:
   tool_result:
     type: dict
   test_results:
     type: dict
-  parent_folder_name:
+  source_path:
     type: str
-  child_folder_name:
+    value: ${TEST_FOLDER_PATH}
+  target_path:
     type: str
-  parent_path:
-    type: str
-  child_path:
-    type: str
-  create_parent_result:
-    type: str
-  create_child_result:
-    type: str
-  delete_child_result:
-    type: str
-  delete_parent_result:
-    type: str
-
-entry_point: prepare_test_data
+    value: null
+entry_point: invoke_move_folder
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        import random
-        import string
-        timestamp = time.strftime('%Y%m%d-%H%M%S')
-        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-        parent_folder_name = f"PST33_Parent_{timestamp}_{suffix}"
-        child_folder_name = f"PST33_Child_{timestamp}_{suffix}"
-        parent_path = parent_folder_name
-        child_path = f"{parent_folder_name}/{child_folder_name}"
-        {"parent_folder_name": parent_folder_name, "child_folder_name": child_folder_name, "parent_path": parent_path, "child_path": child_path}
-    output:
-      - parent_folder_name
-      - child_folder_name
-      - parent_path
-      - child_path
-    structured_output: true
-    transition: create_parent_folder
-
-  - id: create_parent_folder
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - parent_folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: parent_folder_name
-    output:
-      - create_parent_result
-    structured_output: true
-    transition: create_child_folder
-
-  - id: create_child_folder
-    type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - child_folder_name
-      - parent_path
-    input_mapping:
-      name:
-        type: variable
-        value: child_folder_name
-      parent_path:
-        type: variable
-        value: parent_path
-    output:
-      - create_child_result
-    structured_output: true
-    transition: invoke_move_folder
-
   - id: invoke_move_folder
     type: toolkit
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    toolkit_name: ${TOOLKIT_NAME}
     tool: move_folder
     input:
-      - child_path
+      - source_path
+      - target_path
     input_mapping:
       source_path:
         type: variable
-        value: child_path
+        value: source_path
+      target_path:
+        type: variable
+        value: target_path
     output:
+
       - tool_result
     structured_output: true
     transition: process_results
 
   - id: process_results
     type: llm
-    model: ${DEFAULT_LLM_MODEL}
+    model: gpt-4o-2024-11-20
     input:
       - tool_result
     input_mapping:
@@ -121,17 +66,23 @@ nodes:
           
           Tool Result: {tool_result}
           
-          Perform the following checks:
-          1. Confirm the tool executed successfully (no ToolException).
-          2. Verify the result contains a success message indicating the folder was moved.
+          This test validates that move_folder can move a folder to root level.
           
-          Return a JSON object:
+          Perform the following checks:
+          1. Confirm the tool executed successfully.
+          2. Verify the folder was moved to root level.
+          3. Check for success confirmation.
+          4. Validate the folder is now a top-level folder.
+          
+          Return a JSON object named test_results with the following structure:
+          
           {{
             "test_passed": boolean (true if folder was moved to root successfully),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
-          Return **ONLY** the JSON object.
+          
+          Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed
         value: []
@@ -139,36 +90,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
-    transition: cleanup_delete_child
-
-  - id: cleanup_delete_child
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_folder
-    input:
-      - child_folder_name
-    input_mapping:
-      folder_path:
-        type: variable
-        value: child_folder_name
-    output:
-      - delete_child_result
-    structured_output: true
-    transition: cleanup_delete_parent
-
-  - id: cleanup_delete_parent
-    type: toolkit
-    continue_on_error: true
-    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
-    tool: delete_folder
-    input:
-      - parent_path
-    input_mapping:
-      folder_path:
-        type: variable
-        value: parent_path
-    output:
-      - delete_parent_result
-    structured_output: true
     transition: END

@@ -1,10 +1,16 @@
 name: "PST57 move request to root"
 priority: High
 description: |
-  Validates that the move_request tool successfully moves a request to the
-  collection root level (no parent folder).
+  Validates that the move_request tool can move a request to the root level
+  of the collection (not inside any folder).
   
-  Objective: Verify request move to root functionality
+  Objective: Verify moving request to collection root
+  
+  Expected Behavior:
+  - Tool executes successfully
+  - Request is moved to collection root
+  - Request becomes a top-level item
+  - Returns confirmation of the move
 
 toolkits:
   - id: ${TOOLKIT_ID}
@@ -15,99 +21,31 @@ state:
     type: dict
   test_results:
     type: dict
-  folder_name:
-    type: str
-  request_name:
-    type: str
-  folder_path:
-    type: str
   request_path:
     type: str
-  create_folder_result:
+    value: ${TEST_REQUEST_PATH}
+  target_folder_path:
     type: str
-  create_request_result:
-    type: str
-  delete_result:
-    type: str
-
-entry_point: prepare_test_data
+    value: null
+entry_point: invoke_move_request
 
 nodes:
-  - id: prepare_test_data
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time, random, string
-        ts = time.strftime('%Y%m%d-%H%M%S')
-        sfx = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-        folder_name = f"PST57_Folder_{ts}_{sfx}"
-        request_name = f"PST57_Request_{ts}_{sfx}"
-        folder_path = folder_name
-        request_path = f"{folder_name}/{request_name}"
-        {"folder_name": folder_name, "request_name": request_name, "folder_path": folder_path, "request_path": request_path}
-    output:
-      - folder_name
-      - request_name
-      - folder_path
-      - request_path
-    structured_output: true
-    transition: create_test_folder
-
-  - id: create_test_folder
-    type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
-    tool: create_folder
-    input:
-      - folder_name
-    input_mapping:
-      name:
-        type: variable
-        value: folder_name
-    output:
-      - create_folder_result
-    structured_output: true
-    transition: create_test_request
-
-  - id: create_test_request
-    type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
-    tool: create_request
-    input:
-      - folder_path
-      - request_name
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-      name:
-        type: variable
-        value: request_name
-      method:
-        type: fixed
-        value: "GET"
-      url:
-        type: fixed
-        value: "https://api.example.com/test"
-    output:
-      - create_request_result
-    structured_output: true
-    transition: invoke_move_request
-
   - id: invoke_move_request
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
     tool: move_request
     input:
       - request_path
+      - target_folder_path
     input_mapping:
-      source_path:
+      request_path:
         type: variable
         value: request_path
-      target_path:
-        type: fixed
-        value: null
+      target_folder_path:
+        type: variable
+        value: target_folder_path
     output:
+
       - tool_result
     structured_output: true
     transition: process_results

@@ -28,7 +28,6 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    continue_on_error: true
     tool: get_team_projects
     toolkit_name: ${FIGMA_TOOLKIT_NAME}
     transition: validate_error_response
@@ -59,9 +58,8 @@ nodes:
              - Should return an error message
              - Error should indicate team not found or unauthorized
              - HTTP status should reflect the error (403/404)
-          3. Graceful Failure: Tool should handle invalid input gracefully.
-             NOTE: A ToolException with a clear HTTP error message (e.g. 404 Not Found) IS considered graceful handling.
-             Stack traces in the tool output are part of the framework's standard error format and do NOT indicate ungraceful handling.
+          3. Graceful Failure: Tool should handle invalid input gracefully
+          4. No Sensitive Data: Error should not expose internal details
 
           Return a JSON object named test_results with this EXACT structure:
           {
@@ -73,8 +71,6 @@ nodes:
             "error": string or null,
             "message_snippet": "Brief summary of error handling"
           }
-
-          Set test_passed=true if and only if: tool_executed=true AND error_handled_gracefully=true AND appropriate_error_message=true.
 
           IMPORTANT: Return ONLY the test_results JSON object, no additional text.
     model: ${DEFAULT_LLM_MODEL:gpt-4o}

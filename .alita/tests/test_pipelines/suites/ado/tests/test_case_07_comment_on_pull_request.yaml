@@ -74,22 +74,21 @@ nodes:
         value: |-
           Validate the output from 'comment_on_pull_request' and verify the comment appears in the PR details.
 
-          Comment Query (full): {generated_comment}
+          Expected Comment: {generated_comment}
+          Comment Query (full): {comment_query}
           Comment Tool Result: {tool_result}
           PR Details: {pr_details}
 
-          Note: The comment_query format is "11\n\n<comment_text>". The actual comment text is the part after the first "\n\n".
-
           Validation rules:
            - tool_executed: True ONLY if tool_result contains exactly "Commented on pull request 11" (success message format)
-           - comment_matched: True ONLY if the comment text (part after "\n\n" in comment_query) is found in pr_details comments section
+           - comment_matched: True ONLY if the generated_comment text is found in pr_details (check in comments/threads section)
            - test_passed: True if BOTH tool_executed AND comment_matched are True
            - message_snippet: short string summarizing validation result
            - error: detailed error message if any validation fails, null otherwise
 
           Check carefully:
           1. Tool result must be: "Commented on pull request 11"
-          2. pr_details must contain the comment text (after the "\n\n" separator), no need for exact format match
+          2.  pr_details contain generated_comment , no need to compare exact match and formating
 
           Return ONLY JSON and tags test_results:
           {{
@@ -108,15 +107,29 @@ nodes:
       test_results: dict
     transition: END
   - id: LLM 1
-    type: code
-    code:
-      type: fixed
-      value: |
-        import time
-        comment_text = f"Test comment {time.strftime('%Y-%m-%d %H:%M:%S')}"
-        generated_comment = f"11\n\n{comment_text}"
-        {"generated_comment": generated_comment}
+    type: llm
+    input: []
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fstring
+        value: You are data generator
+      task:
+        type: fstring
+        value: |-
+          Create a test data string
+
+          11 
+
+          Test comment ${current_date}${current_time}
+
+          You have to replace the variables yourself
+
+
+          Return result as test_string only, do not do any summarization, and do not wrapp it with any kind of markup
     output:
       - generated_comment
-    structured_output: true
+    structured_output: false
     transition: invoke_comment_on_pr
