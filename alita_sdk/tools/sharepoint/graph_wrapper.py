@@ -171,6 +171,19 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             logging.error("Graph get_lists failed: %s", e)
             return ToolException(f"Cannot retrieve lists: {e}")
 
+    @staticmethod
+    def _detect_column_type(col: dict) -> str:
+        """Infer a simplified column type string from a Graph API column descriptor."""
+        if 'number' in col or 'currency' in col:
+            return 'number'
+        if 'boolean' in col:
+            return 'boolean'
+        if 'dateTime' in col:
+            return 'dateTime'
+        if 'choice' in col:
+            return 'choice'
+        return 'text'
+
     def get_list_columns(self, list_title: str):
         """Get all columns (fields) in a SharePoint list with their metadata.
 
@@ -194,19 +207,7 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                     continue
                 if 'lookup' in col:
                     continue
-
-                col_type = 'text'
-                if 'text' in col:
-                    col_type = 'text'
-                elif 'number' in col or 'currency' in col:
-                    col_type = 'number'
-                elif 'boolean' in col:
-                    col_type = 'boolean'
-                elif 'dateTime' in col:
-                    col_type = 'dateTime'
-                elif 'choice' in col:
-                    col_type = 'choice'
-
+                col_type = self._detect_column_type(col)
                 column_info = {
                     'name': col.get('name', ''),
                     'displayName': col.get('displayName', col.get('name', '')),
@@ -246,63 +247,182 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             raise ToolException(f"Create list item failed: {e}") from e
 
     # ------------------------------------------------------------------ #
+    #  Files — private helpers                                            #
+    # ------------------------------------------------------------------ #
+
+    def _validate_and_resolve_file_source(
+        self,
+        filepath: Optional[str],
+        filedata: Optional[str],
+        filename: Optional[str],
+    ) -> tuple:
+        """Validate file source args and return (file_bytes, actual_filename).
+
+        Shared by upload_file() and add_attachment_to_list_item().
+        Imports are done lazily to avoid circular dependencies.
+        """
+        from ..utils import get_file_bytes_from_artifact
+
+        if not filepath and not filedata:
+            raise ToolException("Either filepath or filedata must be provided")
+        if filepath and filedata:
+            raise ToolException("Cannot specify both filepath and filedata")
+        if filedata and not filename:
+            raise ToolException("filename is required when using filedata")
+
+        if filepath:
+            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
+            return file_bytes, filename or artifact_filename
+        return filedata.encode('utf-8'), filename
+
+    def _build_drive_item_path(self, folder_path: str, actual_filename: str) -> str:
+        """Strip the site prefix from folder_path and append filename.
+
+        Returns a drive-relative, URL-safe item path ready for Graph API calls.
+        """
+        site_path = re.sub(r'^https?://[^/]+', '', self.site_url).strip('/')
+        folder_clean = folder_path.strip('/')
+        if folder_clean.startswith(site_path):
+            folder_clean = folder_clean[len(site_path):].lstrip('/')
+        item_path = f"{folder_clean}/{actual_filename}".strip('/')
+        return quote(item_path, safe='/')
+
+    def _upload_small_file(
+        self, drive_id: str, safe_item_path: str, conflict: str,
+        file_bytes: bytes, mime_type: str,
+    ) -> dict:
+        """PUT a small file (≤4 MB) directly to the drive item endpoint."""
+        url = (
+            f"{_GRAPH_BASE}/drives/{drive_id}/root:/{safe_item_path}:/content"
+            f"?@microsoft.graph.conflictBehavior={conflict}"
+        )
+        resp = requests.put(
+            url,
+            headers={"Authorization": f"Bearer {self._token}", "Content-Type": mime_type},
+            data=file_bytes,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    def _upload_large_file(
+        self, drive_id: str, safe_item_path: str, conflict: str, file_bytes: bytes,
+    ) -> dict:
+        """Upload a large file (>4 MB) via a resumable upload session (5 MB chunks)."""
+        session_url = (
+            f"{_GRAPH_BASE}/drives/{drive_id}/root:/{safe_item_path}:/createUploadSession"
+        )
+        session = self._post(session_url, {"item": {"@microsoft.graph.conflictBehavior": conflict}})
+        upload_url = session.get('uploadUrl')
+        if not upload_url:
+            raise RuntimeError("No uploadUrl returned in upload session response")
+
+        total = len(file_bytes)
+        offset = 0
+        result: dict = {}
+        while offset < total:
+            chunk = file_bytes[offset: offset + _CHUNK_SIZE]
+            end = offset + len(chunk) - 1
+            chunk_resp = requests.put(
+                upload_url,
+                headers={
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Length": str(len(chunk)),
+                    "Content-Range": f"bytes {offset}-{end}/{total}",
+                    "Content-Type": "application/octet-stream",
+                },
+                data=chunk,
+                timeout=120,
+            )
+            chunk_resp.raise_for_status()
+            if chunk_resp.status_code in (200, 201):
+                result = chunk_resp.json()
+            offset += len(chunk)
+        return result
+
+    # ------------------------------------------------------------------ #
     #  Files                                                               #
     # ------------------------------------------------------------------ #
 
     def get_files_list(self, folder_name: Optional[str] = None,
                        limit_files: int = 100,
-                       form_name: Optional[str] = None):
+                       form_name: Optional[str] = None,
+                       include_extensions: Optional[List[str]] = None,
+                       skip_extensions: Optional[List[str]] = None):
         """
-        If folder name is specified, lists all files in this folder under Shared Documents path.
-        If folder name is empty, lists all files under root catalog (Shared Documents).
+        Lists all files including files from subfolders.
+        If folder name is specified, lists files under that folder; otherwise lists
+        from the root catalog (Shared Documents).
         Number of files is limited by limit_files (default is 100).
 
         If form_name is specified, only files from specified form will be returned.
+        If include_extensions is specified, only files with matching extensions are returned.
+        If skip_extensions is specified, files with matching extensions are excluded.
+        Extensions accept both 'pdf' and '.pdf' forms and are matched case-insensitively.
         Note:
             * URL anatomy: https://epam.sharepoint.com/sites/{some_site}/{form_name}/Forms/AllItems.aspx
             * Example of folders syntax: `{form_name} / Hello / inner-folder` - 1st folder is commonly form_name
         """
+        from .base_wrapper import _normalize_extensions, _matches_extension
         try:
             drive_id = self._resolve_drive_id()
-            if folder_name:
-                encoded = quote(folder_name.strip('/'), safe='/')
-                url = f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"
-            else:
-                url = f"{_GRAPH_BASE}/drives/{drive_id}/root/children"
+            norm_include = _normalize_extensions(include_extensions)
+            norm_skip = _normalize_extensions(skip_extensions)
 
             params = {
-                "$top": min(limit_files, 999),
+                "$top": 999,
                 "$select": ("id,name,file,folder,webUrl,createdDateTime,"
                              "lastModifiedDateTime,parentReference,size"),
             }
+
             result: list = []
-            next_link: Optional[str] = None
-            while len(result) < limit_files:
-                data = self._get(
-                    next_link or url,
-                    params=params if not next_link else None)
-                for item in data.get('value', []):
-                    if 'file' not in item:
-                        continue   # skip sub-folders
-                    if form_name:
-                        parent_path = (item.get('parentReference', {})
-                                       .get('path', ''))
-                        if form_name.lower() not in parent_path.lower():
+
+            # BFS queue: each entry is the /children URL for a folder to process
+            if folder_name:
+                encoded = quote(folder_name.strip('/'), safe='/')
+                queue = [f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"]
+            else:
+                queue = [f"{_GRAPH_BASE}/drives/{drive_id}/root/children"]
+
+            while queue and len(result) < limit_files:
+                url = queue.pop(0)
+                next_link: Optional[str] = url
+                while next_link and len(result) < limit_files:
+                    data = self._get(
+                        next_link,
+                        params=params if next_link == url else None)
+                    for item in data.get('value', []):
+                        if 'folder' in item:
+                            # Enqueue subfolder for processing
+                            item_id = item.get('id', '')
+                            if item_id:
+                                queue.append(
+                                    f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/children")
                             continue
-                    parent_path = item.get('parentReference', {}).get('path', '')
-                    result.append({
-                        'Name': item.get('name', ''),
-                        'Path': f"{parent_path}/{item.get('name', '')}",
-                        'Created': item.get('createdDateTime', ''),
-                        'Modified': item.get('lastModifiedDateTime', ''),
-                        'Link': item.get('webUrl', ''),
-                        'id': item.get('id', ''),
-                    })
-                    if len(result) >= limit_files:
-                        break
-                next_link = data.get('@odata.nextLink')
-                if not next_link:
-                    break
+                        if 'file' not in item:
+                            continue
+                        if form_name:
+                            parent_path = (item.get('parentReference', {})
+                                           .get('path', ''))
+                            if form_name.lower() not in parent_path.lower():
+                                continue
+                        file_name = item.get('name', '')
+                        if norm_skip and _matches_extension(file_name, norm_skip):
+                            continue
+                        if norm_include and not _matches_extension(file_name, norm_include):
+                            continue
+                        parent_path = item.get('parentReference', {}).get('path', '')
+                        result.append({
+                            'Name': file_name,
+                            'Path': f"{parent_path}/{file_name}",
+                            'Created': item.get('createdDateTime', ''),
+                            'Modified': item.get('lastModifiedDateTime', ''),
+                            'Link': item.get('webUrl', ''),
+                            'id': item.get('id', ''),
+                        })
+                        if len(result) >= limit_files:
+                            break
+                    next_link = data.get('@odata.nextLink')
 
             return result if result else ToolException(
                 "Can not get files or folder is empty. "
@@ -391,83 +511,21 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         Returns:
             dict with {id, webUrl, path, size, mime_type}
         """
-        from ..utils import get_file_bytes_from_artifact, detect_mime_type
+        from ..utils import detect_mime_type
 
-        if not filepath and not filedata:
-            raise ToolException("Either filepath or filedata must be provided")
-        if filepath and filedata:
-            raise ToolException("Cannot specify both filepath and filedata")
-        if filedata and not filename:
-            raise ToolException("filename is required when using filedata")
-
-        if filepath:
-            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
-            actual_filename = filename or artifact_filename
-        else:
-            file_bytes = filedata.encode('utf-8')
-            actual_filename = filename
-
+        file_bytes, actual_filename = self._validate_and_resolve_file_source(
+            filepath, filedata, filename
+        )
         mime_type = detect_mime_type(file_bytes, actual_filename)
         drive_id = self._resolve_drive_id()
-
-        # Build a drive-relative item path from folder_path + filename
-        site_path = re.sub(r'^https?://[^/]+', '', self.site_url).strip('/')
-        folder_clean = folder_path.strip('/')
-        # Strip site prefix if present
-        if folder_clean.startswith(site_path):
-            folder_clean = folder_clean[len(site_path):].lstrip('/')
-
-        item_path = f"{folder_clean}/{actual_filename}".strip('/')
-        safe_item_path = quote(item_path, safe='/')
+        safe_item_path = self._build_drive_item_path(folder_path, actual_filename)
         conflict = "replace" if replace else "fail"
 
         try:
             if len(file_bytes) <= _SMALL_FILE_THRESHOLD:
-                # Simple PUT for small files
-                url = (f"{_GRAPH_BASE}/drives/{drive_id}/root:/"
-                       f"{safe_item_path}:/content"
-                       f"?@microsoft.graph.conflictBehavior={conflict}")
-                resp = requests.put(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {self._token}",
-                        "Content-Type": mime_type,
-                    },
-                    data=file_bytes,
-                    timeout=120)
-                resp.raise_for_status()
-                result = resp.json()
+                result = self._upload_small_file(drive_id, safe_item_path, conflict, file_bytes, mime_type)
             else:
-                # Resumable upload session for large files
-                session_url = (f"{_GRAPH_BASE}/drives/{drive_id}/root:/"
-                               f"{safe_item_path}:/createUploadSession")
-                session = self._post(session_url, {
-                    "item": {"@microsoft.graph.conflictBehavior": conflict}
-                })
-                upload_url = session.get('uploadUrl')
-                if not upload_url:
-                    raise RuntimeError("No uploadUrl returned in upload session response")
-
-                total = len(file_bytes)
-                offset = 0
-                result = {}
-                while offset < total:
-                    chunk = file_bytes[offset: offset + _CHUNK_SIZE]
-                    end = offset + len(chunk) - 1
-                    chunk_resp = requests.put(
-                        upload_url,
-                        headers={
-                            "Authorization": f"Bearer {self._token}",
-                            "Content-Length": str(len(chunk)),
-                            "Content-Range": f"bytes {offset}-{end}/{total}",
-                            "Content-Type": "application/octet-stream",
-                        },
-                        data=chunk,
-                        timeout=120)
-                    chunk_resp.raise_for_status()
-                    if chunk_resp.status_code in (200, 201):
-                        result = chunk_resp.json()
-                    offset += len(chunk)
+                result = self._upload_large_file(drive_id, safe_item_path, conflict, file_bytes)
 
             logging.info("Uploaded '%s' to '%s' via Graph API", actual_filename, folder_path)
             return {
@@ -489,61 +547,1012 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                                     filename: Optional[str] = None,
                                     replace: bool = True):
         """Add attachment to SharePoint list item."""
-        from ..utils import get_file_bytes_from_artifact
-
-        if not filepath and not filedata:
-            raise ToolException("Either filepath or filedata must be provided")
-        if filepath and filedata:
-            raise ToolException("Cannot specify both filepath and filedata")
-        if filedata and not filename:
-            raise ToolException("filename is required when using filedata")
-
-        if filepath:
-            file_bytes, artifact_filename = get_file_bytes_from_artifact(self.alita, filepath)
-            actual_filename = filename or artifact_filename
-        else:
-            file_bytes = filedata.encode('utf-8')
-            actual_filename = filename
-
+        file_bytes, actual_filename = self._validate_and_resolve_file_source(
+            filepath, filedata, filename
+        )
         try:
             site_id = self._resolve_site_id()
             list_id = self._resolve_list_id(list_title)
-
             att_url = (f"{_GRAPH_BASE}/sites/{site_id}/lists/{list_id}/"
                        f"items/{item_id}/attachments")
 
-            # Check for existing attachment
             existing_data = self._get(att_url)
             existing = next(
                 (a for a in existing_data.get('value', [])
                  if a.get('name', '').lower() == actual_filename.lower()),
-                None)
-
+                None,
+            )
             if existing:
                 if not replace:
                     raise ToolException(
                         f"Attachment '{actual_filename}' already exists on list item "
                         f"{item_id}. Set replace=True to overwrite.")
-                att_id = existing.get('id', actual_filename)
-                self._delete(f"{att_url}/{att_id}")
+                self._delete(f"{att_url}/{existing.get('id', actual_filename)}")
 
-            # Upload new attachment (Graph API accepts base64-encoded contentBytes)
             data = self._post(att_url, {
                 "name": actual_filename,
                 "contentBytes": base64.b64encode(file_bytes).decode('ascii'),
             })
-            result = {
+            logging.info(
+                "Attachment '%s' added to list '%s' item %d via Graph API",
+                actual_filename, list_title, item_id)
+            return {
                 'id': data.get('id', actual_filename),
                 'name': data.get('name', actual_filename),
                 'size': len(file_bytes),
             }
-            logging.info(
-                "Attachment '%s' added to list '%s' item %d via Graph API",
-                actual_filename, list_title, item_id)
-            return result
         except ToolException:
             raise
         except Exception as e:
             logging.error("Graph add_attachment_to_list_item failed: %s", e)
             raise ToolException(f"Attachment failed: {e}")
 
+    # ------------------------------------------------------------------ #
+    #  OneNote  (site-scoped: /sites/{site_id}/onenote)                  #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def _onenote_prefix(self) -> str:
+        return f"{_GRAPH_BASE}/sites/{self._resolve_site_id()}/onenote"
+
+    # Default $select fields for each OneNote resource type.
+    # Override by passing select=["field1","field2"] to the respective method.
+    _NOTEBOOK_SELECT_DEFAULT = (
+        "id,displayName,createdDateTime,lastModifiedDateTime,links,isDefault,isShared"
+    )
+    _SECTION_SELECT_DEFAULT = (
+        "id,displayName,createdDateTime,lastModifiedDateTime,pagesUrl,isDefault"
+    )
+    # NOTE: contentUrl is intentionally excluded — the Graph API returns 400
+    # when it is included in $select for the pages endpoint.
+    _PAGE_SELECT_DEFAULT = (
+        "id,title,createdDateTime,lastModifiedDateTime"
+    )
+
+    def _build_onenote_select_params(
+        self, select: Optional[List[str]], default: str, extra: Optional[dict] = None
+    ) -> dict:
+        """Build a Graph API params dict with an appropriate $select value.
+
+        Args:
+            select: Caller-supplied field list. ``None`` → use *default*.
+                    Empty list → omit $select entirely.
+            default: The comma-separated default field string for this resource type.
+            extra: Any additional params to merge in (e.g. ``{"$top": 100}``).
+        """
+        params: dict = dict(extra or {})
+        if select is None:
+            params["$select"] = default
+        elif select:
+            # For pages, silently drop the known-bad field so callers never
+            # need to remember this Graph API quirk.
+            fields = [f for f in select if f != "contentUrl"]
+            if fields:
+                params["$select"] = ",".join(fields)
+        return params
+
+    def onenote_get_notebooks(self, select: Optional[List[str]] = None) -> list:
+        """List all OneNote notebooks in this SharePoint site.
+
+        Returns a list of notebook objects. By default each object contains:
+        id, displayName, createdDateTime, lastModifiedDateTime, isDefault,
+        isShared, and webUrl (via links.oneNoteWebUrl).
+
+        Args:
+            select: Optional list of fields to return instead of the defaults,
+                    e.g. ["id", "displayName"]. Pass an empty list to omit
+                    $select entirely and let Graph return all fields.
+        """
+        try:
+            params = self._build_onenote_select_params(select, self._NOTEBOOK_SELECT_DEFAULT)
+            data = self._get(f"{self._onenote_prefix}/notebooks", params=params)
+            return data.get("value", [])
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(f"Failed to list OneNote notebooks: {e}") from e
+
+    def onenote_get_sections(
+        self, notebook_id: str, select: Optional[List[str]] = None
+    ) -> list:
+        """List all sections in a specific OneNote notebook on this site.
+
+        Returns a list of section objects. By default each object contains:
+        id, displayName, createdDateTime, lastModifiedDateTime,
+        pagesUrl, and isDefault.
+
+        Args:
+            notebook_id: The ID of the notebook to list sections from.
+            select: Optional list of fields to return instead of the defaults.
+                    Pass an empty list to omit $select entirely.
+        """
+        if not notebook_id:
+            raise ToolException("notebook_id is required")
+        try:
+            params = self._build_onenote_select_params(select, self._SECTION_SELECT_DEFAULT)
+            data = self._get(
+                f"{self._onenote_prefix}/notebooks/{notebook_id}/sections",
+                params=params,
+            )
+            return data.get("value", [])
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to list sections for notebook '{notebook_id}': {e}"
+            ) from e
+
+    def onenote_get_pages(
+        self,
+        section_id: str,
+        limit: int = 100,
+        select: Optional[List[str]] = None,
+    ) -> list:
+        """List pages in a OneNote section on this site.
+
+        Returns a list of page metadata objects. By default each object contains:
+        id, title, createdDateTime, lastModifiedDateTime, and webUrl.
+        Does NOT return page HTML content — use onenote_get_page_content() for that.
+
+        Note: ``contentUrl`` cannot be used in ``$select`` — the Graph API returns
+        HTTP 400. To fetch page content use onenote_get_page_content(page_id).
+
+        Args:
+            section_id: The ID of the section to list pages from.
+            limit: Maximum number of pages to return (max 100 per request).
+            select: Optional list of fields to return instead of the defaults.
+                    Pass an empty list to omit $select entirely.
+                    Do NOT include 'contentUrl' — it is not selectable.
+        """
+        if not section_id:
+            raise ToolException("section_id is required")
+        try:
+            params = self._build_onenote_select_params(
+                select, self._PAGE_SELECT_DEFAULT, extra={"$top": min(limit, 100)}
+            )
+            data = self._get(
+                f"{self._onenote_prefix}/sections/{section_id}/pages",
+                params=params,
+            )
+            return data.get("value", [])
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to list pages for section '{section_id}': {e}"
+            ) from e
+
+    def _onenote_fetch_page_html(self, page_id: str) -> str:
+        """Fetch raw OneNote page HTML from Graph API (internal helper)."""
+        if not page_id:
+            raise ToolException("page_id is required")
+        try:
+            resp = requests.get(
+                f"{self._onenote_prefix}/pages/{page_id}/content",
+                headers=self._auth_headers(),
+                timeout=60,
+            )
+            resp.raise_for_status()
+            return resp.content.decode("utf-8")
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to get content for OneNote page '{page_id}': {e}"
+            ) from e
+
+    def onenote_get_page_content(self, page_id: str) -> str:
+        """Retrieve the raw HTML content of a OneNote page on this site.
+
+        Returns the OneNote XHTML string as stored by the service.
+        For human-readable parsed content — including image descriptions
+        and attachment listings — use onenote_read_page() instead.
+        """
+        return self._onenote_fetch_page_html(page_id)
+
+    # ------------------------------------------------------------------ #
+    #  Attachment helpers                                                  #
+    # ------------------------------------------------------------------ #
+
+    def _onenote_resolve_resource_url(self, src: str) -> str:
+        """Rewrite a raw OneNote resource URL to the canonical Graph API form.
+
+        OneNote embeds resource URLs that may look like::
+
+            https://graph.microsoft.com/.../resources/<id>/$value
+            https://graph.microsoft.com/.../resources/<id>/content
+            https://graph.microsoft.com/.../resources/<id>
+
+        All forms are normalised to::
+
+            {_GRAPH_BASE}/sites/{site_id}/onenote/resources/{resource_id}/content
+        """
+        resource_match = (
+            re.search(r'resources/([^/]+)/\$value', src)
+            or re.search(r'resources/([^/]+)/content', src)
+            or re.search(r'resources/([^/?]+)', src)
+        )
+        if resource_match:
+            resource_id = resource_match.group(1)
+            return (
+                f"{_GRAPH_BASE}/sites/{self._resolve_site_id()}"
+                f"/onenote/resources/{resource_id}/content"
+            )
+        return src
+
+    def onenote_list_attachments(self, page_id: str) -> list:
+        """List all file attachments on a OneNote page.
+
+        Parses the page HTML and extracts every ``<object data-attachment="…">``
+        element.  Embedded images (``<img>``) are intentionally excluded — only
+        user-uploaded file attachments are returned.
+
+        Returns a list of dicts, each containing:
+
+        - **name** (str): The original attachment filename
+          (from ``data-attachment``).
+        - **resource_id** (str | None): The Graph API resource ID parsed from
+          the ``data`` attribute URL.  Use this as a stable identifier for
+          :meth:`onenote_read_attachment`.
+        - **download_url** (str): The canonical Graph API download URL for this
+          attachment (``…/onenote/resources/{resource_id}/content``).
+
+        Args:
+            page_id: The ID of the OneNote page to inspect.
+        """
+        from html.parser import HTMLParser
+
+        if not page_id:
+            raise ToolException("page_id is required")
+
+        html = self._onenote_fetch_page_html(page_id)
+
+        class _AttachmentParser(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.attachments: list = []
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "object":
+                    d = dict(attrs)
+                    fname = d.get("data-attachment", "")
+                    src = d.get("data", "")
+                    if fname:
+                        self.attachments.append((fname, src))
+
+        parser = _AttachmentParser()
+        parser.feed(html)
+
+        results = []
+        for fname, src in parser.attachments:
+            canonical_url = self._onenote_resolve_resource_url(src) if src else ""
+            resource_match = re.search(r'resources/([^/?]+)', src) if src else None
+            resource_id = resource_match.group(1) if resource_match else None
+            results.append({
+                "name": fname,
+                "resource_id": resource_id,
+                "download_url": canonical_url,
+            })
+        return results
+
+    def onenote_read_attachment(
+        self,
+        page_id: str,
+        attachment_name: str,
+        capture_images: bool = True,
+    ) -> str:
+        """Download and parse a single file attachment from a OneNote page.
+
+        Looks up the attachment by *attachment_name* (case-sensitive, matches
+        the ``data-attachment`` attribute from the page HTML) using
+        :meth:`onenote_list_attachments`, downloads its bytes from the Graph
+        API, and passes them through the shared content parser
+        (``parse_content_from_bytes``).
+
+        Supports every file type registered in the SDK loader map — including
+        PDF, DOCX, XLSX, XLS, PPTX, PPT, DOC, XML, JSONL, ODP, images, plain
+        text, and more.  For image attachments an AI-generated description is
+        returned when ``capture_images=True`` and an LLM is configured.
+
+        Args:
+            page_id: The ID of the OneNote page containing the attachment.
+            attachment_name: The filename of the attachment to read, exactly as
+                returned by :meth:`onenote_list_attachments` (e.g.
+                ``"report.pdf"``).
+            capture_images: When True and an LLM is configured, run image
+                attachments through the vision pipeline.
+
+        Returns:
+            Parsed text content of the attachment as a string.
+        """
+        from ..utils.content_parser import parse_content_from_bytes
+
+        if not page_id:
+            raise ToolException("page_id is required")
+        if not attachment_name:
+            raise ToolException("attachment_name is required")
+
+        attachments = self.onenote_list_attachments(page_id)
+        match = next((a for a in attachments if a["name"] == attachment_name), None)
+        if match is None:
+            available = [a["name"] for a in attachments]
+            raise ToolException(
+                f"Attachment '{attachment_name}' not found on page '{page_id}'. "
+                f"Available attachments: {available}"
+            )
+
+        download_url = match["download_url"]
+        if not download_url:
+            raise ToolException(
+                f"Attachment '{attachment_name}' has no resolvable download URL."
+            )
+
+        try:
+            att_resp = requests.get(
+                download_url,
+                headers={"Authorization": f"Bearer {self._token}"},
+                timeout=60,
+                allow_redirects=True,
+            )
+            if att_resp.status_code in (400, 404):
+                raise ToolException(
+                    f"Graph API returned {att_resp.status_code} when downloading "
+                    f"attachment '{attachment_name}' from page '{page_id}'."
+                )
+            att_resp.raise_for_status()
+
+            return parse_content_from_bytes(
+                file_bytes=att_resp.content,
+                filename=attachment_name,
+                content_type=att_resp.headers.get("Content-Type", ""),
+                is_capture_image=capture_images,
+                llm=self.llm,
+            )
+
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to read attachment '{attachment_name}' "
+                f"from page '{page_id}': {e}"
+            ) from e
+
+    def _onenote_download_attachment_bytes(self, download_url: str, attachment_name: str) -> bytes:
+        """Download raw bytes for a OneNote attachment from its canonical Graph API URL.
+
+        Unlike :meth:`onenote_read_attachment`, this method returns the raw bytes
+        without any parsing so the indexing pipeline can pass them through
+        ``CONTENT_IN_BYTES`` / ``process_document_by_type`` itself.
+
+        Args:
+            download_url: The canonical Graph API content URL (from onenote_list_attachments).
+            attachment_name: Used only for error messages.
+
+        Returns:
+            Raw bytes of the attachment content.
+        """
+        try:
+            resp = requests.get(
+                download_url,
+                headers={"Authorization": f"Bearer {self._token}"},
+                timeout=60,
+                allow_redirects=True,
+            )
+            if resp.status_code in (400, 404):
+                raise ToolException(
+                    f"Graph API returned {resp.status_code} when downloading "
+                    f"attachment '{attachment_name}'."
+                )
+            resp.raise_for_status()
+            return resp.content
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to download attachment bytes for '{attachment_name}': {e}"
+            ) from e
+
+    # ------------------------------------------------------------------ #
+    #  onenote_read_page — private helpers                                #
+    # ------------------------------------------------------------------ #
+
+    _MIME_TO_EXT = {
+        "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "image/webp": ".webp",
+        "image/bmp": ".bmp",
+        "image/tiff": ".tiff",
+        "image/svg+xml": ".svg",
+    }
+
+    @classmethod
+    def _sniff_image_extension(cls, content_type: str, img_bytes: bytes) -> str:
+        """Return a file extension for an image given its Content-Type and raw bytes.
+
+        Falls back to magic-byte sniffing when the MIME type is not a recognised
+        image type (e.g. ``application/octet-stream``), and to ``.jpg`` as a
+        final safe fallback.
+        """
+        ext = cls._MIME_TO_EXT.get(content_type)
+        if ext:
+            return ext
+        magic = img_bytes[:4] if len(img_bytes) >= 4 else img_bytes
+        if magic[:2] == b'\xff\xd8':
+            return ".jpg"
+        if magic[:4] == b'\x89PNG':
+            return ".png"
+        if magic[:4] == b'GIF8':
+            return ".gif"
+        if magic[:4] == b'RIFF':
+            return ".webp"
+        return ".jpg"
+
+    def _fetch_onenote_image(self, src: str, alt: str, capture_images: bool) -> tuple:
+        """Download a OneNote embedded image and return ``(description, raw_bytes, filename)``.
+
+        - ``description`` – human-readable text (LLM vision result, or fallback placeholder).
+        - ``raw_bytes``   – raw image bytes, or ``None`` if the image could not be fetched.
+        - ``filename``    – e.g. ``"image0_<resource_id>.png"`` derived from the resource URL.
+
+        This is the canonical image-processing helper. Both the read-page formatter
+        and the indexing pipeline call this so the image is only downloaded once.
+        """
+        from ..utils.content_parser import parse_file_content
+
+        description = f"[image: {alt or 'no description'}]"
+        if not src or "graph.microsoft.com" not in src:
+            return description, None, None
+
+        canonical_src = self._onenote_resolve_resource_url(src)
+        # Derive a stable filename from the resource URL
+        resource_match = re.search(r'resources/([^/?]+)', canonical_src)
+        resource_id = resource_match.group(1) if resource_match else "unknown"
+
+        if not capture_images:
+            return description, None, f"image_{resource_id}.jpg"
+
+        try:
+            img_resp = requests.get(
+                canonical_src,
+                headers={"Authorization": f"Bearer {self._token}"},
+                timeout=30,
+                allow_redirects=True,
+            )
+            if img_resp.status_code in (400, 404):
+                logging.warning(
+                    "OneNote image URL returned %d, skipping: %s",
+                    img_resp.status_code, canonical_src,
+                )
+                return description, None, f"image_{resource_id}.jpg"
+            img_resp.raise_for_status()
+            img_bytes = img_resp.content
+            ct = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip().lower()
+            ext = self._sniff_image_extension(ct, img_bytes)
+            filename = f"image_{resource_id}{ext}"
+            if self.llm:
+                result = parse_file_content(
+                    file_name=filename,
+                    file_content=img_bytes,
+                    is_capture_image=True,
+                    llm=self.llm,
+                )
+                if isinstance(result, str) and result.strip():
+                    description = f"[image description: {result.strip()}]"
+            return description, img_bytes, filename
+        except Exception as img_exc:
+            logging.warning("Could not process OneNote image '%s': %s", src, img_exc)
+            return description, None, f"image_{resource_id}.jpg"
+
+    def _process_onenote_image(self, src: str, alt: str, capture_images: bool) -> str:
+        """Return the text description for an embedded OneNote image (backward-compat wrapper)."""
+        description, _, _ = self._fetch_onenote_image(src, alt, capture_images)
+        return description
+
+    def _resolve_page_attachment_data(
+        self,
+        attachments: list,
+        page_id: str,
+        capture_images: bool,
+        include_attachments: bool,
+        read_attachment_content: bool,
+    ) -> tuple:
+        """Pre-resolve canonical URLs and optionally parse content for all attachments.
+
+        Returns:
+            (attachment_download_urls, attachment_contents) — both are dicts keyed
+            by the attachment placeholder string used inside ``parser.chunks``.
+        """
+        download_urls: dict = {}
+        contents: dict = {}
+
+        for fname, src, placeholder in attachments:
+            download_urls[placeholder] = self._onenote_resolve_resource_url(src) if src else ""
+
+        if read_attachment_content and include_attachments:
+            for fname, src, placeholder in attachments:
+                try:
+                    parsed = self.onenote_read_attachment(
+                        page_id=page_id,
+                        attachment_name=fname,
+                        capture_images=capture_images,
+                    )
+                    contents[placeholder] = (
+                        parsed if parsed and not parsed.startswith("[attachment") else None
+                    )
+                except Exception as att_exc:
+                    logging.warning(
+                        "Could not process OneNote attachment '%s': %s", fname, att_exc
+                    )
+                    contents[placeholder] = None
+
+        return download_urls, contents
+
+    def _build_attachments_footer(
+        self,
+        attachments: list,
+        download_urls: dict,
+        contents: dict,
+        read_attachment_content: bool,
+    ) -> str:
+        """Build the trailing '--- Attachments ---' footer block."""
+        lines = ["\n\n--- Attachments ---"]
+        for fname, src, placeholder in attachments:
+            url = download_urls.get(placeholder) or "(no download URL)"
+            lines.append(f"  {fname}  ->  {url}")
+            parsed = contents.get(placeholder)
+            if read_attachment_content and parsed:
+                indented = "\n".join(f"    {line}" for line in parsed.splitlines())
+                lines.append(f"    Content:\n{indented}")
+        return "\n".join(lines)
+
+    def _onenote_parse_page_items(
+        self,
+        page_id: str,
+        capture_images: bool = True,
+        include_attachments: bool = True,
+        read_attachment_content: bool = False,
+    ) -> list:
+        """Parse a OneNote page and return a structured list of typed items.
+
+        Each item is a dict with a ``type`` key:
+
+        - ``{"type": "text", "content": "<plain text>"}``
+        - ``{"type": "image", "description": "<LLM description or alt text>",
+             "src": "<Graph API resource URL>", "alt": "<original alt attr>"}``
+        - ``{"type": "attachment", "name": "<filename>",
+             "download_url": "<Graph API URL>",
+             "content": "<parsed text or None>"}``
+
+        Args:
+            page_id: The ID of the OneNote page to parse.
+            capture_images: Run embedded images through the LLM vision pipeline.
+            include_attachments: Resolve and include attachment download URLs.
+            read_attachment_content: Also download and parse each attachment's content.
+
+        Returns:
+            List of typed item dicts in document order.
+        """
+        from html.parser import HTMLParser
+
+        if not page_id:
+            raise ToolException("page_id is required")
+
+        html = self._onenote_fetch_page_html(page_id)
+
+        # ── Step 1: parse XHTML into raw chunks ──────────────────────
+        class _Parser(HTMLParser):
+            _SKIP = {"script", "style", "head"}
+            _BLOCK = {
+                "p", "div", "h1", "h2", "h3", "h4", "h5", "h6",
+                "li", "br", "tr", "td", "th",
+            }
+
+            def __init__(self):
+                super().__init__()
+                self.chunks: list = []
+                self.images: list = []       # (placeholder, src, alt)
+                self.attachments: list = []  # (filename, src, placeholder)
+                self._skip_depth = 0
+
+            def handle_starttag(self, tag, attrs):
+                d = dict(attrs)
+                if tag in self._SKIP:
+                    self._skip_depth += 1
+                    return
+                if self._skip_depth:
+                    return
+                if tag == "img":
+                    src = d.get("src", "")
+                    alt = d.get("alt", "")
+                    ph = f"\x00IMG{len(self.images)}\x00"
+                    self.images.append((ph, src, alt))
+                    self.chunks.append(ph)
+                elif tag == "object":
+                    fname = d.get("data-attachment", "")
+                    src = d.get("data", "")
+                    if fname:
+                        ph = f"\x00ATT{len(self.attachments)}\x00"
+                        self.attachments.append((fname, src, ph))
+                        self.chunks.append(ph)
+                elif tag in self._BLOCK:
+                    self.chunks.append("\n")
+
+            def handle_endtag(self, tag):
+                if tag in self._SKIP:
+                    self._skip_depth = max(0, self._skip_depth - 1)
+                elif tag in self._BLOCK and not self._skip_depth:
+                    self.chunks.append("\n")
+
+            def handle_data(self, data):
+                if not self._skip_depth:
+                    self.chunks.append(data)
+
+        parser = _Parser()
+        parser.feed(html)
+
+        # ── Step 2: resolve image placeholders → descriptions + raw bytes ──
+        image_data: dict = {}
+        for ph, src, alt in parser.images:
+            description, raw_bytes, filename = self._fetch_onenote_image(src, alt, capture_images)
+            image_data[ph] = {
+                "description": description,
+                "src": self._onenote_resolve_resource_url(src) if src else "",
+                "alt": alt,
+                "raw_bytes": raw_bytes,     # bytes or None — used by indexing pipeline
+                "filename": filename,       # e.g. "image_<resource_id>.png"
+            }
+
+        # ── Step 3: resolve attachment placeholders → URLs + content ──
+        download_urls, att_contents = self._resolve_page_attachment_data(
+            parser.attachments, page_id, capture_images,
+            include_attachments, read_attachment_content,
+        )
+
+        # ── Step 4: walk chunks and build typed item list ─────────────
+        items: list = []
+        text_buf: list = []
+
+        def _flush_text():
+            if text_buf:
+                text = re.sub(r"\n{3,}", "\n\n", "".join(text_buf)).strip()
+                if text:
+                    items.append({"type": "text", "content": text})
+                text_buf.clear()
+
+        img_phs = {ph for ph, _, _ in parser.images}
+        att_phs = {ph for _, _, ph in parser.attachments}
+
+        for chunk in parser.chunks:
+            if chunk in img_phs:
+                _flush_text()
+                info = image_data[chunk]
+                items.append({
+                    "type": "image",
+                    "description": info["description"],
+                    "src": info["src"],
+                    "alt": info["alt"],
+                    "raw_bytes": info["raw_bytes"],
+                    "filename": info["filename"],
+                })
+            elif chunk in att_phs:
+                _flush_text()
+                # Look up the attachment tuple by placeholder
+                att_tuple = next(
+                    (t for t in parser.attachments if t[2] == chunk), None
+                )
+                if att_tuple:
+                    fname, _src, ph = att_tuple
+                    url = download_urls.get(ph, "")
+                    content = att_contents.get(ph) if read_attachment_content else None
+                    items.append({
+                        "type": "attachment",
+                        "name": fname,
+                        "download_url": url,
+                        "content": content,
+                    })
+            else:
+                text_buf.append(chunk)
+
+        _flush_text()
+        return items
+
+    def onenote_read_page(
+            self,
+            page_id: str,
+            capture_images: bool = True,
+            include_attachments: bool = True,
+            read_attachment_content: bool = False,
+    ) -> str:
+        """Read and parse a OneNote page into a beautified plain-text string.
+
+        Each content item (text block, image, attachment) is separated by a
+        ``-----`` divider. Text is stripped of HTML; images become their LLM
+        description (or ``[image: <alt>]`` without LLM); attachments are shown
+        as ``[attachment: <name>]`` followed by their download URL and, when
+        ``read_attachment_content=True``, their parsed content.
+
+        Args:
+            page_id: The ID of the OneNote page to read.
+            capture_images: Pass embedded images through the LLM vision pipeline.
+            include_attachments: Include attachment entries in the output.
+            read_attachment_content: Also parse and inline each attachment's content.
+
+        Returns:
+            Beautified plain-text string with ``-----`` separators between items.
+        """
+        if not page_id:
+            raise ToolException("page_id is required")
+        try:
+            items = self._onenote_parse_page_items(
+                page_id=page_id,
+                capture_images=capture_images,
+                include_attachments=include_attachments,
+                read_attachment_content=read_attachment_content,
+            )
+
+            parts: list = []
+            for item in items:
+                t = item["type"]
+                if t == "text":
+                    parts.append(item["content"])
+                elif t == "image":
+                    parts.append(item["description"])
+                elif t == "attachment":
+                    block = f"[attachment: {item['name']}]\n  {item['download_url']}"
+                    if item.get("content"):
+                        indented = "\n".join(
+                            f"  {line}" for line in item["content"].splitlines()
+                        )
+                        block += f"\n  Content:\n{indented}"
+                    parts.append(block)
+
+            return "\n-----\n".join(p for p in parts if p)
+
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to read OneNote page '{page_id}': {e}"
+            ) from e
+
+    def onenote_read_page_items(
+            self,
+            page_id: str,
+            capture_images: bool = True,
+            include_attachments: bool = True,
+            read_attachment_content: bool = False,
+    ) -> list:
+        """Read and parse a OneNote page into a structured list of typed items.
+
+        Returns a list of dicts, one per content element, in document order:
+
+        - ``{"type": "text", "content": "<plain text block>"}``
+        - ``{"type": "image", "description": "<LLM description or alt text>",
+             "src": "<canonical Graph API resource URL>", "alt": "<original alt>"}``
+        - ``{"type": "attachment", "name": "<filename>",
+             "download_url": "<canonical Graph API URL>",
+             "content": "<parsed text or None>"}``
+
+        Args:
+            page_id: The ID of the OneNote page to read.
+            capture_images: Pass embedded images through the LLM vision pipeline.
+            include_attachments: Resolve attachment download URLs and include them.
+            read_attachment_content: Also download and parse each attachment inline.
+
+        Returns:
+            List of typed item dicts in document order.
+        """
+        if not page_id:
+            raise ToolException("page_id is required")
+        try:
+            return self._onenote_parse_page_items(
+                page_id=page_id,
+                capture_images=capture_images,
+                include_attachments=include_attachments,
+                read_attachment_content=read_attachment_content,
+            )
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to read OneNote page items for '{page_id}': {e}"
+            ) from e
+
+    def onenote_create_notebook(self, display_name: str) -> dict:
+        """Create a new OneNote notebook in this SharePoint site.
+
+        Returns the created notebook object containing:
+        id, displayName, createdDateTime, and webUrl.
+        """
+        if not display_name or not display_name.strip():
+            raise ToolException("display_name is required and cannot be empty")
+        try:
+            result = self._post(
+                f"{self._onenote_prefix}/notebooks",
+                {"displayName": display_name.strip()},
+            )
+            return {
+                "id": result.get("id"),
+                "displayName": result.get("displayName"),
+                "createdDateTime": result.get("createdDateTime"),
+                "webUrl": (
+                    result.get("links", {})
+                    .get("oneNoteWebUrl", {})
+                    .get("href")
+                ),
+            }
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to create OneNote notebook '{display_name}': {e}"
+            ) from e
+
+    def onenote_create_section(self, notebook_id: str, display_name: str) -> dict:
+        """Create a new section in a OneNote notebook on this site.
+
+        Returns the created section object containing:
+        id, displayName, createdDateTime, and pagesUrl.
+        """
+        if not notebook_id:
+            raise ToolException("notebook_id is required")
+        if not display_name or not display_name.strip():
+            raise ToolException("display_name is required and cannot be empty")
+        try:
+            result = self._post(
+                f"{self._onenote_prefix}/notebooks/{notebook_id}/sections",
+                {"displayName": display_name.strip()},
+            )
+            return {
+                "id": result.get("id"),
+                "displayName": result.get("displayName"),
+                "createdDateTime": result.get("createdDateTime"),
+                "pagesUrl": result.get("pagesUrl"),
+            }
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to create section '{display_name}' in notebook "
+                f"'{notebook_id}': {e}"
+            ) from e
+
+    def onenote_create_page(self, section_id: str, html_content: str) -> dict:
+        """Create a new OneNote page in a section on this site from raw HTML.
+
+        The html_content must be a valid HTML document containing a <title> tag.
+        Example:
+            '<!DOCTYPE html><html><head><title>My Page</title></head>
+             <body><p>Content here</p></body></html>'
+
+        Returns the created page object containing:
+        id, title, createdDateTime, webUrl, and contentUrl.
+        """
+        if not section_id:
+            raise ToolException("section_id is required")
+        if not html_content or not html_content.strip():
+            raise ToolException("html_content is required and cannot be empty")
+        try:
+            resp = requests.post(
+                f"{self._onenote_prefix}/sections/{section_id}/pages",
+                headers={
+                    "Authorization": f"Bearer {self._token}",
+                    "Content-Type": "text/html",
+                },
+                data=html_content.encode("utf-8"),
+                timeout=60,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            return {
+                "id": result.get("id"),
+                "title": result.get("title"),
+                "createdDateTime": result.get("createdDateTime"),
+                "webUrl": result.get("webUrl"),
+                "contentUrl": result.get("contentUrl"),
+            }
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to create OneNote page in section '{section_id}': {e}"
+            ) from e
+
+    def onenote_update_page(self, page_id: str, patch_commands: list) -> str:
+        """Update a OneNote page using Graph API PATCH commands.
+
+        Each patch_command object must have:
+        - target: CSS selector or 'body', 'title', or an element id
+        - action: 'append', 'prepend', 'replace', 'insert', or 'delete'
+        - content: HTML string (not required for 'delete' action)
+        - position: optional — 'after' or 'before' (used with 'insert')
+
+        Returns a success confirmation string.
+        """
+        if not page_id:
+            raise ToolException("page_id is required")
+        if not patch_commands:
+            raise ToolException("patch_commands must be a non-empty list")
+        try:
+            resp = requests.patch(
+                f"{self._onenote_prefix}/pages/{page_id}/content",
+                headers=self._auth_headers("application/json"),
+                json=patch_commands,
+                timeout=60,
+            )
+            resp.raise_for_status()
+            return (
+                f"OneNote page '{page_id}' updated successfully with "
+                f"{len(patch_commands)} patch command(s)."
+            )
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to update OneNote page '{page_id}': {e}"
+            ) from e
+
+    def onenote_replace_page_content(self, page_id: str, html_content: str) -> str:
+        """Replace the entire body of a OneNote page with new HTML content.
+
+        Convenience wrapper around onenote_update_page() that generates a single
+        PATCH command to replace the full page body.
+        html_content should be a plain HTML fragment (no <html>/<head> wrapper).
+
+        Returns a success confirmation string.
+        """
+        if not page_id:
+            raise ToolException("page_id is required")
+        if not html_content:
+            raise ToolException("html_content is required")
+        return self.onenote_update_page(
+            page_id,
+            [{"target": "body", "action": "replace", "content": html_content}],
+        )
+
+    def onenote_delete_page(self, page_id: str) -> str:
+        """Permanently delete a OneNote page on this site.
+
+        This action is irreversible.
+        Returns a success confirmation string.
+        """
+        if not page_id:
+            raise ToolException("page_id is required")
+        try:
+            self._delete(f"{self._onenote_prefix}/pages/{page_id}")
+            return f"OneNote page '{page_id}' deleted successfully."
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to delete OneNote page '{page_id}': {e}"
+            ) from e
+
+    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
+        """Search for OneNote pages matching a full-text query on this site.
+
+        Returns a list of matching page metadata objects, each containing:
+        id, title, lastModifiedDateTime, createdDateTime, and webUrl.
+        """
+        if not query or not query.strip():
+            raise ToolException("query is required and cannot be empty")
+        try:
+            data = self._get(
+                f"{self._onenote_prefix}/pages",
+                params={
+                    "search": query.strip(),
+                    "$select": (
+                        "id,title,lastModifiedDateTime,createdDateTime,webUrl"
+                    ),
+                    "$top": min(limit, 100),
+                },
+            )
+            return data.get("value", [])
+        except ToolException:
+            raise
+        except Exception as e:
+            raise ToolException(
+                f"Failed to search OneNote pages with query '{query}': {e}"
+            ) from e

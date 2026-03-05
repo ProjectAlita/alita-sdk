@@ -14,7 +14,8 @@
 
 from langchain_community.document_loaders import (
     AirbyteJSONLoader, UnstructuredHTMLLoader,
-    UnstructuredXMLLoader)
+    UnstructuredXMLLoader, UnstructuredWordDocumentLoader,
+    UnstructuredPowerPointLoader)
 
 from .AlitaCSVLoader import AlitaCSVLoader
 from .AlitaDocxMammothLoader import AlitaDocxMammothLoader
@@ -201,6 +202,14 @@ document_loaders_map = {
         },
         'allowed_to_override': {**DEFAULT_ALLOWED_WITH_LLM, 'mode': 'paged'}
     },
+    # Legacy binary Word format — uses unstructured (libreoffice/antiword under the hood)
+    '.doc': {
+        'class': UnstructuredWordDocumentLoader,
+        'mime_type': 'application/msword',
+        'is_multimodal_processing': False,
+        'kwargs': {},
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
+    },
     '.json': {
         'class': AlitaJSONLoader,
         'mime_type': 'application/json',
@@ -236,14 +245,13 @@ document_loaders_map = {
         'kwargs': {},
         'allowed_to_override': DEFAULT_ALLOWED_WITH_LLM
     },
+    # Legacy binary PowerPoint format — uses unstructured (libreoffice under the hood)
     '.ppt': {
-        'class': AlitaPowerPointLoader,
+        'class': UnstructuredPowerPointLoader,
         'mime_type': 'application/vnd.ms-powerpoint',
         'is_multimodal_processing': False,
-        'kwargs': {
-            'mode': 'paged'
-        },
-        'allowed_to_override': {**DEFAULT_ALLOWED_WITH_LLM, 'mode': 'paged'}
+        'kwargs': {},
+        'allowed_to_override': DEFAULT_ALLOWED_BASE
     },
     '.pptx': {
         'class': AlitaPowerPointLoader,
