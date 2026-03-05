@@ -94,7 +94,7 @@ setup:
       alita_title: ${TESTRAIL_SECRET_NAME:testrail}
       data:
         url: ${TESTRAIL_URL:https://epamelitea.testrail.io}
-        email: ${TESTRAIL_EMAIL:liana_gevorgyan@epam.com}
+        email: ${TESTRAIL_EMAIL:Vladyslav_Variushkin@epam.com}
         password: ${TESTRAIL_PASSWORD}
 
   # Step 2e: Create TestRail Toolkit
