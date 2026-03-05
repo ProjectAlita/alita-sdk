@@ -252,7 +252,7 @@ nodes:
           2. first_update_failed: Non-matching OLD content update failed
           3. second_update_failed: Missing NEW marker update failed
           4. content_preserved: Current content matches initial content
-          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
+          5. no_unhandled_exception: Both error outputs contain 'Error Type: ToolException' confirming the exception was properly caught and handled (NOT a raw unhandled crash)
           6. no_partial_modification: File was not partially modified
           
           OPTIONAL (nice to have, but not required for test to pass):
