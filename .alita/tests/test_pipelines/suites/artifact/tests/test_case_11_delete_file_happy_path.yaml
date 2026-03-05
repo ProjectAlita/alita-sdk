@@ -40,6 +40,12 @@ state:
   filedata:
     type: str
     value: ''
+  read_before_result:
+    type: str
+    value: ''
+  read_after_result:
+    type: str
+    value: ''
   test_results:
     type: str
     value: ''
@@ -88,7 +94,7 @@ nodes:
         value: bucket_name
     output:
       - read_before_result
-    structured_output: true
+    structured_output: false
     transition: delete_file
 
   - id: delete_file
@@ -129,7 +135,8 @@ nodes:
         value: bucket_name
     output:
       - read_after_result
-    structured_output: true
+    structured_output: false
+    continue_on_error: true
     transition: validate_result
 
   # Verification using readFile instead of listFiles for more robust deletion check.
