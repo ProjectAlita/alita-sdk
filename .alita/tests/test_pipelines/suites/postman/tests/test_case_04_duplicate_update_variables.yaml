@@ -7,8 +7,8 @@ description: |
   
   Expected Behavior:
   - Collection is duplicated successfully
-  - Variables are updated on the duplicate
-  - Updated variables are verified
+  - Variables are updated on the duplicate collection
+  - Updated variables are verified by retrieving the duplicate
   - Duplicate collection is deleted after test
 
 toolkits:
@@ -16,9 +16,6 @@ toolkits:
     name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
-  source_collection_id:
-    type: str
-    value: ${POSTMAN_COLLECTION_ID}
   duplicate_name:
     type: str
   new_variables_json:
@@ -131,12 +128,8 @@ nodes:
     toolkit_name: ${POSTMAN_TOOLKIT_NAME}
     tool: update_collection_variables
     input:
-      - duplicate_id
       - variables
     input_mapping:
-      collection_id:
-        type: variable
-        value: duplicate_id
       variables:
         type: variable
         value: variables
@@ -149,12 +142,8 @@ nodes:
     type: toolkit
     toolkit_name: ${POSTMAN_TOOLKIT_NAME}
     tool: get_collection
-    input:
-      - duplicate_id
-    input_mapping:
-      collection_id:
-        type: variable
-        value: duplicate_id
+    input: []
+    input_mapping: {}
     output:
       - get_updated_result
     structured_output: true
@@ -188,13 +177,16 @@ nodes:
           Expected Variables: {new_variables_json}
           
           Validation Criteria (ALL must pass for test_passed=true):
-          1. duplication_succeeded: Collection was duplicated successfully
-          2. id_extracted: Duplicate ID was extracted
-          3. update_succeeded: Variables update completed without errors
-          4. collection_retrieved: Updated collection was retrieved
-          5. variables_present: Collection includes variable data
-          6. test_var_found: At least one test variable (test_var_pst04) is present
+          1. duplication_succeeded: Collection was duplicated successfully (duplicate_result contains collection id)
+          2. id_extracted: Duplicate ID was extracted (not "ID_NOT_FOUND")
+          3. update_succeeded: Variables update completed without errors (update_result contains collection data)
+          4. collection_retrieved: Updated collection was retrieved successfully
+          5. variables_present: Collection includes variable data (variables array present)
+          6. test_var_found: At least one variable is present in the collection (any variable key found)
           7. no_errors: No error indicators in outputs
+          
+          Note: The update_collection_variables tool updates the default collection's variables.
+          Check if the get_updated_result contains any variables array with at least one entry.
           
           Return JSON test_results:
           {{

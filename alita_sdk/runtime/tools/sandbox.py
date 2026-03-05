@@ -107,11 +107,41 @@ class PyodideSandboxTool(BaseTool):
     alita_client: Optional[Any] = None
 
     def __init__(self, **kwargs: Any) -> None:
+        # Ensure display metadata is set so AlitaCallback can render the FE chip correctly.
+        # This covers both the agent internal_tool path and pipeline Code nodes, where
+        # no external caller injects metadata before the first tool invocation.
+        if kwargs.get('metadata') is None:
+            kwargs['metadata'] = {
+                'toolkit_type': 'internal',
+                'toolkit_name': 'pyodide',
+                'display_name': 'Python Sandbox',
+            }
         super().__init__(**kwargs)
         self._sandbox = None
         # Setup caching environment for optimal performance
         _setup_pyodide_cache_env()
         self._initialize_sandbox()
+
+    def invoke(self, input, config=None, **kwargs):
+        """Inject BaseTool.metadata into the LangGraph run config before invocation.
+
+        LangChain's BaseTool.run() only passes {"name": ..., "description": ...} to
+        on_tool_start callbacks — it never forwards BaseTool.metadata.  By merging
+        self.metadata into config["metadata"] here, the fields (toolkit_type,
+        toolkit_name, display_name) reach AlitaCallback.on_tool_start via
+        kwargs["metadata"], which then emits them in the Socket.IO chip event.
+
+        This mirrors the approach used by Application.invoke() for nested agents.
+        """
+        if self.metadata:
+            if config is None:
+                config = {}
+            if 'metadata' not in config:
+                config['metadata'] = {}
+            for key, value in self.metadata.items():
+                if key not in config['metadata']:
+                    config['metadata'][key] = value
+        return super().invoke(input, config=config, **kwargs)
 
     def _prepare_pyodide_input(self, code: str) -> str:
         """Prepare input for PyodideSandboxTool by injecting state and alita_client into the code block."""

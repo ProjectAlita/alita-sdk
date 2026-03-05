@@ -143,16 +143,19 @@ nodes:
           - Search finds the match in line 3
           - Context line 2 is included (before)
           - Context line 4 is included (after)
-          - Match line is clearly marked
+          - Match line is clearly marked with a ">" prefix
           - Result indicates 1 match found
           - No errors
           
+          Note: The grep_file tool marks the matching line with a ">" prefix.
+          It does NOT inline-highlight the pattern string within the text.
+          A ">" marker on the match line IS the expected highlight mechanism.
+          
           Evaluate:
           1. Does result indicate a match was found?
-          2. Is the match line identified (line 3)?
+          2. Is the match line identified (line 3) and marked with ">"?
           3. Are context lines included (lines 2 and 4)?
-          4. Is the pattern "TARGET" highlighted in the context?
-          5. Is there any error or empty result?
+          4. Is there any error or empty result?
           
           Return a JSON object with:
           {{

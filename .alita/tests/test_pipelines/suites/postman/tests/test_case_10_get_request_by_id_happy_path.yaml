@@ -38,6 +38,8 @@ state:
     type: str
   create_request_result:
     type: str
+  get_by_path_result:
+    type: str
   get_request_result:
     type: str
   delete_request_result:
@@ -123,6 +125,21 @@ nodes:
     output:
       - create_request_result
     structured_output: true
+    transition: get_request_by_path
+
+  - id: get_request_by_path
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: get_request_by_path
+    input:
+      - request_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+    output:
+      - get_by_path_result
+    structured_output: true
     transition: extract_request_id
 
   - id: extract_request_id
@@ -133,7 +150,7 @@ nodes:
         import json
         import re
         
-        result_str = alita_state.get('create_request_result', '')
+        result_str = alita_state.get('get_by_path_result', '')
         
         # Try to extract ID from result
         request_id = None
@@ -143,13 +160,7 @@ nodes:
         if id_match:
             request_id = id_match.group(1)
         
-        # Pattern 2: Look for "uid": "..."
-        if not request_id:
-            uid_match = re.search(r'"uid"\s*:\s*"([^"]+)"', result_str)
-            if uid_match:
-                request_id = uid_match.group(1)
-        
-        # Pattern 3: Try JSON parse
+        # Pattern 2: Try JSON parse
         if not request_id:
             try:
                 result_data = json.loads(result_str)
@@ -160,7 +171,7 @@ nodes:
         
         request_id or "ID_NOT_FOUND"
     input:
-      - create_request_result
+      - get_by_path_result
     output:
       - request_id
     structured_output: true

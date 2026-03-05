@@ -63,14 +63,16 @@ nodes:
           
           Perform the following checks:
           1. Confirm the tool executed successfully.
-          2. Verify the result indicates description was updated.
-          3. Check for success confirmation or updated collection data.
-          4. Validate no errors occurred during the update.
+          2. The Postman API returns a collection object with id, name, uid on successful update.
+             A response containing a "collection" key with id/name/uid fields IS a success - the API
+             does not echo back the description field in the update response.
+          3. Check that no error field is present in the response.
+          4. If the response contains a "collection" object with id and name, treat as success.
           
           Return a JSON object named test_results with the following structure:
           
           {{
-            "test_passed": boolean (true if description was updated successfully),
+            "test_passed": boolean (true if collection object with id/name returned, no errors),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}

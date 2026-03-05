@@ -69,7 +69,10 @@ nodes:
           1. did the tool execute successfully?
           2. are there any errors?
           3. does the output contain issue details (title, description)?
-          4. is the issue data properly structured?
+          4. does the output contain a comments field (it may be a string representation of a list - this is acceptable)?
+
+          note: the comments field may be returned as a string representation of a list (e.g. "[{'body': ...}]") - this is the expected SDK behavior and should be treated as valid.
+          note: the response does not include an explicit issue_number field - verify the issue was retrieved by confirming title and body are present.
 
           return a json object with:
           {{

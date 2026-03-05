@@ -21,15 +21,110 @@ state:
     type: dict
   test_results:
     type: dict
-  request_path:
+  source_folder_name:
     type: str
-    value: ${TEST_REQUEST_PATH}
+  target_folder_name:
+    type: str
+  source_folder_path:
+    type: str
   target_folder_path:
     type: str
-    value: ${TARGET_FOLDER_PATH}
-entry_point: invoke_move_request
+  request_name:
+    type: str
+  request_path:
+    type: str
+  create_source_result:
+    type: str
+  create_target_result:
+    type: str
+  create_request_result:
+    type: str
+  delete_result:
+    type: str
+
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time, random, string
+        ts = time.strftime('%Y%m%d-%H%M%S')
+        sfx = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        source_folder_name = f"PST56_Source_{ts}_{sfx}"
+        target_folder_name = f"PST56_Target_{ts}_{sfx}"
+        request_name = f"PST56_Request_{ts}_{sfx}"
+        source_folder_path = source_folder_name
+        target_folder_path = target_folder_name
+        request_path = f"{source_folder_name}/{request_name}"
+        {"source_folder_name": source_folder_name, "target_folder_name": target_folder_name, "request_name": request_name, "source_folder_path": source_folder_path, "target_folder_path": target_folder_path, "request_path": request_path}
+    output:
+      - source_folder_name
+      - target_folder_name
+      - request_name
+      - source_folder_path
+      - target_folder_path
+      - request_path
+    structured_output: true
+    transition: create_source_folder
+
+  - id: create_source_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - source_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: source_folder_name
+    output:
+      - create_source_result
+    structured_output: true
+    transition: create_target_folder
+
+  - id: create_target_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - target_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: target_folder_name
+    output:
+      - create_target_result
+    structured_output: true
+    transition: create_test_request
+
+  - id: create_test_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - source_folder_path
+      - request_name
+    input_mapping:
+      folder_path:
+        type: variable
+        value: source_folder_path
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: fixed
+        value: "GET"
+      url:
+        type: fixed
+        value: "https://api.example.com/test"
+    output:
+      - create_request_result
+    structured_output: true
+    transition: invoke_move_request
+
   - id: invoke_move_request
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
@@ -38,14 +133,13 @@ nodes:
       - request_path
       - target_folder_path
     input_mapping:
-      request_path:
+      source_path:
         type: variable
         value: request_path
-      target_folder_path:
+      target_path:
         type: variable
         value: target_folder_path
     output:
-
       - tool_result
     structured_output: true
     transition: process_results

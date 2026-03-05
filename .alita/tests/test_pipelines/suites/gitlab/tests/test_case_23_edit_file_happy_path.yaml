@@ -172,9 +172,9 @@ nodes:
           1. branch_created: Test branch was created successfully
           2. file_created: Initial file was created successfully
           3. tool_executed: edit_file tool ran and returned results
-          4. no_errors: Output does NOT contain error indicators
-          5. text_replaced: Output confirms exact text was replaced with new text
-          6. operation_confirmed: Edit operation is confirmed in response
+          4. no_errors: Output does NOT contain error indicators (no "error", "failed", "not found" in edit result)
+          5. text_replaced: edit_file returned a success message such as "Updated file ..." — the tool does NOT echo back the replaced text, a success response IS confirmation of replacement
+          6. operation_confirmed: Edit operation is confirmed in response (success message present)
 
           Return JSON test_results:
           {{

@@ -90,8 +90,16 @@ class PandasWrapper(BaseToolApiWrapper):
                 file_obj = BytesIO(file_content.encode('utf-8'))
                 
             # Handle different file formats using pandas' built-in functionality
-            if file_extension in ['csv', 'txt']:
+            if file_extension == 'csv':
                 df = pd.read_csv(file_obj)
+            elif file_extension == 'txt':
+                try:
+                    df = pd.read_csv(file_obj)
+                except pd.errors.ParserError:
+                    file_obj.seek(0)
+                    content = file_obj.read()
+                    text = content.decode('utf-8', errors='replace') if isinstance(content, bytes) else content
+                    df = pd.DataFrame({'content': text.splitlines()})
             elif file_extension in ['xlsx', 'xls']:
                 df = pd.read_excel(file_obj, engine='calamine')
             elif file_extension == 'parquet':

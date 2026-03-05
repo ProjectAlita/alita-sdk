@@ -7,87 +7,167 @@ description: |
   Objective: Verify nested folder creation
   
   Expected Behavior:
-  - Tool executes successfully
-  - Folder is created inside the specified parent
+  - Parent folder is created first
+  - Nested folder is created inside the parent
   - Parent-child relationship is established
-  - Returns folder ID and confirmation
+  - Cleanup removes both folders
 
 toolkits:
-  - id: ${TOOLKIT_ID}
-    name: ${TOOLKIT_NAME}
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
-  tool_result:
-    type: dict
-  test_results:
-    type: dict
-  folder_name:
+  parent_folder_name:
+    type: str
+  nested_folder_name:
     type: str
     value: "Nested Folder"
   parent_path:
     type: str
-    value: ${TEST_FOLDER_PATH}
-entry_point: invoke_create_folder
+  create_parent_result:
+    type: str
+  tool_result:
+    type: dict
+  delete_nested_result:
+    type: str
+  delete_parent_result:
+    type: str
+  test_results:
+    type: dict
+
+entry_point: prepare_test_data
 
 nodes:
-  - id: invoke_create_folder
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        parent_folder_name = f"PST29_Parent_{timestamp}_{random_suffix}"
+
+        {
+          "parent_folder_name": parent_folder_name,
+          "parent_path": parent_folder_name
+        }
+    output:
+      - parent_folder_name
+      - parent_path
+    structured_output: true
+    transition: create_parent_folder
+
+  - id: create_parent_folder
     type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
     tool: create_folder
     input:
-      - folder_name
+      - parent_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: parent_folder_name
+    output:
+      - create_parent_result
+    structured_output: true
+    transition: invoke_create_folder
+
+  - id: invoke_create_folder
+    type: toolkit
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - nested_folder_name
       - parent_path
     input_mapping:
       name:
         type: variable
-        value: folder_name
+        value: nested_folder_name
       parent_path:
         type: variable
         value: parent_path
     output:
-
       - tool_result
     structured_output: true
-    transition: process_results
+    transition: validate_results
 
-  - id: process_results
+  - id: validate_results
     type: llm
-    model: gpt-4o-2024-11-20
+    model: ${DEFAULT_LLM_MODEL}
     input:
+      - create_parent_result
       - tool_result
     input_mapping:
-      system:
-        type: fixed
-        value: "You are a quality assurance validator."
-      task:
-        type: fstring
-        value: |
-          Analyze the output from the 'create_folder' tool for nested folder creation.
-          
-          Tool Result: {tool_result}
-          
-          This test validates that create_folder creates a nested folder.
-          
-          Perform the following checks:
-          1. Confirm the tool executed successfully.
-          2. Verify the folder was created inside the parent folder.
-          3. Check for folder ID and parent relationship.
-          4. Validate the nested structure was established.
-          
-          Return a JSON object named test_results with the following structure:
-          
-          {{
-            "test_passed": boolean (true if nested folder was created successfully),
-            "summary": "brief description of outcome",
-            "error": "error details if failed, null if passed"
-          }}
-          
-          Return **ONLY** the JSON object. No markdown formatting, no additional text.
       chat_history:
         type: fixed
         value: []
+      system:
+        type: fixed
+        value: "You are a strict quality assurance validator. Only return valid JSON."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from Postman nested folder creation operations.
+
+          Parent Folder Creation Result: {create_parent_result}
+          Nested Folder Creation Result: {tool_result}
+
+          This is a POSITIVE test - we expect successful nested folder creation.
+
+          Validation Criteria (ALL must pass for test_passed=true):
+          1. parent_created: Parent folder was created successfully
+          2. nested_created: Nested folder was created inside the parent
+          3. no_errors: No error indicators in any output
+
+          Return JSON:
+          {{
+            "test_passed": boolean (true only if ALL criteria pass),
+            "parent_created": boolean,
+            "nested_created": boolean,
+            "no_errors": boolean,
+            "summary": "brief description of outcome",
+            "error": string | null
+          }}
+
+          Return ONLY the JSON object. No markdown formatting.
     output:
       - test_results
     structured_output_dict:
-      test_results: "dict"
+      test_results: dict
+    transition: cleanup_delete_nested
+
+  - id: cleanup_delete_nested
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - parent_path
+    input_mapping:
+      folder_path:
+        type: fstring
+        value: "{parent_path}/Nested Folder"
+    output:
+      - delete_nested_result
+    structured_output: true
+    transition: cleanup_delete_parent
+
+  - id: cleanup_delete_parent
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - parent_folder_name
+    input_mapping:
+      folder_path:
+        type: variable
+        value: parent_folder_name
+    output:
+      - delete_parent_result
+    structured_output: true
     transition: END
