@@ -1,16 +1,10 @@
 name: "PST57 move request to root"
 priority: High
 description: |
-  Validates that the move_request tool can move a request to the root level
-  of the collection (not inside any folder).
+  Validates that the move_request tool successfully moves a request to the
+  collection root level (no parent folder).
   
-  Objective: Verify moving request to collection root
-  
-  Expected Behavior:
-  - Tool executes successfully
-  - Request is moved to collection root
-  - Request becomes a top-level item
-  - Returns confirmation of the move
+  Objective: Verify request move to root functionality
 
 toolkits:
   - id: ${TOOLKIT_ID}
@@ -21,12 +15,9 @@ state:
     type: dict
   test_results:
     type: dict
-  request_path:
+  source_path:
     type: str
     value: ${TEST_REQUEST_PATH}
-  target_folder_path:
-    type: str
-    value: null
 entry_point: invoke_move_request
 
 nodes:
@@ -35,15 +26,14 @@ nodes:
     toolkit_name: ${TOOLKIT_NAME}
     tool: move_request
     input:
-      - request_path
-      - target_folder_path
+      - source_path
     input_mapping:
       source_path:
         type: variable
-        value: request_path
-      target_folder_path:
-        type: variable
-        value: target_folder_path
+        value: source_path
+      target_path:
+        type: fixed
+        value: null
     output:
 
       - tool_result
