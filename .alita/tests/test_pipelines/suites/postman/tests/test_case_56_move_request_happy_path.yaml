@@ -38,7 +38,7 @@ nodes:
       - request_path
       - target_folder_path
     input_mapping:
-      request_path:
+      source_path:
         type: variable
         value: request_path
       target_folder_path:
