@@ -5,7 +5,39 @@ Two concrete implementations exist:
 - :class:`SharepointGraphWrapper` : Microsoft Graph API (delegated access — requires token + scopes)
 """
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
+
+from langchain_core.tools import ToolException
+
+
+def _normalize_extensions(extensions):
+    """Normalize extension filters to lowercase dot-prefixed form.
+
+    Accepts ``'pdf'``, ``'.pdf'``, or ``'*.pdf'``; returns e.g. ``['.pdf', '.docx']``.
+    An empty / None input returns an empty list.
+    """
+    if not extensions:
+        return []
+    normalized = []
+    for e in extensions:
+        if not e or not e.strip():
+            continue
+        e = e.strip()
+        # Strip glob prefix: '*.pdf' -> 'pdf', '*pdf' -> 'pdf'
+        if e.startswith('*'):
+            e = e.lstrip('*')
+        # Strip leading dot(s): '.pdf' -> 'pdf'
+        e = e.lstrip('.')
+        if e:
+            normalized.append(f'.{e.lower()}')
+    return normalized
+
+def _matches_extension(filename: str, normalized_extensions: list) -> bool:
+    """Return True if *filename*'s extension is in *normalized_extensions*."""
+    if not normalized_extensions:
+        return False
+    ext = '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+    return ext in normalized_extensions
 
 
 class BaseSharepointWrapper(ABC):
@@ -61,8 +93,21 @@ class BaseSharepointWrapper(ABC):
         folder_name: Optional[str] = None,
         limit_files: int = 100,
         form_name: Optional[str] = None,
+        include_extensions: Optional[List[str]] = None,
+        skip_extensions: Optional[List[str]] = None,
     ):
-        """Return a list of file metadata dicts from document libraries.
+        """Return a list of file metadata dicts from document libraries,
+        including files from subfolders.
+
+        Args:
+            folder_name: Optional sub-folder path to restrict listing.
+            limit_files: Maximum number of files to return.
+            form_name: Optional Document Library name filter.
+            include_extensions: If provided, only files whose extension matches
+                one of these values are returned.  Accepts ``'pdf'`` or ``'.pdf'``
+                form; matched case-insensitively.
+            skip_extensions: If provided, files whose extension matches any of
+                these values are excluded.  Same format as *include_extensions*.
 
         Returns:
             list[dict] on success, :class:`ToolException` on failure.
@@ -127,4 +172,64 @@ class BaseSharepointWrapper(ABC):
             :class:`ToolException` on failure.
         """
 
+    # ------------------------------------------------------------------ #
+    #  OneNote  (Graph API only — delegated access required)             #
+    # ------------------------------------------------------------------ #
 
+    _ONENOTE_NOT_SUPPORTED = (
+        "OneNote operations require Graph API delegated access. "
+        "Provide token + scopes to enable OneNote support."
+    )
+
+    def onenote_get_notebooks(self, select: Optional[List[str]] = None) -> list:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_get_sections(self, notebook_id: str, select: Optional[List[str]] = None) -> list:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_get_pages(self, section_id: str, limit: int = 100, select: Optional[List[str]] = None) -> list:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_get_page_content(self, page_id: str) -> str:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_list_attachments(self, page_id: str) -> list:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_read_attachment(
+        self,
+        page_id: str,
+        attachment_name: str,
+        capture_images: bool = True,
+    ) -> str:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_read_page(
+        self,
+        page_id: str,
+        capture_images: bool = True,
+        include_attachments: bool = True,
+        read_attachment_content: bool = False,
+    ) -> str:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_create_notebook(self, display_name: str) -> dict:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_create_section(self, notebook_id: str, display_name: str) -> dict:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_create_page(self, section_id: str, html_content: str) -> dict:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_update_page(self, page_id: str, patch_commands: list) -> str:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_replace_page_content(self, page_id: str, html_content: str) -> str:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_delete_page(self, page_id: str) -> str:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)
+
+    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
+        raise ToolException(self._ONENOTE_NOT_SUPPORTED)

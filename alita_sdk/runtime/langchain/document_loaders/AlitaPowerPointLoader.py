@@ -224,32 +224,40 @@ class AlitaPowerPointLoader:
     def read_pptx_slide(self, slide, index):
         text_content = f'Slide: {index}\n'
         for shape in slide.shapes:
-            # Handle tables
-            if shape.has_table:
-                text_content += self._extract_table_as_markdown(shape.table)
-            # Handle charts
-            elif shape.has_chart:
-                text_content += self._extract_chart_info(shape.chart)
-            # Handle images - check multiple ways images can be embedded
-            elif self.extract_images and self._is_image_shape(shape):
-                try:
-                    image_blob = self._get_image_blob(shape)
-                    if image_blob:
-                        caption = perform_llm_prediction_for_image_bytes(image_blob, self.llm, self.prompt)
-                        text_content += "\n**Image Transcript:**\n" + caption + "\n--------------------\n"
-                except Exception:
-                    pass
-            # Handle text frames with hyperlinks
-            elif hasattr(shape, "text_frame") and shape.text_frame is not None:
-                for paragraph in shape.text_frame.paragraphs:
-                    for run in paragraph.runs:
-                        if run.hyperlink and run.hyperlink.address:
-                            link_text = run.text.strip() or "Link"
-                            link_url = run.hyperlink.address
-                            text_content += f" [{link_text}]({link_url}) "
-                        else:
-                            text_content += run.text
-                text_content += "\n"
+            try:
+                # Handle tables
+                if shape.has_table:
+                    text_content += self._extract_table_as_markdown(shape.table)
+                # Handle charts
+                elif shape.has_chart:
+                    text_content += self._extract_chart_info(shape.chart)
+                # Handle images - check multiple ways images can be embedded
+                elif self.extract_images and self._is_image_shape(shape):
+                    try:
+                        image_blob = self._get_image_blob(shape)
+                        if image_blob:
+                            caption = perform_llm_prediction_for_image_bytes(image_blob, self.llm, self.prompt)
+                            text_content += "\n**Image Transcript:**\n" + caption + "\n--------------------\n"
+                    except Exception:
+                        pass
+                # Handle text frames with hyperlinks
+                elif hasattr(shape, "text_frame") and shape.text_frame is not None:
+                    try:
+                        for paragraph in shape.text_frame.paragraphs:
+                            for run in paragraph.runs:
+                                if run.hyperlink and run.hyperlink.address:
+                                    link_text = run.text.strip() or "Link"
+                                    link_url = run.hyperlink.address
+                                    text_content += f" [{link_text}]({link_url}) "
+                                else:
+                                    text_content += run.text
+                        text_content += "\n"
+                    except Exception:
+                        # shape.text_frame.paragraphs can raise for certain placeholder types
+                        pass
+            except Exception:
+                # Skip any shape that raises unexpectedly (e.g. 'shape is not a placeholder')
+                pass
         return text_content + "\n"
 
     def _is_image_shape(self, shape) -> bool:

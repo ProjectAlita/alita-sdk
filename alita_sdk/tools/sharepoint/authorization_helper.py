@@ -112,11 +112,27 @@ class SharepointAuthorizationHelper:
         except Exception as e:
             raise RuntimeError(f"Error while obtaining access_token and site_id: {e}")
 
-    def get_files_list(self, site_url: str, folder_name: str = None, limit_files: int = 100):
+    def get_files_list(self, site_url: str, folder_name: str = None, limit_files: int = 100,
+                       include_extensions=None, skip_extensions=None):
         if not site_url or not site_url.startswith("https://"):
             raise ValueError(f"Invalid site_url format: {site_url}")
         if limit_files is not None and (not isinstance(limit_files, int) or limit_files <= 0):
             raise ValueError(f"limit_files must be a positive integer, got: {limit_files}")
+
+        # Normalize extension filters: accept 'pdf' or '.pdf', lowercase dot-prefixed
+        def _norm(exts):
+            if not exts:
+                return []
+            return [f".{e.strip().lstrip('.').lower()}" for e in exts if e and e.strip()]
+
+        def _ext_match(filename, norm_exts):
+            if not norm_exts:
+                return False
+            ext = '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+            return ext in norm_exts
+
+        norm_include = _norm(include_extensions)
+        norm_skip = _norm(skip_extensions)
         try:
             access_token, site_id = self.generate_token_and_site_id(site_url)
             headers = {"Authorization": f"Bearer {access_token}"}
@@ -161,6 +177,11 @@ class SharepointAuthorizationHelper:
                         inner_files = _recurse_drive(drive_id, drive_path, inner_folder, limit_files)
                         files.extend(inner_files)
                     else:
+                        # Apply extension filters
+                        if norm_skip and _ext_match(file_name, norm_skip):
+                            continue
+                        if norm_include and not _ext_match(file_name, norm_include):
+                            continue
                         files.append(temp_props)
                     if limit_files is not None and len(result) + len(files) >= limit_files:
                         return files[:limit_files - len(result)]

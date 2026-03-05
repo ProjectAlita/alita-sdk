@@ -217,7 +217,8 @@ def load_content(file_path: str, extension: str = None, loader_extra_config: dic
             return ""
 
         loader_cls = loader_config['class']
-        loader_kwargs = loader_config['kwargs']
+        # Copy — the dict in loaders_map is shared; mutating it corrupts future calls.
+        loader_kwargs = dict(loader_config['kwargs'])
 
         if loader_extra_config:
             loader_kwargs.update(loader_extra_config)
@@ -344,7 +345,9 @@ def process_content_by_type(content, filename: str, llm=None, chunking_config=No
                     return []
     
                 loader_cls = loader_config['class']
-                loader_kwargs = loader_config['kwargs']
+                # Copy kwargs — the dict in loaders_map is shared across all calls;
+                # mutating it directly (e.g. via pop) permanently corrupts the config.
+                loader_kwargs = dict(loader_config['kwargs'])
                 # Determine which loader configuration keys are allowed to be overridden by user input.
                 # If 'allowed_to_override' is specified in the loader configuration, use it; otherwise, allow all keys in loader_kwargs.
                 allowed_to_override = loader_config.get('allowed_to_override', loader_kwargs)
@@ -413,3 +416,159 @@ def file_extension_by_chunker(chunker_name: str) -> str | None:
     if name == "csv":
         return ".csv"
     return None
+
+
+# ---------------------------------------------------------------------------
+# Shared MIME-type → file-extension lookup used by multiple toolkits
+# (SharePoint graph_wrapper, Jira, etc.) to derive a file extension when
+# only a Content-Type header is available (e.g. attachment without extension).
+# ---------------------------------------------------------------------------
+MIME_TYPE_TO_EXTENSION: dict = {
+    # Images
+    "image/jpeg":                                                          ".jpg",
+    "image/jpg":                                                           ".jpg",
+    "image/png":                                                           ".png",
+    "image/gif":                                                           ".gif",
+    "image/webp":                                                          ".webp",
+    "image/bmp":                                                           ".bmp",
+    "image/tiff":                                                          ".tiff",
+    "image/svg+xml":                                                       ".svg",
+    # Documents — modern Office Open XML
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":   ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    # Documents — legacy Office binary
+    "application/msword":                                                  ".doc",
+    "application/vnd.ms-excel":                                            ".xls",
+    "application/vnd.ms-powerpoint":                                       ".ppt",
+    # Documents — ODF
+    "application/vnd.oasis.opendocument.text":                             ".odt",
+    "application/vnd.oasis.opendocument.spreadsheet":                      ".ods",
+    "application/vnd.oasis.opendocument.presentation":                     ".odp",
+    # Documents — other
+    "application/pdf":                                                     ".pdf",
+    "application/rtf":                                                     ".rtf",
+    "text/rtf":                                                            ".rtf",
+    # Data / markup
+    "application/json":                                                    ".json",
+    "application/jsonl":                                                   ".jsonl",
+    "application/x-ndjson":                                                ".jsonl",
+    "application/jsonlines":                                               ".jsonl",
+    "application/xml":                                                     ".xml",
+    "text/xml":                                                            ".xml",
+    "text/html":                                                           ".html",
+    "text/htm":                                                            ".htm",
+    "text/csv":                                                            ".csv",
+    "text/plain":                                                          ".txt",
+    "text/markdown":                                                       ".md",
+    # Binary fallback
+    "application/octet-stream":                                            ".bin",
+    "application/zip":                                                     ".zip",
+}
+
+
+def extension_from_mime(content_type: str, fallback: str = ".bin") -> str:
+    """Return a dot-prefixed file extension for a given MIME *content_type*.
+
+    Strips charset / boundary parameters before the lookup so that strings
+    like ``"text/plain; charset=utf-8"`` resolve correctly.
+
+    Args:
+        content_type: The ``Content-Type`` header value (may include params).
+        fallback: Extension to return when the MIME type is not recognised.
+
+    Returns:
+        A dot-prefixed extension string, e.g. ``".pdf"``.
+    """
+    ct_base = content_type.split(";")[0].strip().lower()
+    return MIME_TYPE_TO_EXTENSION.get(ct_base, fallback)
+
+
+def parse_content_from_bytes(
+    file_bytes: bytes,
+    filename: str,
+    content_type: str = "",
+    is_capture_image: bool = True,
+    llm=None,
+) -> str:
+    """Parse raw bytes into human-readable text — the single canonical entry-point
+    for all toolkits (SharePoint, Jira, OneNote, …) that download binary content.
+
+    Strategy
+    --------
+    1. Resolve the effective filename with extension (from the name itself, or
+       from *content_type* via :data:`MIME_TYPE_TO_EXTENSION`).
+    2. If a loader is registered for that extension → use
+       ``process_content_by_type`` which writes bytes to a **named temp-file
+       with the correct suffix** before invoking the loader.  This is critical
+       for ``UnstructuredXMLLoader``, ``AlitaJSONLinesLoader``, etc. that
+       inspect the file-system extension.  Dict/list results from structured
+       loaders (Excel, JSON) are converted to a readable string.
+    3. If no loader is registered (e.g. ``.ppt``, ``.doc``, ``.odp``,
+       ``.bin``) → attempt a UTF-8 text decode as a last resort, then give a
+       clear ``[… unsupported format …]`` notice.
+
+    Returns:
+        Parsed text.  Never raises — errors become a ``[…]`` notice string.
+    """
+    import json as _json
+
+    # --- 1. Resolve effective filename + extension -----------------------
+    effective_name = filename
+    ext = Path(filename).suffix.lower()   # "" when no extension
+    if not ext and content_type:
+        ext = extension_from_mime(content_type, fallback="")
+        if ext:
+            effective_name = filename + ext
+
+    # --- 2. Known extension → process_content_by_type (file-based) ------
+    # process_content_by_type writes to a NamedTemporaryFile with the correct
+    # suffix, which is required by loaders that detect format from file path
+    # (e.g. UnstructuredXMLLoader, AlitaJSONLinesLoader).
+    if ext and loaders_map.get(ext):
+        try:
+            docs = list(process_content_by_type(
+                file_bytes,
+                effective_name,
+                llm=llm,
+                fallback_extensions=None,
+            ))
+            parts = []
+            for doc in docs:
+                content = doc.page_content
+                if not isinstance(content, str):
+                    # Structured loaders (Excel, JSON) may store dict/list in page_content
+                    try:
+                        content = _json.dumps(content, ensure_ascii=False, indent=2)
+                    except Exception:
+                        content = str(content)
+                if content and content.strip():
+                    parts.append(content.strip())
+            text = "\n".join(parts)
+            if text:
+                return text
+            # Structured loader returned empty (e.g. XML with only attributes,
+            # empty spreadsheet) — fall back to raw UTF-8 text before giving up
+            try:
+                raw = file_bytes.decode("utf-8").strip().strip("\x00")
+                if raw:
+                    return raw
+            except (UnicodeDecodeError, ValueError):
+                pass
+            return f"[{filename}: no readable content extracted]"
+        except Exception as exc:
+            logger.warning("parse_content_from_bytes loader failed for '%s': %s", filename, exc)
+            return f"[{filename}: Error reading file content. {exc}]"
+
+    # --- 3. No registered loader — try raw UTF-8 text decode -------------
+    # Covers .ppt (legacy binary PPT), .doc (legacy binary DOC), .odp, .bin, etc.
+    try:
+        text = file_bytes.decode("utf-8").strip().strip("\x00")
+        if text:
+            return text
+    except (UnicodeDecodeError, ValueError):
+        pass
+
+    return f"[{filename}: unsupported format, {len(file_bytes)} bytes — no parser available for '{ext or 'unknown'}']"
+
+

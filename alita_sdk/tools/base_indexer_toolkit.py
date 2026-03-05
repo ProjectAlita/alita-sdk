@@ -233,7 +233,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             documents = self._extend_data((base_doc for _ in range(1)))  # update content of not-reduced base document if needed (for sharepoint and similar)
             documents = self._collect_dependencies(documents)  # collect dependencies for base documents
             self._log_tool_event(f"Dependent documents were processed. "
-                                 f"Applying chunking tool '{chunking_tool}' if specified and preparing documents for indexing...")
+                                 f"Applying chunking tool '{chunking_tool if chunking_tool else "default"}' if specified and preparing documents for indexing...")
             documents = self._apply_loaders_chunkers(documents, chunking_tool, chunking_config)
             documents = self._clean_metadata(documents)
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from io import BytesIO
-from typing import Optional
+from typing import List, Optional
 
 from langchain_core.tools import ToolException
 
@@ -219,17 +219,24 @@ class SharepointRestWrapper(BaseSharepointWrapper):
 
     def get_files_list(self, folder_name: Optional[str] = None,
                        limit_files: int = 100,
-                       form_name: Optional[str] = None):
+                       form_name: Optional[str] = None,
+                       include_extensions: Optional[List[str]] = None,
+                       skip_extensions: Optional[List[str]] = None):
         """
-        If folder name is specified, lists all files in this folder under Shared Documents path.
-        If folder name is empty, lists all files under root catalog (Shared Documents).
+        Lists all files including files from subfolders.
+        If folder name is specified, lists files under that folder; otherwise lists
+        from the root catalog (Shared Documents).
         Number of files is limited by limit_files (default is 100).
 
         If form_name is specified, only files from specified form will be returned.
+        If include_extensions is specified, only files with matching extensions are returned.
+        If skip_extensions is specified, files with matching extensions are excluded.
+        Extensions accept both 'pdf' and '.pdf' forms and are matched case-insensitively.
         Note:
             * URL anatomy: https://epam.sharepoint.com/sites/{some_site}/{form_name}/Forms/AllItems.aspx
             * Example of folders syntax: `{form_name} / Hello / inner-folder` - 1st folder is commonly form_name
         """
+        from .base_wrapper import _normalize_extensions, _matches_extension
         try:
             all_libraries = (
                 self._client.web.lists
@@ -239,6 +246,8 @@ class SharepointRestWrapper(BaseSharepointWrapper):
             )
             result = []
             limit_files = limit_files or 100
+            norm_include = _normalize_extensions(include_extensions)
+            norm_skip = _normalize_extensions(skip_extensions)
 
             site_segments = [s for s in self.site_url.strip('/').split('/') if s][-2:]
             full_path_prefix = '/'.join(site_segments)
@@ -271,8 +280,13 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                         continue
                     if len(result) >= limit_files:
                         break
+                    file_name = file.properties['Name']
+                    if norm_skip and _matches_extension(file_name, norm_skip):
+                        continue
+                    if norm_include and not _matches_extension(file_name, norm_include):
+                        continue
                     result.append({
-                        'Name': file.properties['Name'],
+                        'Name': file_name,
                         'Path': file.properties['ServerRelativeUrl'],
                         'Created': file.properties['TimeCreated'],
                         'Modified': file.properties['TimeLastModified'],
@@ -285,7 +299,9 @@ class SharepointRestWrapper(BaseSharepointWrapper):
         except Exception as e:
             try:
                 files = self._graph_helper().get_files_list(
-                    self.site_url, folder_name, limit_files)
+                    self.site_url, folder_name, limit_files,
+                    include_extensions=include_extensions,
+                    skip_extensions=skip_extensions)
                 return files
             except Exception as graph_e:
                 logging.error("Failed to load files via REST: %s", e)
