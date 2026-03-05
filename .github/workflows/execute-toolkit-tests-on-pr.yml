@@ -2,7 +2,7 @@ name: Execute toolkit AI tests on PR
 
 on:
   pull_request:
-     types: [opened, synchronize]
+     types: [opened]
      branches:
        - main
   workflow_dispatch:
