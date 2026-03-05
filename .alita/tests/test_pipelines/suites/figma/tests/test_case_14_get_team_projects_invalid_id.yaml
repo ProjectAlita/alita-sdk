@@ -28,6 +28,7 @@ nodes:
     output:
       - tool_result
     structured_output: true
+    continue_on_error: true
     tool: get_team_projects
     toolkit_name: ${FIGMA_TOOLKIT_NAME}
     transition: validate_error_response
