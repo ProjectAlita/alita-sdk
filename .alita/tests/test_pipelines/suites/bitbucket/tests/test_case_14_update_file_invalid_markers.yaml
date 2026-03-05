@@ -252,7 +252,7 @@ nodes:
           2. first_update_failed: Non-matching OLD content update failed
           3. second_update_failed: Missing NEW marker update failed
           4. content_preserved: Current content matches initial content
-          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in outputs
+          5. no_unhandled_exception: No truly unhandled exception occurred. NOTE: The SDK wraps errors in ToolException and includes a formatted 'Stack Trace:' section in the tool output - this is EXPECTED and HANDLED behavior. Set no_unhandled_exception=true if the error was caught and returned as a ToolException (even if the output contains 'Stack Trace:' or 'Traceback'). Only set false if there is evidence of a crash or uncaught exception outside the tool handler.
           6. no_partial_modification: File was not partially modified
           
           OPTIONAL (nice to have, but not required for test to pass):
