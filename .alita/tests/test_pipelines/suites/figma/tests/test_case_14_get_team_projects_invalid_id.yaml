@@ -28,7 +28,6 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    continue_on_error: true
     tool: get_team_projects
     toolkit_name: ${FIGMA_TOOLKIT_NAME}
     transition: validate_error_response
@@ -54,16 +53,18 @@ nodes:
           Invalid Team ID Used: {invalid_team_id}
 
           Validation Criteria:
-          1. Tool Execution: Confirm the tool was called (tool_executed=true).
-          2. Error Handling: The tool returned an error message indicating team not found or unauthorized (HTTP 403/404). Set appropriate_error_message=true if the error contains "404", "Not found", "403", or "unauthorized".
-          3. Graceful Failure: The tool raised a ToolException with a clear error message. Stack traces in the tool output are a NORMAL framework artifact and do NOT indicate ungraceful failure. Set error_handled_gracefully=true if the tool raised a ToolException with a meaningful error message (e.g. "Figma API error 404").
+          1. Tool Execution: Confirm the tool completed without crashing
+          2. Error Handling: Check for appropriate error response:
+             - Should return an error message
+             - Error should indicate team not found or unauthorized
+             - HTTP status should reflect the error (403/404)
+          3. Graceful Failure: Tool should handle invalid input gracefully
 
-          IMPORTANT: Set test_passed=true if ALL of the following are true: tool_executed=true AND error_handled_gracefully=true AND appropriate_error_message=true.
-          Do NOT fail the test because of stack traces in the output — they are expected and normal.
+          NOTE: The SDK error output may include a stack trace as part of its standard error format — this is expected and should NOT affect test_passed.
 
           Return a JSON object named test_results with this EXACT structure:
           {
-            "test_passed": boolean (true if tool_executed AND error_handled_gracefully AND appropriate_error_message),
+            "test_passed": boolean,
             "tool_executed": boolean,
             "operation_succeeded": false,
             "error_handled_gracefully": boolean,
@@ -71,6 +72,8 @@ nodes:
             "error": string or null,
             "message_snippet": "Brief summary of error handling"
           }
+
+          Set test_passed=true if and only if: tool_executed=true AND error_handled_gracefully=true AND appropriate_error_message=true.
 
           IMPORTANT: Return ONLY the test_results JSON object, no additional text.
     model: ${DEFAULT_LLM_MODEL:gpt-4o}
