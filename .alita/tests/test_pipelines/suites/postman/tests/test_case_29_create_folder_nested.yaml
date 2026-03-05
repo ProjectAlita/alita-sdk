@@ -21,15 +21,58 @@ state:
     type: dict
   test_results:
     type: dict
+  test_folder_name:
+    type: str
+  test_folder_path:
+    type: str
+  create_test_folder_result:
+    type: str
+  delete_test_folder_result:
+    type: str
+  parent_path:
+    type: str
   folder_name:
     type: str
     value: "Nested Folder"
-  parent_path:
-    type: str
-    value: ${TEST_FOLDER_PATH}
-entry_point: invoke_create_folder
+
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        test_folder_name = f"PST29_Folder_{timestamp}_{suffix}"
+        test_folder_path = test_folder_name
+        {"test_folder_name": test_folder_name, "test_folder_path": test_folder_path, "parent_path": test_folder_path}
+    output:
+      - test_folder_name
+      - test_folder_path
+      - parent_path
+    structured_output: true
+    transition: create_test_folder
+
+  - id: create_test_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - test_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: test_folder_name
+    output:
+      - create_test_folder_result
+    structured_output: true
+    transition: invoke_create_folder
+
   - id: invoke_create_folder
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
