@@ -116,7 +116,12 @@ class PlanningMiddleware(Middleware):
                 api_wrapper=self._wrapper,
                 name=tool["name"],
                 description=tool["description"],
-                args_schema=tool["args_schema"]
+                args_schema=tool["args_schema"],
+                metadata={
+                    'toolkit_type': 'internal',
+                    'toolkit_name': 'planner',
+                    'display_name': 'Planner',
+                },
             ))
 
         self._tools = tools
