@@ -1,20 +1,19 @@
 name: "PST18 execute request happy path"
 priority: Critical
 description: |
-  Validates that the execute_request tool successfully executes a Postman request
-  with environment variables and custom configuration.
+  Validates that the execute_request tool successfully executes a Postman request.
   
   Objective: Verify request execution functionality
   
   Expected Behavior:
-  - Tool executes the specified request
-  - Environment variables are properly resolved
+  - Test folder and request are created
+  - execute_request executes the request
   - Returns HTTP response details (status, headers, body)
-  - Request completes without errors
+  - Cleanup removes both request and folder
 
 toolkits:
-  - id: ${TOOLKIT_ID}
-    name: ${TOOLKIT_NAME}
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
   tool_result:
