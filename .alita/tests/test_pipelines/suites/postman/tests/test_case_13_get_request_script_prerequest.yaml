@@ -68,7 +68,7 @@ nodes:
 
   - id: create_test_folder
     type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
     tool: create_folder
     input:
       - folder_name
@@ -83,7 +83,7 @@ nodes:
 
   - id: create_test_request
     type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
     tool: create_request
     input:
       - folder_path
@@ -108,7 +108,7 @@ nodes:
 
   - id: invoke_get_request_script
     type: toolkit
-    toolkit_name: ${TOOLKIT_NAME}
+    toolkit_name: ${POSTMAN_TOOLKIT_NAME}
     tool: get_request_script
     input:
       - request_path
