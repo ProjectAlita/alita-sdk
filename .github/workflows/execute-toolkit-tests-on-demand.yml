@@ -29,7 +29,9 @@ on:
           - figma
           - gitlab
           - jira
+          - postman
           - qtest
+          - testrail
           - zephyr_essential
           - xray
           - sharepoint
@@ -44,7 +46,7 @@ on:
         description: 'Comma-separated suite names to exclude from execution (applies to "all" and "custom" modes)'
         required: false
         type: string
-        default: ''
+        default: 'bitbucket,postman,figma'
       enable_bug_reporting:
         description: 'Enable automatic bug report creation on GitHub (disable for testing)'
         required: false

@@ -52,6 +52,15 @@ state:
   read_result:
     type: str
     value: ''
+  delete1_result:
+    type: str
+    value: ''
+  delete2_result:
+    type: str
+    value: ''
+  delete3_result:
+    type: str
+    value: ''
   filename:
     type: str
     value: ''
@@ -161,6 +170,69 @@ nodes:
     output:
       - read_result
     structured_output: true
+    transition: delete_file1
+
+  - id: delete_file1
+    name: delete_file1
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: deleteFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: file1
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - delete1_result
+    structured_output: true
+    continue_on_error: true
+    transition: delete_file2
+
+  - id: delete_file2
+    name: delete_file2
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: deleteFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: file2
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - delete2_result
+    structured_output: true
+    continue_on_error: true
+    transition: delete_file3
+
+  - id: delete_file3
+    name: delete_file3
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: deleteFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: file3
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - delete3_result
+    structured_output: true
+    continue_on_error: true
     transition: validate_result
 
   - id: validate_result

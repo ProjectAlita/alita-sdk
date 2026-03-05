@@ -49,6 +49,9 @@ state:
   read_result:
     type: str
     value: ''
+  delete_result:
+    type: str
+    value: ''
   filedata:
     type: str
     value: ''
@@ -131,6 +134,27 @@ nodes:
     output:
       - read_result
     structured_output: true
+    transition: delete_file
+
+  - id: delete_file
+    name: delete_file
+    type: toolkit
+    toolkit_name: ${ARTIFACT_TOOLKIT_NAME}
+    tool: deleteFile
+    input:
+      - filename
+      - bucket_name
+    input_mapping:
+      filename:
+        type: variable
+        value: filename
+      bucket_name:
+        type: variable
+        value: bucket_name
+    output:
+      - delete_result
+    structured_output: true
+    continue_on_error: true
     transition: validate_result
 
   - id: validate_result

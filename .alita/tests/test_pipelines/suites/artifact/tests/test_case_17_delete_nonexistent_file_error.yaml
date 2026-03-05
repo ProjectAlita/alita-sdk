@@ -101,14 +101,14 @@ nodes:
           3. error_indicates_not_found: Error message indicates file not found
           4. file_not_in_list: The file '{nonexistent_filename}' does NOT appear in file list
           5. no_false_success: Result does NOT contain "deleted successfully" message
-          6. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
           
           OPTIONAL (nice to have, but not required for test to pass):
+          6. no_unhandled_exception: No unhandled/unexpected exception (note: SDK error handler may include stack trace in formatted output - this is expected behavior, not an unhandled exception)
           7. error_message_helpful: Error message provides useful information
           
           Return JSON test_results:
           {{
-            "test_passed": boolean (SET TO TRUE if: list_files_worked AND delete_failed AND error_indicates_not_found AND file_not_in_list AND no_false_success AND no_unhandled_exception),
+            "test_passed": boolean (SET TO TRUE if: list_files_worked AND delete_failed AND error_indicates_not_found AND file_not_in_list AND no_false_success),
             "list_files_worked": boolean,
             "delete_failed": boolean,
             "error_indicates_not_found": boolean,

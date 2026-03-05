@@ -918,8 +918,14 @@ def run(
     if dry_run:
         logger.info("[DRY RUN MODE]")
 
+    # Create strategy based on local flag
+    strategy = None
+    if local:
+        strategy = LocalSetupStrategy()
+        logger.info("[LOCAL MODE] Using LocalSetupStrategy for toolkit creation")
+
     # Execute setup
-    results = execute_setup(config, ctx, suite_folder)
+    results = execute_setup(config, ctx, suite_folder, strategy=strategy)
 
     # Write env file if requested
     if output_env and results["env_vars"]:
