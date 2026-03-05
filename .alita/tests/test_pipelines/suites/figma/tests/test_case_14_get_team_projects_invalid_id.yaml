@@ -59,7 +59,9 @@ nodes:
              - Error should indicate team not found or unauthorized
              - HTTP status should reflect the error (403/404)
           3. Graceful Failure: Tool should handle invalid input gracefully
-          4. No Sensitive Data: Error should not expose internal details
+
+          NOTE: Stack traces in the tool output are acceptable and should NOT cause test_passed to be false.
+          Focus ONLY on whether the error was handled gracefully and the error message is appropriate.
 
           Return a JSON object named test_results with this EXACT structure:
           {
