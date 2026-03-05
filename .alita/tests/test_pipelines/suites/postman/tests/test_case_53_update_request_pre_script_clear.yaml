@@ -41,7 +41,7 @@ nodes:
       request_path:
         type: variable
         value: request_path
-      pre_script:
+      pre_request_script:
         type: variable
         value: pre_script
     output:
