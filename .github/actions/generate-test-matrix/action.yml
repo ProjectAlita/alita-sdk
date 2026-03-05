@@ -1,0 +1,235 @@
+name: 'Generate Test Matrix'
+description: >
+  Unified test matrix generation for on-demand and agent-based workflows.
+  Produces a consistent [{suite, tests_to_run}] output format that can be
+  used directly with the test-runner-reusable workflow.
+
+inputs:
+  mode:
+    description: |
+      Matrix generation mode:
+        - "on-demand": Generate matrix from workflow inputs (test_cases_dir, custom_suites, exclude_suites)
+        - "agent": Parse agent-produced test_matrix.json file with per-suite test configuration
+    required: true
+
+  # ── On-demand mode inputs ──────────────────────────────────────────────
+  test_cases_dir:
+    description: 'Toolkit tests to execute: "all", "custom", or a specific suite name (e.g. github, jira)'
+    required: false
+    default: ''
+  custom_suites:
+    description: 'Comma-separated suite names (used only when test_cases_dir is "custom")'
+    required: false
+    default: ''
+  exclude_suites:
+    description: 'Comma-separated suite names to exclude from execution (applies to both modes)'
+    required: false
+    default: ''
+  workflow_file:
+    description: 'Path to workflow file for parsing "all" suites list (on-demand mode)'
+    required: false
+    default: '.github/workflows/execute-toolkit-tests-on-demand.yml'
+
+  # ── Agent mode inputs ──────────────────────────────────────────────────
+  agent_matrix_file:
+    description: 'Path to agent-produced test_matrix.json (agent mode)'
+    required: false
+    default: '.alita/tests/test_pipelines/test_matrix.json'
+
+outputs:
+  test_matrix:
+    description: 'JSON array of [{suite, tests_to_run}] for matrix strategy'
+    value: ${{ steps.generate.outputs.test_matrix }}
+  has-tests:
+    description: 'Whether there are tests to run (true/false)'
+    value: ${{ steps.generate.outputs.has-tests }}
+  matrix:
+    description: 'JSON array of unique suite names (for backward compatibility)'
+    value: ${{ steps.generate.outputs.matrix }}
+  skip_reason:
+    description: 'Reason for skipping tests (agent mode only, empty if not skipping)'
+    value: ${{ steps.generate.outputs.skip_reason }}
+  run_all:
+    description: 'Whether agent requested running all tests (agent mode only)'
+    value: ${{ steps.generate.outputs.run_all }}
+  tests_config:
+    description: 'Detailed per-suite test config JSON (agent mode only, for step summaries)'
+    value: ${{ steps.generate.outputs.tests_config }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate test matrix
+      id: generate
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        MODE="${{ inputs.mode }}"
+        echo "::group::Generate Test Matrix (mode=$MODE)"
+
+        # ── Helper: apply exclusions to a JSON array of suite names ──────
+        apply_exclusions() {
+          local matrix="$1"
+          local exclude="${{ inputs.exclude_suites }}"
+          if [ -n "$exclude" ]; then
+            EXCLUDE_ARRAY=$(echo "$exclude" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+            matrix=$(echo "$matrix" | jq -c --argjson ex "$EXCLUDE_ARRAY" 'map(select(. as $s | $ex | index($s) | not))')
+            echo "Excluded suites: $EXCLUDE_ARRAY"
+          fi
+          echo "$matrix"
+        }
+
+        # ── Helper: convert suite names array to [{suite, tests_to_run}] ─
+        suites_to_test_matrix() {
+          local suites="$1"
+          echo "$suites" | jq -c '[.[] | {suite: ., tests_to_run: "all"}]'
+        }
+
+        if [ "$MODE" = "on-demand" ]; then
+          # ════════════════════════════════════════════════════════════════
+          # ON-DEMAND MODE: Generate from workflow inputs
+          # ════════════════════════════════════════════════════════════════
+          TEST_CASES_DIR="${{ inputs.test_cases_dir }}"
+          CUSTOM_SUITES="${{ inputs.custom_suites }}"
+
+          if [ -z "$TEST_CASES_DIR" ]; then
+            echo "::error::test_cases_dir is required for on-demand mode"
+            exit 1
+          fi
+
+          if [ "$TEST_CASES_DIR" = "all" ]; then
+            WORKFLOW_FILE="${{ inputs.workflow_file }}"
+            if [ ! -f "$WORKFLOW_FILE" ]; then
+              echo "::error::Workflow file not found: $WORKFLOW_FILE"
+              exit 1
+            fi
+            # Parse workflow file to extract all suite options (excluding 'all' and 'custom')
+            SUITES=$(yq eval '.on.workflow_dispatch.inputs.test_cases_dir.options[] | select(. != "all" and . != "custom")' \
+              "$WORKFLOW_FILE" | \
+              jq -R -s -c 'split("\n") | map(select(length > 0))')
+          elif [ "$TEST_CASES_DIR" = "custom" ]; then
+            # Parse comma-separated custom suites
+            SUITES=$(echo "$CUSTOM_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          else
+            # Single suite
+            SUITES=$(jq -n -c --arg dir "$TEST_CASES_DIR" '[$dir]')
+          fi
+
+          # Apply exclusions
+          SUITES=$(apply_exclusions "$SUITES")
+
+          # Build unified test matrix (all on-demand suites run all tests)
+          TEST_MATRIX=$(suites_to_test_matrix "$SUITES")
+          HAS_TESTS=$(echo "$SUITES" | jq 'length > 0')
+
+          echo "test_matrix=$TEST_MATRIX" >> $GITHUB_OUTPUT
+          echo "matrix=$SUITES" >> $GITHUB_OUTPUT
+          echo "has-tests=$HAS_TESTS" >> $GITHUB_OUTPUT
+          echo "skip_reason=" >> $GITHUB_OUTPUT
+          echo "run_all=" >> $GITHUB_OUTPUT
+          echo "tests_config=" >> $GITHUB_OUTPUT
+
+          echo "Generated matrix (on-demand): $SUITES"
+          echo "Test matrix: $TEST_MATRIX"
+
+        elif [ "$MODE" = "agent" ]; then
+          # ════════════════════════════════════════════════════════════════
+          # AGENT MODE: Parse agent-produced test_matrix.json
+          # ════════════════════════════════════════════════════════════════
+          MATRIX_FILE="${{ inputs.agent_matrix_file }}"
+
+          if [ ! -f "$MATRIX_FILE" ]; then
+            echo "::error::Agent matrix file not found: $MATRIX_FILE - agent execution may have failed"
+            exit 1
+          fi
+
+          echo "Agent output:"
+          cat "$MATRIX_FILE"
+
+          # Validate JSON
+          if ! jq -e '.' "$MATRIX_FILE" > /dev/null 2>&1; then
+            echo "::error::Agent produced invalid JSON in $MATRIX_FILE"
+            exit 1
+          fi
+
+          # Parse agent structured output
+          SKIP_TESTS=$(jq -r '.skip_tests // false' "$MATRIX_FILE")
+          RUN_ALL=$(jq -r '.run_all // false' "$MATRIX_FILE")
+          REASON=$(jq -r '.reason // "No reason provided"' "$MATRIX_FILE")
+
+          echo "::notice::Impact Analysis: $REASON"
+
+          # Handle skip_tests case
+          if [ "$SKIP_TESTS" = "true" ]; then
+            echo "::notice::Skipping tests - $REASON"
+            echo "has-tests=false" >> $GITHUB_OUTPUT
+            echo "matrix=[]" >> $GITHUB_OUTPUT
+            echo "test_matrix=[]" >> $GITHUB_OUTPUT
+            echo "skip_reason=$REASON" >> $GITHUB_OUTPUT
+            echo "run_all=false" >> $GITHUB_OUTPUT
+            echo "tests_config=[]" >> $GITHUB_OUTPUT
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          # Extract unique suite names
+          SUITES=$(jq -c '[.matrix[].suite] | unique' "$MATRIX_FILE")
+          SUITE_COUNT=$(echo "$SUITES" | jq 'length')
+
+          if [ "$SUITE_COUNT" -eq 0 ]; then
+            echo "::error::Agent returned empty matrix - no suites to run"
+            exit 1
+          fi
+
+          # Apply exclusions to suite list
+          SUITES=$(apply_exclusions "$SUITES")
+
+          # Extract detailed per-suite test configuration
+          TESTS_CONFIG=$(jq -c '.matrix | map({suite: .suite, tests_to_run: .tests_to_run, run_all_tests: .run_all_tests})' "$MATRIX_FILE")
+
+          # Build unified test matrix: resolve tests_to_run per suite
+          # Also filter by excluded suites
+          EXCLUDE_SUITES="${{ inputs.exclude_suites }}"
+          if [ -n "$EXCLUDE_SUITES" ]; then
+            EXCLUDE_ARRAY=$(echo "$EXCLUDE_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
+          else
+            EXCLUDE_ARRAY="[]"
+          fi
+          TEST_MATRIX=$(jq -c --argjson ex "$EXCLUDE_ARRAY" '
+            .matrix
+            | map(select(.suite as $s | $ex | index($s) | not))
+            | map({
+                suite: .suite,
+                tests_to_run: (
+                  if .run_all_tests == true or (.tests_to_run | length) == 0
+                  then "all"
+                  else (.tests_to_run | join(","))
+                  end
+                )
+              })
+          ' "$MATRIX_FILE")
+
+          # Also filter tests_config by exclusions
+          TESTS_CONFIG=$(echo "$TESTS_CONFIG" | jq -c --argjson ex "$EXCLUDE_ARRAY" '
+            map(select(.suite as $s | $ex | index($s) | not))
+          ')
+
+          HAS_TESTS=$(echo "$SUITES" | jq 'length > 0')
+
+          echo "test_matrix=$TEST_MATRIX" >> $GITHUB_OUTPUT
+          echo "matrix=$SUITES" >> $GITHUB_OUTPUT
+          echo "has-tests=$HAS_TESTS" >> $GITHUB_OUTPUT
+          echo "skip_reason=" >> $GITHUB_OUTPUT
+          echo "run_all=$RUN_ALL" >> $GITHUB_OUTPUT
+          echo "tests_config=$TESTS_CONFIG" >> $GITHUB_OUTPUT
+
+          echo "Generated matrix (agent): $SUITES"
+          echo "Test matrix: $TEST_MATRIX"
+
+        else
+          echo "::error::Unknown mode '$MODE'. Must be 'on-demand' or 'agent'."
+          exit 1
+        fi
+
+        echo "::endgroup::"
