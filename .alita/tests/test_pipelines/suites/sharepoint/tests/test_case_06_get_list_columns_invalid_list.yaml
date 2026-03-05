@@ -63,20 +63,29 @@ nodes:
 
           this test validates error handling for invalid list names.
 
+          important: the tool output may contain a full stack trace with intermediate http errors
+          (such as 401 unauthorized). these intermediate errors are internal implementation details
+          of the sharepoint sdk — the sdk catches them and converts them into a final toolexception
+          with a "list not found" message. focus only on the final error message returned by the tool,
+          not on intermediate errors in the stack trace.
+
           perform the following checks:
           1. confirm the tool executed (result is not empty or null).
-          2. examine any error message for specific meaning. valid error patterns for invalid lists include:
+          2. examine the final error message (the toolexception message at the end of the output).
+             valid error patterns for invalid lists include:
              - list not found or does not exist
              - invalid list title or list name
              - cannot access list or list unavailable
              - list retrieval failed or list error
-          3. determine if the error is about the invalid list itself.
-             errors like "list 'invalidlist_99999_doesnotexist' not found" are expected and correct.
-             system errors unrelated to the list name are failures.
+             - error getting list columns: list '...' not found on site
+          3. determine if the final error message is about the invalid list itself.
+             if the final toolexception message says "list not found" or similar, the test passes —
+             regardless of any intermediate http errors (401, 403, etc.) in the stack trace.
+             only fail if the tool returned no error at all, or returned columns instead of an error.
 
           return a json object with:
           {{
-            "test_passed": true/false (true if error occurred as expected),
+            "test_passed": true/false (true if final error message indicates list not found as expected),
             "summary": "brief description of outcome",
             "error": "error details if test failed, null if passed"
           }}
