@@ -77,6 +77,8 @@ nodes:
     input:
       - files_in_repo
       - read_result
+      - non_existent_file
+      - expected_error_indicators
     input_mapping:
       chat_history:
         type: fixed
