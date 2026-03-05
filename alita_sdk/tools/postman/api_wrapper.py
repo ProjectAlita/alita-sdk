@@ -342,7 +342,7 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Request failed: {e}{error_details}")
             return ToolException(f"Postman API request failed: {str(e)}{error_details}")
         except ToolException:
-            pass
+            raise ToolException(f"Postman API request failed: {str(e)}")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode JSON response: {e}")
             return ToolException(
