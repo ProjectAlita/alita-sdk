@@ -262,8 +262,6 @@ When you can identify specific changed tools within a toolkit:
 | `alita_sdk/tools/gitlab/` | `gitlab` |
 | `alita_sdk/tools/confluence/` | `confluence` |
 | `alita_sdk/tools/bitbucket/` | `bitbucket` |
-| `alita_sdk/tools/figma/` | `figma` |
-| `alita_sdk/tools/postman/` | `postman` |
 | `alita_sdk/tools/qtest/` | `qtest` |
 | `alita_sdk/tools/xray/` | `xray` |
 | `alita_sdk/tools/zephyr_essential/` | `zephyr_essential` |
