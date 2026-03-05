@@ -1,4 +1,4 @@
-name: "PST13 get request script"
+name: "PST13 get request script prerequest"
 priority: High
 description: |
   Validates that the get_request_script tool successfully retrieves pre-request
@@ -7,14 +7,14 @@ description: |
   Objective: Verify pre-request script retrieval
   
   Expected Behavior:
-  - Tool executes successfully
-  - Returns pre-request script content
+  - Test folder and request are created with a pre-request script
+  - get_request_script retrieves the pre-request script content
   - Properly distinguishes pre-request from test scripts
-  - Handles requests with no pre-request scripts gracefully
+  - Cleanup removes both request and folder
 
 toolkits:
-  - id: ${TOOLKIT_ID}
-    name: ${TOOLKIT_NAME}
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
   tool_result:
