@@ -16,10 +16,6 @@ toolkits:
     name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
-  tool_result:
-    type: dict
-  test_results:
-    type: dict
   folder_name:
     type: str
   request_name:
@@ -32,10 +28,15 @@ state:
     type: str
   create_request_result:
     type: str
+  tool_result:
+    type: dict
   delete_request_result:
     type: str
   delete_folder_result:
     type: str
+  test_results:
+    type: dict
+
 entry_point: prepare_test_data
 
 nodes:
