@@ -21,7 +21,7 @@ state:
     type: dict
   test_results:
     type: dict
-  request_path:
+  source_path:
     type: str
     value: ${TEST_REQUEST_PATH}
   new_name:
@@ -35,12 +35,12 @@ nodes:
     toolkit_name: ${TOOLKIT_NAME}
     tool: duplicate_request
     input:
-      - request_path
+      - source_path
       - new_name
     input_mapping:
       source_path:
         type: variable
-        value: request_path
+        value: source_path
       new_name:
         type: variable
         value: new_name
