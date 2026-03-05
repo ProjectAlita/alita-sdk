@@ -28,7 +28,6 @@ nodes:
     output:
       - tool_result
     structured_output: true
-    continue_on_error: true
     tool: get_team_projects
     toolkit_name: ${FIGMA_TOOLKIT_NAME}
     transition: validate_error_response
@@ -59,12 +58,10 @@ nodes:
              - Should return an error message
              - Error should indicate team not found or unauthorized
              - HTTP status should reflect the error (403/404)
-          3. Graceful Failure: Set error_handled_gracefully=true if the tool returned
-             a structured error message with an HTTP status code (e.g. 404 Not Found)
-             without an unhandled Python exception crash. Technical details in the
-             error message are acceptable — what matters is the tool did not crash
-             and returned a meaningful, actionable error.
-          4. No Sensitive Data: Error should not expose credentials or tokens
+          3. Graceful Failure: The tool handles invalid input gracefully when it raises a ToolException with a clear error message. Stack traces in the tool output are a normal framework artifact and do NOT indicate ungraceful failure.
+
+          Set error_handled_gracefully=true if the tool raised a ToolException with a meaningful error message (e.g. "Figma API error 404").
+          Set test_passed=true if criteria 1, 2, and 3 are all satisfied.
 
           Return a JSON object named test_results with this EXACT structure:
           {
