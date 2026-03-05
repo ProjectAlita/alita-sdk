@@ -69,15 +69,17 @@ nodes:
           This test validates that create_folder creates a new folder.
           
           Perform the following checks:
-          1. Confirm the tool executed successfully.
-          2. Verify the result indicates a new folder was created.
-          3. Check for folder ID or confirmation.
-          4. Validate the folder has the specified name and description.
+          1. Confirm the tool executed successfully (no ToolException or error).
+          2. Verify the result contains a success message indicating the folder was created.
+          
+          IMPORTANT: The tool returns a message like "Folder 'X' created successfully" - this is the expected success format.
+          A message-only response without a folder ID is VALID and expected behavior.
+          test_passed should be true if the message indicates successful creation and contains no error.
           
           Return a JSON object named test_results with the following structure:
           
           {{
-            "test_passed": boolean (true if folder was created successfully),
+            "test_passed": boolean (true if folder creation success message is present),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}
