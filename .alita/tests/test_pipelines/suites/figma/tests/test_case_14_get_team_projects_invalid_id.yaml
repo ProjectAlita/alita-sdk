@@ -58,10 +58,11 @@ nodes:
              - Should return an error message
              - Error should indicate team not found or unauthorized
              - HTTP status should reflect the error (403/404)
-          3. Graceful Failure: Tool should handle invalid input gracefully
-
-          NOTE: Stack traces in the tool output are acceptable and should NOT cause test_passed to be false.
-          Focus ONLY on whether the error was handled gracefully and the error message is appropriate.
+          3. Graceful Failure: Tool should handle invalid input gracefully.
+             Set error_handled_gracefully=true if the tool returned a clear error message
+             (e.g. 404 Not Found) without an unhandled Python exception crash.
+             Note: The framework middleware always includes a stack trace in tool output —
+             this is expected behavior and does NOT make error_handled_gracefully=false.
 
           Return a JSON object named test_results with this EXACT structure:
           {
