@@ -33,15 +33,16 @@ state:
   url:
     type: str
     value: "https://api.example.com/users"
-  request_details:
+  headers:
+    type: list
+    value:
+      - key: "Content-Type"
+        value: "application/json"
+  body:
     type: dict
     value:
-      headers:
-        - key: "Content-Type"
-          value: "application/json"
-      body:
-        mode: "raw"
-        raw: '{"name": "Test User", "email": "test@example.com"}'
+      mode: "raw"
+      raw: '{"name": "Test User", "email": "test@example.com"}'
 
 entry_point: invoke_create_request
 
