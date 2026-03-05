@@ -26,7 +26,7 @@ on:
           - github
           - bitbucket
           - confluence
-          # - figma
+          - figma
           - gitlab
           - jira
           - qtest
@@ -45,11 +45,6 @@ on:
         required: false
         type: string
         default: ''
-      enable_parallel:
-        description: 'Enable parallel test execution (uses value from pipeline.yaml when enabled)'
-        required: false
-        type: boolean
-        default: false
       enable_bug_reporting:
         description: 'Enable automatic bug report creation on GitHub (disable for testing)'
         required: false
@@ -65,7 +60,7 @@ jobs:
   configure-matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      test_matrix: ${{ steps.set-matrix.outputs.test_matrix }}
       has-tests: ${{ steps.set-matrix.outputs.has-tests }}
     steps:
       - name: Checkout repository
@@ -73,43 +68,17 @@ jobs:
         with:
           sparse-checkout: |
             .github/workflows/execute-toolkit-tests-on-demand.yml
+            .github/actions/generate-test-matrix
           sparse-checkout-cone-mode: false
       
       - name: Generate test matrix
         id: set-matrix
-        run: |
-          TEST_CASES_DIR="${{ inputs.test_cases_dir }}"
-          CUSTOM_SUITES="${{ inputs.custom_suites }}"
-          EXCLUDE_SUITES="${{ inputs.exclude_suites }}"
-          
-          if [ "$TEST_CASES_DIR" = "all" ]; then
-            # Parse workflow file to extract all test_cases_dir options (excluding 'all' and 'custom')
-            MATRIX=$(yq eval '.on.workflow_dispatch.inputs.test_cases_dir.options[] | select(. != "all" and . != "custom")' \
-              .github/workflows/execute-toolkit-tests-on-demand.yml | \
-              jq -R -s -c 'split("\n") | map(select(length > 0))')
-          elif [ "$TEST_CASES_DIR" = "custom" ]; then
-            # Parse comma-separated custom suites
-            MATRIX=$(echo "$CUSTOM_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
-          else
-            # Create matrix with single directory
-            MATRIX=$(jq -n -c --arg dir "$TEST_CASES_DIR" '[$dir]')
-          fi
-          
-          # Apply exclusions (works for all modes)
-          if [ -n "$EXCLUDE_SUITES" ]; then
-            EXCLUDE_ARRAY=$(echo "$EXCLUDE_SUITES" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))')
-            MATRIX=$(echo "$MATRIX" | jq -c --argjson ex "$EXCLUDE_ARRAY" 'map(select(. as $s | $ex | index($s) | not))')
-            echo "Excluded suites: $EXCLUDE_ARRAY"
-          fi
-          
-          HAS_TESTS=$(echo "$MATRIX" | jq 'length > 0')
-          
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-          echo "has-tests=$HAS_TESTS" >> $GITHUB_OUTPUT
-          
-          # Debug output
-          echo "Generated matrix: $MATRIX"
-          echo "Has tests: $HAS_TESTS"
+        uses: ./.github/actions/generate-test-matrix
+        with:
+          mode: on-demand
+          test_cases_dir: ${{ inputs.test_cases_dir }}
+          custom_suites: ${{ inputs.custom_suites }}
+          exclude_suites: ${{ inputs.exclude_suites }}
 
   test-execution:
     needs: configure-matrix
@@ -118,12 +87,13 @@ jobs:
       fail-fast: false
       max-parallel: 10
       matrix:
-        test_cases_dir: ${{ fromJson(needs.configure-matrix.outputs.matrix) }}
+        data: ${{ fromJson(needs.configure-matrix.outputs.test_matrix) }}
     uses: ./.github/workflows/test-runner-reusable.yml
     with:
-      test_cases_dir: ${{ matrix.test_cases_dir }}
+      test_cases_dir: ${{ matrix.data.suite }}
+      tests_to_run: ${{ matrix.data.tests_to_run }}
       environment: ${{ github.event.inputs.environment }}
-      enable_parallel: ${{ inputs.enable_parallel }}
+      enable_parallel: true
       enable_bug_reporting: ${{ inputs.enable_bug_reporting }}
       enable_rp_reporting: ${{ inputs.enable_rp_reporting }}
     secrets: inherit

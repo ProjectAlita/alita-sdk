@@ -140,6 +140,8 @@ jobs:
           export ENVIRONMENT="${{ inputs.environment }}"
           export DOCKER_COMMAND="${{ env.DOCKER_COMMAND_COMPOSED }}"
           export ENV_NAME="${{ inputs.environment }}"
+          export DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}"
+          export DEFAULT_LLM_MODEL="${{ secrets.DEFAULT_LLM_MODEL }}"
           docker-compose up -d
 
       - name: Wait for tests to complete
@@ -285,27 +287,10 @@ jobs:
           export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
           export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
           export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
-          export CONFLUENCE_API_KEY="${{ secrets.CONFLUENCE_API_KEY }}"
-          export CONFLUENCE_BASE_URL="${{ secrets.CONFLUENCE_BASE_URL }}"
-          export CONFLUENCE_USERNAME="${{ secrets.CONFLUENCE_USERNAME }}"
-          export ADO_TOKEN="${{ secrets.ADO_TOKEN }}"
-          export ADO_REPOSITORY_ID="${{ secrets.ADO_REPOSITORY_ID }}"
-          export ADO_ORGANIZATION_URL="${{ secrets.ADO_ORGANIZATION_URL }}"
-          export ADO_PROJECT="${{ secrets.ADO_PROJECT }}"
-          export JIRA_API_KEY="${{ secrets.JIRA_API_KEY }}"
-          export JIRA_USERNAME="${{ secrets.JIRA_USERNAME }}"
-          export JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}"
-          export FIGMA_API_TOKEN="${{ secrets.FIGMA_API_TOKEN }}"
-          export BITBUCKET_TOKEN="${{ secrets.BITBUCKET_TOKEN }}"
-          export XRAY_CLIENT_SECRET="${{ secrets.XRAY_CLIENT_SECRET }}"
-          export XRAY_CLIENT_ID="${{ secrets.XRAY_CLIENT_ID }}"
-          export ZEPHYR_ESENTIALS_KEY="${{ secrets.ZEPHYR_ESENTIALS_KEY }}"
-          export GITLAB_PRIVATE_TOKEN="${{ secrets.GITLAB_PRIVATE_TOKEN }}"
-          export JIRA_PROJECT="EL"
-          export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
           export ENVIRONMENT="${{ inputs.environment }}"
           export ENV_NAME="${{ inputs.environment }}"
-          export DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS || env.DEFAULT_CODE_ANALYSIS_MODEL }}"
+          export DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}"
+          export DEFAULT_LLM_MODEL="${{ secrets.DEFAULT_LLM_MODEL }}"
           
           # Build the results path first
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json"

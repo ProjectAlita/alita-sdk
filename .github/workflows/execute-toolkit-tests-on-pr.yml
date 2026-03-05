@@ -6,19 +6,29 @@ on:
      branches:
        - main
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to analyze (required for workflow_dispatch)'
+        required: false
+        type: number
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  DEFAULT_CODE_ANALYSIS_MODEL: 'eu.anthropic.claude-sonnet-4-6'
+  PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+  EXCLUDE_SUITES: 'figma,bitbucket,postman'
+  AGENT_MATRIX_FILE: '.alita/tests/test_pipelines/test_matrix.json'
 
 jobs:
   configure-matrix:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      test_matrix: ${{ steps.set-matrix.outputs.test_matrix }}
       has-tests: ${{ steps.set-matrix.outputs.has-tests }}
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
       tests_config: ${{ steps.set-matrix.outputs.tests_config }}
+      skip_reason: ${{ steps.set-matrix.outputs.skip_reason }}
+      run_all: ${{ steps.set-matrix.outputs.run_all }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -45,19 +55,19 @@ jobs:
         id: run-agent
         run: |
           # Determine PR number - fail if not available
-          if [ -z "${{ github.event.pull_request.number }}" ]; then
+          if [ -z "${{ env.PR_NUMBER }}" ]; then
             echo "::error::No PR context available - this workflow requires a PR"
             exit 1
           fi
           
-          PR_REF="${{ github.event.pull_request.number }}"
-          echo "::notice::Analyzing PR #$PR_REF with AI agent"
+          echo "::notice::Analyzing PR #${{ env.PR_NUMBER }} with AI agent"
           
           # Run the PR Impact Analyzer agent via docker-compose - fail if agent fails
           docker-compose run --rm --name alita-sdk-analyzer alita-sdk \
-            sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/pr-impact-analyzer.agent.md --dir . 'Analyze PR $PR_REF'"
+            sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/pr-impact-analyzer.agent.md --dir . 'Analyze PR ${{ env.PR_NUMBER }}'"
         env:
-          DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS || env.DEFAULT_CODE_ANALYSIS_MODEL }}
+          DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
+          DEFAULT_LLM_MODEL: ${{ secrets.DEFAULT_LLM_MODEL }}
           DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
           ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_STAGE }}
           PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
@@ -65,71 +75,21 @@ jobs:
 
       - name: Parse Agent Output
         id: set-matrix
+        uses: ./.github/actions/generate-test-matrix
+        with:
+          mode: agent
+          exclude_suites: ${{ env.EXCLUDE_SUITES }}
+          agent_matrix_file: ${{ env.AGENT_MATRIX_FILE }}
+
+      - name: Write Step Summary
+        if: steps.set-matrix.outputs.has-tests == 'true'
         run: |
-          MATRIX_FILE=".alita/tests/test_pipelines/test_matrix.json"
-          
-          # Agent must produce output - no fallback
-          if [ ! -f "$MATRIX_FILE" ]; then
-            echo "::error::Agent did not produce test_matrix.json - agent execution failed"
-            exit 1
-          fi
-          
-          echo "Agent output:"
-          cat "$MATRIX_FILE"
-          
-          # Validate JSON structure
-          if ! jq -e '.' "$MATRIX_FILE" > /dev/null 2>&1; then
-            echo "::error::Agent produced invalid JSON in test_matrix.json"
-            exit 1
-          fi
-          
-          # Parse the agent's structured output
-          SKIP_TESTS=$(jq -r '.skip_tests // false' "$MATRIX_FILE")
-          RUN_ALL=$(jq -r '.run_all // false' "$MATRIX_FILE")
-          REASON=$(jq -r '.reason // "No reason provided"' "$MATRIX_FILE")
-          
-          echo "::notice::Impact Analysis: $REASON"
-          
-          # Handle skip_tests case
-          if [ "$SKIP_TESTS" = "true" ]; then
-            echo "::notice::Skipping tests - $REASON"
-            echo "has-tests=false" >> $GITHUB_OUTPUT
-            echo "matrix=[]" >> $GITHUB_OUTPUT
-            echo "tests_config=[]" >> $GITHUB_OUTPUT
-            
-            # Write Step Summary for skipped tests
-            {
-              echo "# 🤖 PR Impact Analysis"
-              echo ""
-              echo "## ⏭️ Tests Skipped"
-              echo ""
-              echo "> **Reason:** $REASON"
-              echo ""
-              echo "---"
-              echo "*Analysis performed by AI agent on PR #${{ github.event.pull_request.number }}*"
-            } >> $GITHUB_STEP_SUMMARY        
-            exit 0
-          fi
-          
-          # Extract suites from matrix array (agent provides all suites when run_all=true)
-          SUITES=$(jq -c '[.matrix[].suite] | unique' "$MATRIX_FILE")
+          MATRIX_FILE="${{ env.AGENT_MATRIX_FILE }}"
+          RUN_ALL="${{ steps.set-matrix.outputs.run_all }}"
+          SUITES='${{ steps.set-matrix.outputs.matrix }}'
           SUITE_COUNT=$(echo "$SUITES" | jq 'length')
-          
-          # Agent must provide suites in matrix (even for run_all)
-          if [ "$SUITE_COUNT" -eq 0 ]; then
-            echo "::error::Agent returned empty matrix - no suites to run"
-            exit 1
-          fi
-          
-          # Extract detailed test configuration for targeted tests
-          TESTS_CONFIG=$(jq -c '.matrix | map({suite: .suite, tests_to_run: .tests_to_run, run_all_tests: .run_all_tests})' "$MATRIX_FILE")
-          
-          echo "matrix=$SUITES" >> $GITHUB_OUTPUT
-          echo "has-tests=true" >> $GITHUB_OUTPUT
-          echo "tests_config=$TESTS_CONFIG" >> $GITHUB_OUTPUT
-          echo "::notice::Generated matrix from agent: $SUITES"
-          
-          # Write Step Summary for tests to run
+          REASON=$(jq -r '.reason // "No reason provided"' "$MATRIX_FILE")
+
           {
             echo "# 🤖 PR Impact Analysis"
             echo ""
@@ -137,7 +97,7 @@ jobs:
             echo ""
             echo "| Property | Value |"
             echo "|----------|-------|"
-            echo "| **PR Number** | #${{ github.event.pull_request.number }} |"
+            echo "| **PR Number** | #${{ env.PR_NUMBER }} |"
             echo "| **Run All Tests** | $([ "$RUN_ALL" = "true" ] && echo "✅ Yes" || echo "❌ No") |"
             echo "| **Suites Affected** | $SUITE_COUNT |"
             echo ""
@@ -148,7 +108,6 @@ jobs:
             echo "| Suite | Tests to Run | Mode |"
             echo "|-------|--------------|------|"
             
-            # Generate table rows for each suite
             jq -r '.matrix[] | "| `\(.suite)` | \(if .run_all_tests then "All tests" else (.tests_to_run | if length == 0 then "All tests" else (map("`\(.)`") | join(", ")) end) end) | \(if .run_all_tests then "🔄 Full Suite" else "🎯 Targeted" end) |"' "$MATRIX_FILE"
             
             echo ""
@@ -168,6 +127,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+      - name: Write Skip Summary
+        if: steps.set-matrix.outputs.has-tests == 'false'
+        run: |
+          REASON="${{ steps.set-matrix.outputs.skip_reason }}"
+          if [ -z "$REASON" ]; then
+            REASON="No reason provided"
+          fi
+          {
+            echo "# 🤖 PR Impact Analysis"
+            echo ""
+            echo "## ⏭️ Tests Skipped"
+            echo ""
+            echo "> **Reason:** $REASON"
+            echo ""
+            echo "---"
+            echo "*Analysis performed by AI agent on PR #${{ env.PR_NUMBER }}*"
+          } >> $GITHUB_STEP_SUMMARY
+
       - name: Upload PR change context artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -177,42 +154,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  # Job to compute tests_to_run for each suite from tests_config
-  compute-tests:
-    needs: configure-matrix
-    if: needs.configure-matrix.outputs.has-tests == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      test_matrix: ${{ steps.compute.outputs.test_matrix }}
-    steps:
-      - name: Compute test matrix with specific tests
-        id: compute
-        run: |
-          TESTS_CONFIG='${{ needs.configure-matrix.outputs.tests_config }}'
-          
-          # Agent must provide tests_config - no fallback
-          if [ -z "$TESTS_CONFIG" ] || [ "$TESTS_CONFIG" = "[]" ]; then
-            echo "::error::Agent did not provide tests_config - this should not happen"
-            exit 1
-          fi
-          
-          # Process each suite config to determine tests_to_run
-          MATRIX=$(echo "$TESTS_CONFIG" | jq -c '[.[] | {
-            suite: .suite,
-            tests_to_run: (if .run_all_tests == true or (.tests_to_run | length) == 0 then "all" else (.tests_to_run | join(",")) end)
-          }]')
-          
-          echo "Computed test matrix: $MATRIX"
-          echo "test_matrix=$MATRIX" >> $GITHUB_OUTPUT
-
   test-execution:
-    needs: [configure-matrix, compute-tests]
+    needs: [configure-matrix]
     if: needs.configure-matrix.outputs.has-tests == 'true'
     strategy:
       fail-fast: false
       max-parallel: 10
       matrix:
-        data: ${{ fromJson(needs.compute-tests.outputs.test_matrix) }}
+        data: ${{ fromJson(needs.configure-matrix.outputs.test_matrix) }}
     uses: ./.github/workflows/test-runner-reusable.yml
     with:
       test_cases_dir: ${{ matrix.data.suite }}
@@ -240,4 +189,4 @@ jobs:
         uses: ./.github/actions/post-test-summary
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          pr-number: ${{ github.event.pull_request.number }}
+          pr-number: ${{ env.PR_NUMBER }}
