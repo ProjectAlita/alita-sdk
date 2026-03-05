@@ -21,9 +21,10 @@ state:
     type: dict
   test_results:
     type: dict
+  folder_name:
+    type: str
   folder_path:
     type: str
-    value: ${TEST_FOLDER_PATH}
   request_name:
     type: str
     value: "Create User POST"
@@ -33,19 +34,60 @@ state:
   url:
     type: str
     value: "https://api.example.com/users"
-  request_details:
+  headers:
+    type: list
+    value:
+      - key: "Content-Type"
+        value: "application/json"
+  body:
     type: dict
     value:
-      headers:
-        - key: "Content-Type"
-          value: "application/json"
-      body:
-        mode: "raw"
-        raw: '{"name": "Test User", "email": "test@example.com"}'
+      mode: "raw"
+      raw: '{"name": "Test User", "email": "test@example.com"}'
+  create_folder_result:
+    type: str
+  delete_request_result:
+    type: str
+  delete_folder_result:
+    type: str
 
-entry_point: invoke_create_request
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        folder_name = f"PST35_Folder_{timestamp}_{suffix}"
+        folder_path = folder_name
+        {"folder_name": folder_name, "folder_path": folder_path}
+    output:
+      - folder_name
+      - folder_path
+    structured_output: true
+    transition: create_test_folder
+
+  - id: create_test_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+    output:
+      - create_folder_result
+    structured_output: true
+    transition: invoke_create_request
+
   - id: invoke_create_request
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
@@ -77,7 +119,6 @@ nodes:
         type: variable
         value: body
     output:
-
       - tool_result
     structured_output: true
     transition: process_results
@@ -122,4 +163,37 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_delete_request
+
+  - id: cleanup_delete_request
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_request
+    input:
+      - folder_path
+      - request_name
+    input_mapping:
+      request_path:
+        type: fstring
+        value: "{folder_path}/{request_name}"
+    output:
+      - delete_request_result
+    structured_output: true
+    transition: cleanup_delete_folder
+
+  - id: cleanup_delete_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - folder_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+    output:
+      - delete_folder_result
+    structured_output: true
     transition: END
