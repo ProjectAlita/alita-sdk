@@ -24,7 +24,7 @@ state:
   request_path:
     type: str
     value: ${TEST_REQUEST_PATH}
-  pre_script:
+  pre_request_script:
     type: str
     value: |
       // Set timestamp variable
@@ -41,14 +41,14 @@ nodes:
     tool: update_request_pre_script
     input:
       - request_path
-      - pre_script
+      - pre_request_script
     input_mapping:
       request_path:
         type: variable
         value: request_path
       pre_request_script:
         type: variable
-        value: pre_script
+        value: pre_request_script
     output:
 
       - tool_result
