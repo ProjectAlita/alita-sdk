@@ -7,33 +7,33 @@ description: |
   Objective: Verify nested folder creation
   
   Expected Behavior:
-  - Tool executes successfully
-  - Folder is created inside the specified parent
+  - Parent folder is created first
+  - Nested folder is created inside the parent
   - Parent-child relationship is established
-  - Returns folder ID and confirmation
+  - Cleanup removes both folders
 
 toolkits:
-  - id: ${TOOLKIT_ID}
-    name: ${TOOLKIT_NAME}
+  - id: ${POSTMAN_TOOLKIT_ID}
+    name: ${POSTMAN_TOOLKIT_NAME}
 
 state:
-  tool_result:
-    type: dict
-  test_results:
-    type: dict
-  test_folder_name:
+  parent_folder_name:
     type: str
-  test_folder_path:
-    type: str
-  create_test_folder_result:
-    type: str
-  delete_test_folder_result:
-    type: str
-  parent_path:
-    type: str
-  folder_name:
+  nested_folder_name:
     type: str
     value: "Nested Folder"
+  parent_path:
+    type: str
+  create_parent_result:
+    type: str
+  tool_result:
+    type: dict
+  delete_nested_result:
+    type: str
+  delete_parent_result:
+    type: str
+  test_results:
+    type: dict
 
 entry_point: prepare_test_data
 
