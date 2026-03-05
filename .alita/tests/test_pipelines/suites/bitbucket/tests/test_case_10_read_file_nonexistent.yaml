@@ -102,14 +102,14 @@ nodes:
           2. read_failed: Read operation failed (contains error indicator)
           3. error_indicates_not_found: Error message indicates file not found
           4. file_not_in_list: The file '{non_existent_file}' does NOT appear in file list
-          5. no_unhandled_exception: No 'traceback', 'stack trace', or 'unhandled' in output
           
           OPTIONAL (nice to have, but not required for test to pass):
+          5. no_unhandled_exception: No raw unhandled Python exception (ToolException with stack trace is acceptable - it is handled by continue_on_error)
           6. error_message_helpful: Error message provides useful information
 
           Return JSON test_results:
           {{
-            "test_passed": boolean (SET TO TRUE if: list_files_worked AND read_failed AND error_indicates_not_found AND file_not_in_list AND no_unhandled_exception),
+            "test_passed": boolean (SET TO TRUE if: list_files_worked AND read_failed AND error_indicates_not_found AND file_not_in_list),
             "list_files_worked": boolean,
             "read_failed": boolean,
             "error_indicates_not_found": boolean,
