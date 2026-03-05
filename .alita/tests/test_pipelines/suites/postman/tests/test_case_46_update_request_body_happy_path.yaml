@@ -21,18 +21,94 @@ state:
     type: dict
   test_results:
     type: dict
+  folder_name:
+    type: str
+  request_name:
+    type: str
+  folder_path:
+    type: str
   request_path:
     type: str
-    value: ${TEST_REQUEST_PATH}
-  mode:
+  body:
+    type: dict
+    value:
+      mode: "raw"
+      raw: '{"name": "Updated User", "email": "updated@example.com"}'
+  create_folder_result:
     type: str
-    value: "raw"
-  raw:
+  create_request_result:
     type: str
-    value: '{"name": "Updated User", "email": "updated@example.com"}'
-entry_point: invoke_update_request_body
+  delete_request_result:
+    type: str
+  delete_folder_result:
+    type: str
+
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        folder_name = f"PST46_Folder_{timestamp}_{suffix}"
+        request_name = f"PST46_Request_{timestamp}_{suffix}"
+        folder_path = folder_name
+        request_path = f"{folder_name}/{request_name}"
+        {"folder_name": folder_name, "request_name": request_name, "folder_path": folder_path, "request_path": request_path}
+    output:
+      - folder_name
+      - request_name
+      - folder_path
+      - request_path
+    structured_output: true
+    transition: create_test_folder
+
+  - id: create_test_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+    output:
+      - create_folder_result
+    structured_output: true
+    transition: create_test_request
+
+  - id: create_test_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - folder_path
+      - request_name
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: fixed
+        value: "GET"
+      url:
+        type: fixed
+        value: "https://api.example.com/test"
+    output:
+      - create_request_result
+    structured_output: true
+    transition: invoke_update_request_body
+
   - id: invoke_update_request_body
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
@@ -48,7 +124,6 @@ nodes:
         type: variable
         value: body
     output:
-
       - tool_result
     structured_output: true
     transition: process_results
@@ -93,4 +168,36 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_delete_request
+
+  - id: cleanup_delete_request
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_request
+    input:
+      - request_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+    output:
+      - delete_request_result
+    structured_output: true
+    transition: cleanup_delete_folder
+
+  - id: cleanup_delete_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - folder_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_path
+    output:
+      - delete_folder_result
+    structured_output: true
     transition: END

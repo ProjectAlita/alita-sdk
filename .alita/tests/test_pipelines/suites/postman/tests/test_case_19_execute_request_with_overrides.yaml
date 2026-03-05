@@ -23,13 +23,89 @@ state:
     type: dict
   request_path:
     type: str
-    value: ${TEST_REQUEST_PATH}
-  test_var:
+  folder_name:
     type: str
-    value: "override_value"
-entry_point: invoke_execute_request
+  request_name:
+    type: str
+  create_folder_result:
+    type: str
+  create_request_result:
+    type: str
+  delete_request_result:
+    type: str
+  delete_folder_result:
+    type: str
+  override_variables:
+    type: dict
+    value:
+      test_var: "override_value"
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        folder_name = f"PST19_Folder_{timestamp}_{suffix}"
+        request_name = f"PST19_Request_{timestamp}_{suffix}"
+        {
+          "folder_name": folder_name,
+          "request_name": request_name,
+          "request_path": f"{folder_name}/{request_name}"
+        }
+    output:
+      - folder_name
+      - request_name
+      - request_path
+    structured_output: true
+    transition: create_test_folder
+
+  - id: create_test_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: folder_name
+    output:
+      - create_folder_result
+    structured_output: true
+    transition: create_test_request
+
+  - id: create_test_request
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_request
+    input:
+      - folder_name
+      - request_name
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_name
+      name:
+        type: variable
+        value: request_name
+      method:
+        type: fixed
+        value: "GET"
+      url:
+        type: fixed
+        value: "https://httpbin.org/get"
+    output:
+      - create_request_result
+    structured_output: true
+    transition: invoke_execute_request
+
   - id: invoke_execute_request
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
@@ -90,4 +166,36 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_request
+
+  - id: cleanup_request
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_request
+    input:
+      - request_path
+    input_mapping:
+      request_path:
+        type: variable
+        value: request_path
+    output:
+      - delete_request_result
+    structured_output: true
+    transition: cleanup_folder
+
+  - id: cleanup_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - folder_name
+    input_mapping:
+      folder_path:
+        type: variable
+        value: folder_name
+    output:
+      - delete_folder_result
+    structured_output: true
     transition: END

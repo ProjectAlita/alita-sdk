@@ -21,15 +21,79 @@ state:
     type: dict
   test_results:
     type: dict
+  source_folder_name:
+    type: str
+  target_folder_name:
+    type: str
   source_path:
     type: str
-    value: ${TEST_FOLDER_PATH}
   target_path:
     type: str
-    value: ${TARGET_FOLDER_PATH}
-entry_point: invoke_move_folder
+  create_source_result:
+    type: str
+  create_target_result:
+    type: str
+  delete_source_result:
+    type: str
+  delete_target_result:
+    type: str
+
+entry_point: prepare_test_data
 
 nodes:
+  - id: prepare_test_data
+    type: code
+    code:
+      type: fixed
+      value: |
+        import time
+        import random
+        import string
+        timestamp = time.strftime('%Y%m%d-%H%M%S')
+        suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
+        source_folder_name = f"PST32_Source_{timestamp}_{suffix}"
+        target_folder_name = f"PST32_Target_{timestamp}_{suffix}"
+        source_path = source_folder_name
+        target_path = target_folder_name
+        {"source_folder_name": source_folder_name, "target_folder_name": target_folder_name, "source_path": source_path, "target_path": target_path}
+    output:
+      - source_folder_name
+      - target_folder_name
+      - source_path
+      - target_path
+    structured_output: true
+    transition: create_source_folder
+
+  - id: create_source_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - source_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: source_folder_name
+    output:
+      - create_source_result
+    structured_output: true
+    transition: create_target_folder
+
+  - id: create_target_folder
+    type: toolkit
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: create_folder
+    input:
+      - target_folder_name
+    input_mapping:
+      name:
+        type: variable
+        value: target_folder_name
+    output:
+      - create_target_result
+    structured_output: true
+    transition: invoke_move_folder
+
   - id: invoke_move_folder
     type: toolkit
     toolkit_name: ${TOOLKIT_NAME}
@@ -45,7 +109,6 @@ nodes:
         type: variable
         value: target_path
     output:
-
       - tool_result
     structured_output: true
     transition: process_results
@@ -90,4 +153,20 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: cleanup_delete_target_folder
+
+  - id: cleanup_delete_target_folder
+    type: toolkit
+    continue_on_error: true
+    toolkit_name: ${TOOLKIT_NAME}
+    tool: delete_folder
+    input:
+      - target_path
+    input_mapping:
+      folder_path:
+        type: variable
+        value: target_path
+    output:
+      - delete_target_result
+    structured_output: true
     transition: END

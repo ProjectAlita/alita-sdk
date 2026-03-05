@@ -19,9 +19,11 @@ state:
   project_key:
     type: str
     value: ${XRAY_PROJECT_KEY:EL}
+  graphql_query:
+    type: str
   test_issue_id:
     type: str
-  get_tests_result:
+  graphql_result:
     type: str
   attachments_result:
     type: str
@@ -34,37 +36,42 @@ state:
   test_results:
     type: dict
 
-entry_point: find_test_with_steps
+entry_point: prepare_graphql_query
 nodes:
-  - id: find_test_with_steps
+  - id: prepare_graphql_query
     type: code
     code:
       type: fixed
       value: |
-        # Prepare JQL to find Manual tests (which have steps) in AI TESTS folder
+        # Build a GraphQL query that returns only 1 Manual test to keep state small
         project_key = alita_state.get("project_key", "EL")
-        jql_query = f'project = "{project_key}" AND testType = "Manual" AND labels in (ELITEA_AI_CREATED)'
-        
-        {"jql_query": jql_query}
+        graphql_query = f'''query {{
+          getTests(jql: "project = \\"{project_key}\\" AND testType = \\"Manual\\" AND labels in (ELITEA_AI_CREATED)", limit: 1, start: 0) {{
+            results {{
+              issueId
+            }}
+          }}
+        }}'''
+        {"graphql_query": graphql_query}
     input:
       - project_key
     output:
-      - jql_query
+      - graphql_query
     structured_output: true
-    transition: get_tests
+    transition: execute_graphql_query
 
-  - id: get_tests
+  - id: execute_graphql_query
     type: toolkit
     input:
-      - jql_query
+      - graphql_query
     input_mapping:
-      jql:
+      graphql:
         type: variable
-        value: jql_query
+        value: graphql_query
     output:
-      - get_tests_result
+      - graphql_result
     structured_output: false
-    tool: get_tests
+    tool: execute_graphql
     toolkit_name: ${XRAY_TOOLKIT_NAME}
     transition: extract_test_id
 
@@ -73,34 +80,21 @@ nodes:
     code:
       type: fixed
       value: |
-        import json
         import re
-        
-        # Extract first test issueId from results
-        result_str = alita_state.get("get_tests_result", "")
+        # graphql_result is small (1 test only) - safe to pass through state
+        result_str = alita_state.get("graphql_result", "")
         test_issue_id = "not_found"
-        
         try:
-            # Look for issueId in the result
-            issue_id_match = re.search(r"'issueId':\s*'?(\d+)'?", result_str)
-            if not issue_id_match:
-                issue_id_match = re.search(r'"issueId":\s*"?(\d+)"?', result_str)
-            if issue_id_match:
-                test_issue_id = issue_id_match.group(1)
-            
-            # If not found, look for jira key and we'll use that
-            if test_issue_id == "not_found":
-                key_match = re.search(r"'key':\s*'([A-Z]+-\d+)'", result_str)
-                if not key_match:
-                    key_match = re.search(r'"key":\s*"([A-Z]+-\d+)"', result_str)
-                if key_match:
-                    test_issue_id = key_match.group(1)
+            m = re.search(r"'issueId':\s*'?(\d+)'?", result_str)
+            if not m:
+                m = re.search(r'"issueId":\s*"?(\d+)"?', result_str)
+            if m:
+                test_issue_id = m.group(1)
         except Exception:
             pass
-        
         {"test_issue_id": test_issue_id}
     input:
-      - get_tests_result
+      - graphql_result
     output:
       - test_issue_id
     structured_output: true
