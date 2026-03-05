@@ -94,10 +94,22 @@ class SandboxArtifact:
             # Fallback to utf-8 with error replacement
             return data.decode('utf-8', errors='replace')
 
-    def delete(self, artifact_name: str, bucket_name: str = None) -> dict:
-        """Delete a file. Returns dict with message or error."""
+    def delete(self, artifact_name: str, bucket_name: str = None, check_exists: bool = True) -> dict:
+        """Delete a file. Returns dict with message or error.
+
+        Args:
+            artifact_name: File name/key to delete.
+            bucket_name: Bucket to delete from (uses default if None).
+            check_exists: When True (default), performs a HEAD request before deletion.
+                If the file does not exist, returns an error instead of silently succeeding.
+                Set to False for idempotent S3-style deletes (no extra round-trip).
+        """
         if not bucket_name:
             bucket_name = self.bucket_name
+        if check_exists:
+            head_result = self.client.head_artifact_s3(bucket_name, artifact_name)
+            if not head_result.get('exists', True):
+                return {"error": f"File '{artifact_name}' not found in bucket '{bucket_name}'"}
         # Use S3 API for delete
         result = self.client.delete_artifact_s3(bucket_name, artifact_name)
         if 'error' in result:
