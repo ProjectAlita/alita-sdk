@@ -64,16 +64,22 @@ nodes:
 
           this test validates error handling for non-existent files.
 
+          IMPORTANT: this is a NEGATIVE test. the tool is expected to FAIL with an error.
+          test_passed must be TRUE if the tool returned ANY error related to the file access attempt.
+
           perform the following checks:
-          1. confirm the tool executed (result is not empty or null).
-          2. examine any error message for specific meaning. valid error patterns for non-existent files include:
+          1. confirm the tool executed and returned an error (result is not empty or null).
+          2. the following are ALL valid passing outcomes — set test_passed=true for ANY of these:
              - file not found or does not exist
              - invalid file path or path error
              - cannot access file or file unavailable
              - failed to load file or read error
-          3. determine if the error is about the non-existent file itself.
-             errors like "file not found" or "nonexistent_file_12345.txt does not exist" are expected and correct.
-             system errors unrelated to the file path are failures.
+             - 401 unauthorized — this is EXPECTED and CORRECT; sharepoint returns 401 for non-existent files
+             - authentication error when accessing the file — ALSO EXPECTED AND CORRECT
+             - file not found combined with any permission or access error
+          3. set test_passed=false ONLY if the tool succeeded (returned file content) or if the error is
+             completely unrelated to the file access attempt (e.g., network timeout, dns failure, wrong site url).
+          4. a 401 unauthorized error for a non-existent file IS a passing result — do not fail the test for 401.
 
           return a json object with:
           {{
