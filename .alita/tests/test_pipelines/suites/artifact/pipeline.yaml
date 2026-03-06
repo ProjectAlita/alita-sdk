@@ -135,6 +135,7 @@ setup:
   # Step 4: Create test file artifact for Confluence tests
   - name: Create Test File Artifact
     type: toolkit_invoke
+    continue_on_error: true
     config:
       toolkit_id: ${ARTIFACT_TOOLKIT_ID}
       tool_name: createFile
