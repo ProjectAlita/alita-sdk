@@ -4,7 +4,7 @@ import re
 import fnmatch
 import tiktoken
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,7 @@ class GitHubClient(BaseModel):
     alita: Optional[Any] = Field(default=None, exclude=True)
     
     # Import file operation methods from BaseCodeToolApiWrapper
+    _excluded_file_operations: ClassVar[set] = {'edit_file'}
     read_file_chunk = BaseCodeToolApiWrapper.read_file_chunk
     read_multiple_files = BaseCodeToolApiWrapper.read_multiple_files
     search_file = BaseCodeToolApiWrapper.search_file
