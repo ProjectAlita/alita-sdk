@@ -74,6 +74,7 @@ nodes:
           3. determine if the error is about the non-existent file itself.
              errors like "file not found" or "nonexistent_file_12345.txt does not exist" are expected and correct.
              system errors unrelated to the file path are failures.
+          4. Thre should be no 401 error
 
           return a json object with:
           {{
