@@ -730,8 +730,12 @@ def execute_setup(
         except Exception as e:
             step_result = {"success": False, "error": str(e)}
 
-        # Save environment variables from step result
-        if step_result.get("success") and "save_to_env" in step:
+        # Save environment variables from step result.
+        # Also apply save_to_env defaults when step failed but continue_on_error is set,
+        # so downstream tests receive valid fallback values instead of unresolved variables.
+        step_succeeded = step_result.get("success") or step_result.get("dry_run")
+        step_continue_on_error = step.get("continue_on_error", False)
+        if (step_succeeded or step_continue_on_error) and "save_to_env" in step:
             for save_config in step["save_to_env"]:
                 import json
                 key = save_config["key"]
