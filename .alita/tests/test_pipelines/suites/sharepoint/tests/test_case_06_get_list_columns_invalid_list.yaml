@@ -70,9 +70,13 @@ nodes:
              - invalid list title or list name
              - cannot access list or list unavailable
              - list retrieval failed or list error
+             - 401 unauthorized or authentication error when accessing the list
+             - get list columns failed or check list name and permissions
           3. determine if the error is about the invalid list itself.
              errors like "list 'invalidlist_99999_doesnotexist' not found" are expected and correct.
-             system errors unrelated to the list name are failures.
+             401 unauthorized errors when accessing an invalid list are also expected and correct —
+             sharepoint returns 401 for non-existent resources in some configurations.
+             only reject errors that are clearly unrelated to the list access attempt (e.g., network timeout, dns failure).
 
           return a json object with:
           {{
