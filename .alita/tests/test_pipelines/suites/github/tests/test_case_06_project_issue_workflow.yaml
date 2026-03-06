@@ -41,6 +41,8 @@ state:
     type: str
   updated_title:
     type: str
+  test_passed:
+    type: bool
 entry_point: prepare_issue
 nodes:
   - id: prepare_issue
@@ -96,7 +98,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: create_issue_on_project
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_create
   - id: validate_create
     type: llm
@@ -162,7 +164,7 @@ nodes:
       - search_result
     structured_output: true
     tool: search_project_issues
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_search
   - id: validate_search
     type: llm
@@ -231,7 +233,7 @@ nodes:
       - list_result
     structured_output: true
     tool: list_project_issues
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_list
   - id: validate_list
     type: llm
@@ -336,63 +338,49 @@ nodes:
       - update_result
     structured_output: true
     tool: update_issue_on_project
-    toolkit_name: testing
+    toolkit_name: ${GITHUB_TOOLKIT_NAME}
     transition: validate_update
   - id: validate_update
-    type: llm
+    type: code
+    code:
+      type: fixed
+      value: |
+        update_result = alita_state.get('update_result', '')
+        prev = alita_state.get('test_results', {})
+        if not isinstance(prev, dict):
+            prev = {}
+
+        update_ok = isinstance(update_result, str) and ('updated' in update_result.lower() or 'success' in update_result.lower())
+        create_ok = bool(prev.get('create_issue_ok', False))
+        test_passed = create_ok and update_ok
+
+        test_results = {
+            "test_passed": test_passed,
+            "operations": {
+                "create_issue_on_project": create_ok,
+                "search_project_issues": bool(prev.get('search_ok', False)),
+                "list_project_issues": bool(prev.get('list_ok', False)),
+                "update_issue_on_project": update_ok
+            },
+            "details": {
+                "issue_number": prev.get('issue_number', alita_state.get('issue_number', '')),
+                "issue_title": alita_state.get('issue_title', ''),
+                "issue_found_in_search": bool(prev.get('issue_found_in_search', False)),
+                "issue_in_list": bool(prev.get('issue_in_list', False)),
+                "search_items_count": prev.get('search_items_count', 0),
+                "list_items_count": prev.get('list_items_count', 0)
+            },
+            "error": None
+        }
+
+        {"test_results": test_results, "test_passed": test_passed}
     input:
       - update_result
+      - test_results
       - issue_number
       - issue_title
-      - test_results
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: You are a quality assurance validator.
-      task:
-        type: fstring
-        value: |
-          Analyze the output from the 'update_issue_on_project' tool and generate final test results.
-
-          Update Result: {update_result}
-          Issue Number: {issue_number}
-          Issue Title: {issue_title}
-          Previous Test Results: {test_results}
-
-          Perform the following checks:
-
-          1. Confirm the update succeeded (result contains "updated", "success", or similar indicators).
-          2. Calculate overall test_passed: true if create_issue_ok AND update_ok are both true.
-
-          Merge with previous test results and return a JSON object named test_results with the following structure:
-
-          {{
-            "test_passed": boolean (true if core operations passed: create_issue_ok AND update_ok),
-            "operations": {{
-              "create_issue_on_project": boolean (from test_results.create_issue_ok),
-              "search_project_issues": boolean (from test_results.search_ok),
-              "list_project_issues": boolean (from test_results.list_ok),
-              "update_issue_on_project": boolean (true if update succeeded)
-            }},
-            "details": {{
-              "issue_number": string,
-              "issue_title": string,
-              "issue_found_in_search": boolean (from test_results),
-              "issue_in_list": boolean (from test_results),
-              "search_items_count": integer (from test_results),
-              "list_items_count": integer (from test_results)
-            }},
-            "error": string | null
-          }}
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
-    model: gpt-4o
     output:
       - test_results
-    structured_output: false
-    structured_output_dict:
-      test_results: dict
+      - test_passed
+    structured_output: true
     transition: END
