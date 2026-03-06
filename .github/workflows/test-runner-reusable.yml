@@ -200,6 +200,8 @@ jobs:
         run: |
           docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json ./results.json || echo "{}" > ./results.json
           docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results_for_bug_reporter.json ./results_for_bug_reporter.json || echo "{}" > ./results_for_bug_reporter.json
+          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results_errors_only.json ./results_errors_only.json || echo "{}" > ./results_errors_only.json
+          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results_errors_only_for_bug_reporter.json ./results_errors_only_for_bug_reporter.json || echo "{}" > ./results_errors_only_for_bug_reporter.json
           
       - name: Generate test report
         if: always()
@@ -369,13 +371,22 @@ jobs:
           BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
           TOTAL_ANALYZED=$(jq -r '(.summary.total_analyzed // ((.summary.fixed // 0) + (.summary.flaky // 0) + (.summary.blocked // 0)))' ./fix_output.json)
           
+          # Count blocked tests by blocker_type from fix_output.json
+          SDK_BUG_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "sdk_bug")] | length' ./fix_output.json)
+          AUTOMATION_BUG_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "automation_bug")] | length' ./fix_output.json)
+          MAX_ATTEMPTS_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "max_attempts_exceeded")] | length' ./fix_output.json)
+          PR_REGRESSION_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "pr_regression")] | length' ./fix_output.json)
+          PR_REGRESSION_TOP=$(jq -r '.pr_regressions // [] | length' ./fix_output.json)
+          
           # Count SDK bugs from intent analysis in milestone
           SDK_BUG_COUNT=0
           TEST_CODE_ISSUE_COUNT=0
+          AUTOMATION_BUG_INTENT_COUNT=0
           INTENT_ANALYSIS_COUNT=0
           if [ -f ./fix_milestone.json ] && jq empty ./fix_milestone.json 2>/dev/null; then
             SDK_BUG_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "sdk_bug")] | length' ./fix_milestone.json)
             TEST_CODE_ISSUE_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "test_code_issue")] | length' ./fix_milestone.json)
+            AUTOMATION_BUG_INTENT_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "automation_bug")] | length' ./fix_milestone.json)
             INTENT_ANALYSIS_COUNT=$(jq -r '.intent_analysis // [] | length' ./fix_milestone.json)
           fi
           
@@ -386,9 +397,15 @@ jobs:
               echo "## 🤖 AI Analysis Summary"
               echo ""
               # Show SDK bug warning banner if any SDK bugs detected
-              if [ "$SDK_BUG_COUNT" -gt 0 ]; then
+              if [ "$SDK_BUG_BLOCKED" -gt 0 ]; then
                 echo "> [!CAUTION]"
-                echo "> **${SDK_BUG_COUNT} SDK bug(s) detected** — these are real product defects, not test issues. Tests were correctly blocked (not patched to hide bugs)."
+                echo "> **${SDK_BUG_BLOCKED} SDK bug(s) detected** — these are real product defects, not test issues. Tests were correctly blocked (not patched to hide bugs)."
+                echo ""
+              fi
+              # Show automation bug warning banner
+              if [ "$AUTOMATION_BUG_BLOCKED" -gt 0 ]; then
+                echo "> [!WARNING]"
+                echo "> **${AUTOMATION_BUG_BLOCKED} automation bug(s) detected** — environment/infrastructure issues confirmed by rerun. TA team verification required."
                 echo ""
               fi
               
@@ -397,10 +414,26 @@ jobs:
               echo "| Total Analyzed | **${TOTAL_ANALYZED}** |"
               echo "| ✅ Fixed (test code issues) | ${FIXED_COUNT} |"
               echo "| ⚠️ Flaky | ${FLAKY_COUNT} |"
-              echo "| ❌ Blocked (SDK bugs) | ${BLOCKED_COUNT} |"
+              echo "| ❌ Blocked (total) | ${BLOCKED_COUNT} |"
+              if [ "$SDK_BUG_BLOCKED" -gt 0 ]; then
+                echo "| — 🐛 SDK Bugs | ${SDK_BUG_BLOCKED} |"
+              fi
+              if [ "$AUTOMATION_BUG_BLOCKED" -gt 0 ]; then
+                echo "| — 🔌 Automation Bugs | ${AUTOMATION_BUG_BLOCKED} |"
+              fi
+              if [ "$MAX_ATTEMPTS_BLOCKED" -gt 0 ]; then
+                echo "| — 🔄 Max Attempts Exceeded | ${MAX_ATTEMPTS_BLOCKED} |"
+              fi
+              if [ "$PR_REGRESSION_BLOCKED" -gt 0 ] || [ "$PR_REGRESSION_TOP" -gt 0 ]; then
+                PR_REG_TOTAL=$((PR_REGRESSION_BLOCKED > PR_REGRESSION_TOP ? PR_REGRESSION_BLOCKED : PR_REGRESSION_TOP))
+                echo "| — ⚠️ PR Regressions | ${PR_REG_TOTAL} |"
+              fi
               if [ "$INTENT_ANALYSIS_COUNT" -gt 0 ]; then
                 echo "| 🔍 SDK Bugs Identified | ${SDK_BUG_COUNT} |"
                 echo "| 🔧 Test Code Issues | ${TEST_CODE_ISSUE_COUNT} |"
+                if [ "$AUTOMATION_BUG_INTENT_COUNT" -gt 0 ]; then
+                  echo "| 🔌 Automation Bugs Identified | ${AUTOMATION_BUG_INTENT_COUNT} |"
+                fi
               fi
               echo ""
               
@@ -444,44 +477,117 @@ jobs:
                 echo ""
               fi
               
-              # Show blocked tests details
+              # Show blocked tests details — split by blocker type
               if [ "$BLOCKED_COUNT" -gt 0 ]; then
-                echo "### ❌ Blocked Tests (SDK Bugs)"
-                echo ""
-                echo "> [!IMPORTANT]"
-                echo "> These tests were **not patched** because the failures are caused by SDK code defects, not test logic errors. Weakening assertions would hide real bugs."
-                echo ""
                 echo "**Total blocked: ${BLOCKED_COUNT} test(s)**"
                 echo ""
-                # Add numbering to blocked tests
-                COUNTER=1
-                jq -c '.blocked[]?' ./fix_output.json | while read -r item; do
-                  TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
-                  BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
-                  EXPECTED=$(echo "$item" | jq -r '.expected_behavior // "N/A"')
-                  ACTUAL=$(echo "$item" | jq -r '.actual_behavior // "N/A"')
-                  SDK_COMP=$(echo "$item" | jq -r '.sdk_component // "N/A"')
-                  METHODS=$(echo "$item" | jq -r '(.affected_methods // []) | join(", ")')
-                  ERROR_LOC=$(echo "$item" | jq -r '.error_location // "N/A"')
-                  BUG_NEEDED=$(echo "$item" | jq -r '.bug_report_needed // false')
-                  
-                  echo "<details>"
-                  echo "<summary><b>${COUNTER}. ${TEST_IDS}</b> — ${BUG_DESC}</summary>"
+                
+                # SDK Bugs
+                if [ "$SDK_BUG_BLOCKED" -gt 0 ]; then
+                  echo "### ❌ Blocked Tests — SDK Bugs (${SDK_BUG_BLOCKED})"
                   echo ""
-                  echo "| Field | Detail |"
-                  echo "|-------|--------|"
-                  echo "| Bug Description | ${BUG_DESC} |"
-                  echo "| Expected Behavior | ${EXPECTED} |"
-                  echo "| Actual Behavior | ${ACTUAL} |"
-                  echo "| SDK Component | ${SDK_COMP} |"
-                  echo "| Affected Methods | ${METHODS} |"
-                  echo "| Error Location | ${ERROR_LOC} |"
-                  echo "| Bug Report Needed | ${BUG_NEEDED} |"
+                  echo "> [!IMPORTANT]"
+                  echo "> These tests were **not patched** because the failures are caused by SDK code defects, not test logic errors. Weakening assertions would hide real bugs."
                   echo ""
-                  echo "</details>"
+                  COUNTER=1
+                  jq -c '.blocked[]? | select(.blocker_type == "sdk_bug")' ./fix_output.json | while read -r item; do
+                    TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                    BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
+                    EXPECTED=$(echo "$item" | jq -r '.expected_behavior // "N/A"')
+                    ACTUAL=$(echo "$item" | jq -r '.actual_behavior // "N/A"')
+                    SDK_COMP=$(echo "$item" | jq -r '.sdk_component // "N/A"')
+                    METHODS=$(echo "$item" | jq -r '(.affected_methods // []) | join(", ")')
+                    ERROR_LOC=$(echo "$item" | jq -r '.error_location // "N/A"')
+                    BUG_NEEDED=$(echo "$item" | jq -r '.bug_report_needed // false')
+                    
+                    echo "<details>"
+                    echo "<summary><b>${COUNTER}. ${TEST_IDS}</b> — ${BUG_DESC}</summary>"
+                    echo ""
+                    echo "| Field | Detail |"
+                    echo "|-------|--------|"
+                    echo "| Bug Description | ${BUG_DESC} |"
+                    echo "| Expected Behavior | ${EXPECTED} |"
+                    echo "| Actual Behavior | ${ACTUAL} |"
+                    echo "| SDK Component | ${SDK_COMP} |"
+                    echo "| Affected Methods | ${METHODS} |"
+                    echo "| Error Location | ${ERROR_LOC} |"
+                    echo "| Bug Report Needed | ${BUG_NEEDED} |"
+                    echo ""
+                    echo "</details>"
+                    echo ""
+                    COUNTER=$((COUNTER + 1))
+                  done
+                fi
+                
+                # Automation Bugs
+                if [ "$AUTOMATION_BUG_BLOCKED" -gt 0 ]; then
+                  echo "### 🔌 Blocked Tests — Automation Bugs (${AUTOMATION_BUG_BLOCKED})"
                   echo ""
-                  COUNTER=$((COUNTER + 1))
-                done
+                  echo "> [!WARNING]"
+                  echo "> Environment/infrastructure issues confirmed by rerun. These require TA team verification, not code fixes."
+                  echo ""
+                  COUNTER=1
+                  jq -c '.blocked[]? | select(.blocker_type == "automation_bug")' ./fix_output.json | while read -r item; do
+                    TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                    BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
+                    TOOL_NAME=$(echo "$item" | jq -r '.tool_name // "N/A"')
+                    ERROR_TYPE=$(echo "$item" | jq -r '.error_type // "N/A"')
+                    HTTP_CODE=$(echo "$item" | jq -r '.http_status_code // "N/A"')
+                    ERROR_SUMMARY=$(echo "$item" | jq -r '.error_summary // "N/A"')
+                    TEST_NODE=$(echo "$item" | jq -r '.test_node // "N/A"')
+                    PROBABLE_CAUSE=$(echo "$item" | jq -r '.probable_cause // "N/A"')
+                    ACTION_REQUIRED=$(echo "$item" | jq -r '.action_required // "N/A"')
+                    BUG_NEEDED=$(echo "$item" | jq -r '.bug_report_needed // false')
+                    
+                    echo "<details>"
+                    echo "<summary><b>${COUNTER}. ${TEST_IDS}</b> — ${BUG_DESC}</summary>"
+                    echo ""
+                    echo "| Field | Detail |"
+                    echo "|-------|--------|"
+                    echo "| Bug Description | ${BUG_DESC} |"
+                    echo "| Tool Name | \`${TOOL_NAME}\` |"
+                    echo "| Error Type | ${ERROR_TYPE} |"
+                    echo "| HTTP Status Code | ${HTTP_CODE} |"
+                    echo "| Error Summary | ${ERROR_SUMMARY} |"
+                    echo "| Pipeline Node | \`${TEST_NODE}\` |"
+                    echo "| Probable Cause | ${PROBABLE_CAUSE} |"
+                    echo "| Action Required | ${ACTION_REQUIRED} |"
+                    echo "| Bug Report Needed | ${BUG_NEEDED} |"
+                    echo ""
+                    echo "</details>"
+                    echo ""
+                    COUNTER=$((COUNTER + 1))
+                  done
+                fi
+                
+                # Max Attempts Exceeded
+                if [ "$MAX_ATTEMPTS_BLOCKED" -gt 0 ]; then
+                  echo "### 🔄 Blocked Tests — Max Fix Attempts Exceeded (${MAX_ATTEMPTS_BLOCKED})"
+                  echo ""
+                  echo "> [!NOTE]"
+                  echo "> These tests exhausted all fix attempts (3 max) without passing."
+                  echo ""
+                  COUNTER=1
+                  jq -c '.blocked[]? | select(.blocker_type == "max_attempts_exceeded")' ./fix_output.json | while read -r item; do
+                    TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                    BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
+                    ATTEMPTS=$(echo "$item" | jq -r '.attempts_made // "N/A"')
+                    LAST_ERROR=$(echo "$item" | jq -r '.last_attempt_error // "N/A"')
+                    
+                    echo "<details>"
+                    echo "<summary><b>${COUNTER}. ${TEST_IDS}</b> — ${BUG_DESC}</summary>"
+                    echo ""
+                    echo "| Field | Detail |"
+                    echo "|-------|--------|"
+                    echo "| Bug Description | ${BUG_DESC} |"
+                    echo "| Attempts Made | ${ATTEMPTS} |"
+                    echo "| Last Attempt Error | ${LAST_ERROR} |"
+                    echo ""
+                    echo "</details>"
+                    echo ""
+                    COUNTER=$((COUNTER + 1))
+                  done
+                fi
               fi
               
               # Show Intent Analysis from milestone (how each test was classified)
@@ -495,7 +601,7 @@ jobs:
                   echo ""
                   echo "| Test | Type | Classification | Primary Feature | SDK Correct? | Reasoning |"
                   echo "|------|------|----------------|-----------------|--------------|-----------|" 
-                  jq -r '.intent_analysis[]? | "| \(.test_id // "N/A") | \(.positive_or_negative // "N/A") | \(if .classification == "sdk_bug" then "🐛 SDK Bug" else "🔧 Test Issue" end) | \(.primary_feature // "N/A") | \(if .sdk_behaves_correctly then "✅" else "❌" end) | \(.reasoning // "N/A") |"' ./fix_milestone.json
+                  jq -r '.intent_analysis[]? | "| \(.test_id // "N/A") | \(.positive_or_negative // "N/A") | \(if .classification == "sdk_bug" then "🐛 SDK Bug" elif .classification == "automation_bug" then "🔌 Automation Bug" elif .classification == "pr_regression" then "⚠️ PR Regression" else "🔧 Test Issue" end) | \(.primary_feature // "N/A") | \(if .sdk_behaves_correctly then "✅" else "❌" end) | \(.reasoning // "N/A") |"' ./fix_milestone.json
                   echo ""
                   echo "</details>"
                   echo ""
@@ -531,7 +637,7 @@ jobs:
                     echo ""
                     echo "| Pattern | Tests | Category |"
                     echo "|---------|-------|----------|"
-                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) | \(if .category == "sdk_bug" then "🐛 SDK Bug" else "🔧 Test Issue" end) |"' ./fix_milestone.json
+                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) | \(if .category == "sdk_bug" then "🐛 SDK Bug" elif .category == "automation_bug" then "🔌 Automation Bug" elif .category == "pr_regression" then "⚠️ PR Regression" else "🔧 Test Issue" end) |"' ./fix_milestone.json
                     echo ""
                   fi
                   
@@ -721,8 +827,10 @@ jobs:
           
           # Parse bug report results
           BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
+          AUTOMATION_BUGS_CREATED=$(jq -r '.summary.automation_bugs_created // 0' ./bug_report_output.json)
           DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
           PR_REGRESSIONS_SKIPPED=$(jq -r '.summary.pr_regressions_skipped // 0' ./bug_report_output.json)
+          TEST_BUGS_SKIPPED=$(jq -r '.summary.test_bugs_skipped // 0' ./bug_report_output.json)
           FAILED=$(jq -r '.summary.failed // 0' ./bug_report_output.json)
           TOTAL=$(jq -r '.summary.total_analyzed // 0' ./bug_report_output.json)
           
@@ -735,15 +843,21 @@ jobs:
               echo "| Metric | Count |"
               echo "|--------|-------|"
               echo "| Total Analyzed | **${TOTAL}** |"
-              echo "| ✅ Bugs Created | ${BUGS_CREATED} |"
+              echo "| ✅ SDK Bugs Created | ${BUGS_CREATED} |"
+              if [ "$AUTOMATION_BUGS_CREATED" -gt 0 ]; then
+                echo "| 🔌 Automation Bugs Created | ${AUTOMATION_BUGS_CREATED} |"
+              fi
               echo "| ⏭️ Duplicates Skipped | ${DUPLICATES_SKIPPED} |"
               echo "| 🔄 PR Regressions (not reported) | ${PR_REGRESSIONS_SKIPPED} |"
+              if [ "$TEST_BUGS_SKIPPED" -gt 0 ]; then
+                echo "| 🔧 Test Bugs Skipped | ${TEST_BUGS_SKIPPED} |"
+              fi
               echo "| ❌ Failed to Report | ${FAILED} |"
               echo ""
               
-              # Show created bugs
+              # Show created SDK bugs
               if [ "$BUGS_CREATED" -gt 0 ]; then
-                echo "### ✅ Bugs Created on ELITEA Board"
+                echo "### ✅ SDK Bugs Created on ELITEA Board"
                 echo ""
                 echo "**Total created: ${BUGS_CREATED} bug(s)**"
                 echo ""
@@ -757,6 +871,28 @@ jobs:
                   COMPONENT=$(echo "$item" | jq -r '.affected_component // "N/A"')
                   LABELS=$(echo "$item" | jq -r '(.labels // []) | join(", ")')
                   echo "| ${COUNTER} | [${TITLE}](${ISSUE_URL}) | ${TEST_IDS} | ${COMPONENT} | ${LABELS} |"
+                  COUNTER=$((COUNTER + 1))
+                done
+                echo ""
+              fi
+              
+              # Show created automation bugs
+              if [ "$AUTOMATION_BUGS_CREATED" -gt 0 ]; then
+                echo "### 🔌 Automation Bugs Created on ELITEA Board"
+                echo ""
+                echo "**Total created: ${AUTOMATION_BUGS_CREATED} automation bug(s)**"
+                echo ""
+                echo "| # | Issue | Tests | Tool | Error Type | Labels |"
+                echo "|---|-------|-------|------|------------|--------|"
+                COUNTER=1
+                jq -c '.automation_bugs_created[]?' ./bug_report_output.json | while read -r item; do
+                  TITLE=$(echo "$item" | jq -r '.title')
+                  ISSUE_URL=$(echo "$item" | jq -r '.issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + (.issue_number | tostring))')
+                  TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
+                  TOOL_NAME=$(echo "$item" | jq -r '.tool_name // "N/A"')
+                  ERROR_TYPE=$(echo "$item" | jq -r '.error_type // "N/A"')
+                  LABELS=$(echo "$item" | jq -r '(.labels // []) | join(", ")')
+                  echo "| ${COUNTER} | [${TITLE}](${ISSUE_URL}) | ${TEST_IDS} | \`${TOOL_NAME}\` | ${ERROR_TYPE} | ${LABELS} |"
                   COUNTER=$((COUNTER + 1))
                 done
                 echo ""
@@ -810,6 +946,7 @@ jobs:
           
           # Parse bug report results
           BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
+          AUTOMATION_BUGS_CREATED=$(jq -r '.summary.automation_bugs_created // 0' ./bug_report_output.json)
           DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
           
           # Try to get PR number from various sources
@@ -832,14 +969,23 @@ jobs:
           
           echo "PR Number: $PR_NUMBER"
           echo "Bugs Created: $BUGS_CREATED"
+          echo "Automation Bugs Created: $AUTOMATION_BUGS_CREATED"
           echo "Duplicates Skipped: $DUPLICATES_SKIPPED"
           
-          # Add label for new bugs detected
+          # Add label for new SDK bugs detected
           if [ "$BUGS_CREATED" -gt 0 ]; then
             echo "Adding 'bug_ai_detected' label to PR #$PR_NUMBER"
             gh pr edit "$PR_NUMBER" \
               --add-label bug_ai_detected \
               --repo ${{ github.repository }} || echo "Failed to add bug_ai_detected label, continuing..."
+          fi
+          
+          # Add label for automation bugs detected
+          if [ "$AUTOMATION_BUGS_CREATED" -gt 0 ]; then
+            echo "Adding 'automation_bug_ai_detected' label to PR #$PR_NUMBER"
+            gh pr edit "$PR_NUMBER" \
+              --add-label automation_bug_ai_detected \
+              --repo ${{ github.repository }} || echo "Failed to add automation_bug_ai_detected label, continuing..."
           fi
           
           # Add label for existing/known bugs detected
@@ -885,11 +1031,30 @@ jobs:
           BLOCKED=$(jq -r '.summary.blocked // 0' ./fix_output.json)
           COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
 
+          # Count blocked by type
+          SDK_BUGS=$(jq -r '[.blocked[]? | select(.blocker_type == "sdk_bug")] | length' ./fix_output.json)
+          AUTOMATION_BUGS=$(jq -r '[.blocked[]? | select(.blocker_type == "automation_bug")] | length' ./fix_output.json)
+          PR_REGRESSIONS=$(jq -r '((.pr_regressions // []) | length) + ([.blocked[]? | select(.blocker_type == "pr_regression")] | length)' ./fix_output.json)
+          MAX_ATTEMPTS=$(jq -r '[.blocked[]? | select(.blocker_type == "max_attempts_exceeded")] | length' ./fix_output.json)
+
           echo "AI verdict → fixed=$FIXED  flaky=$FLAKY  blocked=$BLOCKED  committed=$COMMITTED"
+          echo "Blocked breakdown → sdk_bugs=$SDK_BUGS  automation_bugs=$AUTOMATION_BUGS  pr_regressions=$PR_REGRESSIONS  max_attempts=$MAX_ATTEMPTS"
+
+          # PR regressions → always fail (bugs introduced by this PR)
+          if [ "$PR_REGRESSIONS" -gt 0 ]; then
+            echo "::error::$PR_REGRESSIONS PR regression(s) detected — bugs introduced by this PR's code changes. Fix before merging."
+            exit 1
+          fi
 
           # SDK bugs blocking tests → fail
-          if [ "$BLOCKED" -gt 0 ]; then
-            echo "::error::$BLOCKED test(s) blocked by SDK bugs – job fails (see AI analysis summary)"
+          if [ "$SDK_BUGS" -gt 0 ]; then
+            echo "::error::$SDK_BUGS test(s) blocked by SDK bugs – job fails (see AI analysis summary)"
+            exit 1
+          fi
+
+          # Automation bugs → fail (environment/infra issues need TA team verification)
+          if [ "$AUTOMATION_BUGS" -gt 0 ]; then
+            echo "::error::$AUTOMATION_BUGS test(s) blocked by automation bugs (environment/infrastructure issues) – job fails (see AI analysis summary)"
             exit 1
           fi
 
@@ -897,6 +1062,12 @@ jobs:
           if [ "$FIXED" -gt 0 ] && [ "$COMMITTED" = "true" ]; then
             echo "✅ All $FIXED failing test(s) were fixed by AI and committed – job passes"
             exit 0
+          fi
+
+          # Max attempts exceeded → fail (tests couldn't be fixed)
+          if [ "$MAX_ATTEMPTS" -gt 0 ]; then
+            echo "::error::$MAX_ATTEMPTS test(s) exhausted max fix attempts – job fails"
+            exit 1
           fi
 
           # Flaky tests → fail (intermittent = unreliable infrastructure)
@@ -920,7 +1091,10 @@ jobs:
           name: test-results-${{ inputs.test_cases_dir }}
           path: |
             ./results.html
+            ./results.json
             ./results_for_bug_reporter.json
+            ./results_errors_only.json
+            ./results_errors_only_for_bug_reporter.json
             ./docker-logs.txt
             ./fix_output.json
             ./fix_milestone.json

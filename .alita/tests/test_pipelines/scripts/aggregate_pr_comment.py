@@ -159,6 +159,14 @@ class SuiteData:
         return _get(self.bug_report, "bugs_created", default=[]) or []
 
     @property
+    def automation_bugs_created(self) -> List[Dict]:
+        return _get(self.bug_report, "automation_bugs_created", default=[]) or []
+
+    @property
+    def test_bugs_skipped(self) -> List[Dict]:
+        return _get(self.bug_report, "test_bugs_skipped", default=[]) or []
+
+    @property
     def duplicates_skipped(self) -> List[Dict]:
         return _get(self.bug_report, "duplicates_skipped", default=[]) or []
 
@@ -175,6 +183,23 @@ class SuiteData:
     def error_patterns(self) -> List[Dict]:
         return _get(self.fix_milestone, "error_patterns", default=[]) or []
 
+    # -- blocked by type helpers --
+    @property
+    def blocked_sdk_bugs(self) -> List[Dict]:
+        return [b for b in self.blocked_tests if b.get("blocker_type") == "sdk_bug"]
+
+    @property
+    def blocked_automation_bugs(self) -> List[Dict]:
+        return [b for b in self.blocked_tests if b.get("blocker_type") == "automation_bug"]
+
+    @property
+    def blocked_max_attempts(self) -> List[Dict]:
+        return [b for b in self.blocked_tests if b.get("blocker_type") == "max_attempts_exceeded"]
+
+    @property
+    def blocked_pr_regressions(self) -> List[Dict]:
+        return [b for b in self.blocked_tests if b.get("blocker_type") == "pr_regression"]
+
     def ai_verdict(self) -> str:
         """One-liner AI verdict for the summary table."""
         parts: List[str] = []
@@ -182,10 +207,26 @@ class SuiteData:
             parts.append(f"{self.fixed_count} fixed")
         if self.flaky_count:
             parts.append(f"{self.flaky_count} flaky")
-        if self.blocked_count:
-            parts.append(f"{self.blocked_count} blocked")
-        if self.pr_regressions_count:
-            parts.append(f"{self.pr_regressions_count} PR regression{'s' if self.pr_regressions_count != 1 else ''}")
+        # Break down blocked by type
+        sdk_bugs = len(self.blocked_sdk_bugs)
+        auto_bugs = len(self.blocked_automation_bugs)
+        max_att = len(self.blocked_max_attempts)
+        other_blocked = self.blocked_count - sdk_bugs - auto_bugs - max_att - len(self.blocked_pr_regressions)
+        if sdk_bugs:
+            parts.append(f"{sdk_bugs} SDK bug{'s' if sdk_bugs != 1 else ''}")
+        if auto_bugs:
+            parts.append(f"{auto_bugs} automation bug{'s' if auto_bugs != 1 else ''}")
+        if max_att:
+            parts.append(f"{max_att} max-attempts")
+        if other_blocked > 0:
+            parts.append(f"{other_blocked} blocked")
+        regressions = self.pr_regressions_count + len(self.blocked_pr_regressions)
+        # Deduplicate: pr_regressions top-level may overlap with blocked pr_regression entries
+        if self.pr_regressions and self.blocked_pr_regressions:
+            # Use the larger count to avoid double-counting
+            regressions = max(self.pr_regressions_count, len(self.blocked_pr_regressions))
+        if regressions:
+            parts.append(f"{regressions} PR regression{'s' if regressions != 1 else ''}")
         return ", ".join(parts) if parts else "—"
 
 
@@ -355,19 +396,31 @@ def build_markdown(
             w(f"| {suite_name} | {ids} | {reason} |")
         w()
 
-    # -- Blocked tests (SDK bugs) --
-    all_blocked: List[tuple[str, Dict]] = []
+    # -- Blocked tests — split by blocker_type --
+    all_sdk_bugs: List[tuple[str, Dict]] = []
+    all_automation_bugs: List[tuple[str, Dict]] = []
+    all_max_attempts: List[tuple[str, Dict]] = []
     for s in suites:
+        for entry in s.blocked_sdk_bugs:
+            all_sdk_bugs.append((s.suite_display, entry))
+        for entry in s.blocked_automation_bugs:
+            all_automation_bugs.append((s.suite_display, entry))
+        for entry in s.blocked_max_attempts:
+            all_max_attempts.append((s.suite_display, entry))
+        # Entries without blocker_type (legacy) go to SDK bugs
         for entry in s.blocked_tests:
-            all_blocked.append((s.suite_display, entry))
-    if all_blocked:
+            bt = entry.get("blocker_type")
+            if bt is None:
+                all_sdk_bugs.append((s.suite_display, entry))
+
+    if all_sdk_bugs:
         w("### ❌ Blocked Tests — SDK Bugs")
         w()
         w("> [!IMPORTANT]")
         w("> These tests were **not patched** because the failures are caused by SDK "
           "code defects, not test logic errors.")
         w()
-        for suite_name, entry in all_blocked:
+        for suite_name, entry in all_sdk_bugs:
             ids = _join_ids(entry.get("test_ids", []))
             bug_desc = entry.get("bug_description", "N/A") or "N/A"
             expected = entry.get("expected_behavior", "N/A") or "N/A"
@@ -390,19 +443,72 @@ def build_markdown(
             w("</details>")
             w()
 
+    if all_automation_bugs:
+        w("### 🔌 Blocked Tests — Automation Bugs")
+        w()
+        w("> [!WARNING]")
+        w("> Environment/infrastructure issues confirmed by rerun. "
+          "These require TA team verification, not code fixes.")
+        w()
+        for suite_name, entry in all_automation_bugs:
+            ids = _join_ids(entry.get("test_ids", []))
+            bug_desc = entry.get("bug_description", "N/A") or "N/A"
+            tool_name = entry.get("tool_name", "N/A") or "N/A"
+            error_type = entry.get("error_type", "N/A") or "N/A"
+            http_code = entry.get("http_status_code", "N/A") or "N/A"
+            error_summary = entry.get("error_summary", "N/A") or "N/A"
+            test_node = entry.get("test_node", "N/A") or "N/A"
+            probable_cause = entry.get("probable_cause", "N/A") or "N/A"
+            action_required = entry.get("action_required", "N/A") or "N/A"
+            w(f"<details>")
+            w(f"<summary><b>[{suite_name}] {ids}</b> — {bug_desc}</summary>")
+            w()
+            w("| Field | Detail |")
+            w("|-------|--------|")
+            w(f"| Bug Description | {bug_desc} |")
+            w(f"| Tool Name | `{tool_name}` |")
+            w(f"| Error Type | {error_type} |")
+            w(f"| HTTP Status Code | {http_code} |")
+            w(f"| Error Summary | {error_summary} |")
+            w(f"| Pipeline Node | `{test_node}` |")
+            w(f"| Probable Cause | {probable_cause} |")
+            w(f"| Action Required | {action_required} |")
+            w()
+            w("</details>")
+            w()
+
+    if all_max_attempts:
+        w("### 🔄 Blocked Tests — Max Fix Attempts Exceeded")
+        w()
+        w("> [!NOTE]")
+        w("> These tests exhausted all fix attempts (3 max) without passing.")
+        w()
+        w("| Suite | Test(s) | Description | Attempts | Last Error |")
+        w("|-------|---------|-------------|----------|------------|")
+        for suite_name, entry in all_max_attempts:
+            ids = _join_ids(entry.get("test_ids", []))
+            bug_desc = entry.get("bug_description", "N/A") or "N/A"
+            attempts = entry.get("attempts_made", "N/A") or "N/A"
+            last_err = entry.get("last_attempt_error", "N/A") or "N/A"
+            w(f"| {suite_name} | {ids} | {bug_desc} | {attempts} | {last_err} |")
+        w()
+
     # -- Bug reports --
     all_bugs_created: List[tuple[str, Dict]] = []
+    all_auto_bugs_created: List[tuple[str, Dict]] = []
     all_dupes_skipped: List[tuple[str, Dict]] = []
     for s in suites:
         for b in s.bugs_created:
             all_bugs_created.append((s.suite_display, b))
+        for b in s.automation_bugs_created:
+            all_auto_bugs_created.append((s.suite_display, b))
         for d in s.duplicates_skipped:
             all_dupes_skipped.append((s.suite_display, d))
-    if all_bugs_created or all_dupes_skipped:
+    if all_bugs_created or all_auto_bugs_created or all_dupes_skipped:
         w("### 🐛 Bug Reports")
         w()
         if all_bugs_created:
-            w("**New bugs created:**")
+            w("**SDK bugs created:**")
             w()
             w("| Suite | Title | Test(s) | Component | Labels |")
             w("|-------|-------|---------|-----------|--------|")
@@ -414,6 +520,21 @@ def build_markdown(
                 comp = b.get("affected_component", "N/A") or "N/A"
                 labels = ", ".join(b.get("labels", []) or []) or "—"
                 w(f"| {suite_name} | {title_md} | {ids} | {comp} | {labels} |")
+            w()
+        if all_auto_bugs_created:
+            w("**Automation bugs created:**")
+            w()
+            w("| Suite | Title | Test(s) | Tool | Error Type | Labels |")
+            w("|-------|-------|---------|------|------------|--------|")
+            for suite_name, b in all_auto_bugs_created:
+                title = b.get("title", "N/A") or "N/A"
+                url = b.get("issue_url", "")
+                title_md = f"[{title}]({url})" if url else title
+                ids = _join_ids(b.get("test_ids", []))
+                tool = b.get("tool_name", "N/A") or "N/A"
+                error_type = b.get("error_type", "N/A") or "N/A"
+                labels = ", ".join(b.get("labels", []) or []) or "—"
+                w(f"| {suite_name} | {title_md} | {ids} | `{tool}` | {error_type} | {labels} |")
             w()
         if all_dupes_skipped:
             w("**Existing bugs matched (deduplicated):**")
@@ -498,6 +619,8 @@ def build_markdown(
                     cls_icon = "⚠️ PR Regression"
                 elif cls == "sdk_bug":
                     cls_icon = "🐛 SDK Bug"
+                elif cls == "automation_bug":
+                    cls_icon = "🔌 Automation Bug"
                 else:
                     cls_icon = "🔧 Test Issue"
                 reasoning = ia.get("reasoning", "N/A") or "N/A"
@@ -522,6 +645,8 @@ def build_markdown(
                     cat_icon = "⚠️ PR Regression"
                 elif cat == "sdk_bug":
                     cat_icon = "🐛 SDK Bug"
+                elif cat == "automation_bug":
+                    cat_icon = "🔌 Automation Bug"
                 else:
                     cat_icon = "🔧 Test Issue"
                 w(f"| {cause} | {ep_ids} | {cat_icon} |")
