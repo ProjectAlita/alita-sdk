@@ -1128,17 +1128,51 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                     capture_images = cfg.get('capture_images', True)
                     if capture_images:
                         items = self._backend.onenote_read_page_items(
-                            page_id,
-                            capture_images=capture_images,
-                            include_attachments=cfg.get('include_attachments', False),
+                            page_id=page_id,
+                            capture_images=True,
+                            include_attachments=False,
+                            read_attachment_content=False,
                         )
-                        # store items for _process_document
-                        document.metadata['_onenote_items'] = items
+
+                        for idx, item in enumerate(items):
+                            raw_bytes: bytes = item.get('raw_bytes')
+                            if raw_bytes and item.get('type') == 'image':
+                                description: str = item.get('description', '')
+                                filename: str = item.get('filename') or f"image_{idx}.jpg"
+                                img_id = f"img_{page_id}_{idx}"
+                                document.metadata.setdefault(
+                                    IndexerKeywords.DEPENDENT_DOCS.value, []
+                                ).append(img_id)
+
+                                content_bytes = description.encode('utf-8') if (
+                                            capture_images and description) else raw_bytes
+                                content_filename = filename.rsplit('.', 1)[0] + '.txt' if (
+                                            capture_images and description) else filename
+
+                                yield Document(
+                                    page_content=description,
+                                    metadata={
+                                        IndexerKeywords.CONTENT_IN_BYTES.value: content_bytes,
+                                        IndexerKeywords.CONTENT_FILE_NAME.value: content_filename,
+                                        'id': img_id,
+                                        'source_type': 'onenote_image',
+                                        'page_id': page_id,
+                                        'page_title': document.metadata.get('title', ''),
+                                        'source': document.metadata.get('webUrl', ''),
+                                        'filename': filename,
+                                        'alt': item.get('alt', ''),
+                                        'updated_on': document.metadata.get('updated_on', ''),
+                                        IndexerKeywords.PARENT.value: page_id,
+                                    },
+                                )
+
                     page_text = self._backend.onenote_get_page_content(page_id)
                     document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = (
                         page_text.encode("utf-8")
                     )
-                    document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = ".html"
+                    document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = (
+                        f"{page_id}.html"
+                    )
                 except Exception as e:
                     logging.error("Failed while parsing OneNote page '%s': %s", page_id, e)
                 yield document
@@ -1148,20 +1182,15 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 file_path = document.metadata.get('Path') or document.metadata.get('file_path')
                 if file_path:
                     try:
-                        # Graph API paths contain the full drive path in 'Path'.
-                        # load_file_content_in_bytes expects a server-relative or
-                        # drive-relative path, so strip the drive prefix if present.
-                        # e.g. "/drives/<id>/root:/folder/file.docx" → "folder/file.docx"
                         relative_path = file_path
                         if '/root:/' in file_path:
                             relative_path = file_path.split('/root:/', 1)[1]
                         content_bytes = self._backend.load_file_content_in_bytes(relative_path)
                         document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = content_bytes
-                        # derive extension from file name for downstream chunker/parser
                         file_name = document.metadata.get('Name', file_path)
                         _, ext = os.path.splitext(file_name)
                         if ext:
-                            document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = ext.lower()
+                            document.metadata[IndexerKeywords.CONTENT_FILE_NAME.value] = file_name
                     except Exception as e:
                         logging.error("Failed while loading file content '%s': %s", file_path, e)
                 yield document
