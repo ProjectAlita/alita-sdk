@@ -77,9 +77,13 @@ nodes:
              - list title is invalid or incorrect
              - cannot retrieve list or access denied
              - no such list or list name error
+             - 401 unauthorized or authentication error when accessing the list
+             - cannot read list or check list name and permissions
           3. determine if the error is about the non-existent list itself.
              errors like "list 'nonexistentlist_12345_doesnotexist' not found" are expected and correct.
-             system errors unrelated to the list name are failures.
+             401 unauthorized errors when accessing a non-existent list are also expected and correct —
+             sharepoint returns 401 for non-existent resources in some configurations.
+             only reject errors that are clearly unrelated to the list access attempt (e.g., network timeout, dns failure).
 
           return a json object with:
           {{
