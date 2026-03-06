@@ -331,6 +331,10 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
             return "No open issues available"
 
     def get_issue(self, issue_number: int) -> Dict[str, Any]:
+        """Fetch details of a specific issue including its comments.
+
+        Returns a dict with title, body, and comments as a list of {body, user} dicts.
+        """
         issue = self.repo_instance.issues.get(issue_number)
         page = 0
         comments: List[dict] = []
@@ -348,7 +352,7 @@ class GitLabAPIWrapper(CodeIndexerToolkit):
         return {
             "title": issue.title,
             "body": issue.description,
-            "comments": str(comments),
+            "comments": comments,
         }
 
     def create_pull_request(self, pr_title: str, pr_body: str, branch: str) -> str:
