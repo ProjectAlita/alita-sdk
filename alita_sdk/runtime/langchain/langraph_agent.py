@@ -19,12 +19,14 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
+from langgraph.types import Command, interrupt
 
 from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE, DEAULT_AGENT_NAME
 from .mixedAgentRenderes import convert_message_to_json
 from .utils import create_state, propagate_the_input_mapping, safe_format
 from ..utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META
 from ..tools.function import FunctionTool
+from ..tools.hitl import HITLNode
 from ..tools.indexer_tool import IndexerNode
 from ..tools.llm import LLMNode
 from ..tools.loop import LoopNode
@@ -1146,6 +1148,26 @@ def create_graph(
                 lg_builder.add_conditional_edges(node_id, TransitionalEdge(reset_node_id))
                 lg_builder.add_conditional_edges(reset_node_id, TransitionalEdge(clean_string(node['transition'])))
                 continue
+            elif node_type == 'hitl':
+                # Human-in-the-Loop node: uses dynamic interrupt() internally
+                # Routes are handled via Command(goto=) - no explicit edges needed
+                routes_config = node.get('routes', {})
+                # Clean route target node names
+                clean_routes = {
+                    action: clean_string(target) if target != 'END' else 'END'
+                    for action, target in routes_config.items()
+                }
+                lg_builder.add_node(node_id, HITLNode(
+                    name=node_id,
+                    input_variables=node.get('input', ['messages']),
+                    user_message=node.get('user_message', {'type': 'fixed', 'value': 'Please review and approve to continue.'}),
+                    routes=clean_routes,
+                    edit_state_key=node.get('edit_state_key'),
+                ))
+                # HITL node uses Command(goto=) for routing, so we skip
+                # explicit transition/decision/condition edges.
+                # All possible route targets must be registered as graph nodes.
+                continue
             if node.get('transition'):
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
@@ -1458,7 +1480,8 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # input['messages'] = [current_message]
         
         # Validate that input is not empty after all processing
-        if not input.get('input'):
+        # Skip validation for HITL resume actions - they don't need text input
+        if not input.get('input') and not input.get('hitl_resume'):
             raise RuntimeError(
                 "Empty input after processing. Cannot send empty string to LLM. "
                 "This likely means the message contained only non-text content "
@@ -1474,7 +1497,26 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 is_at_end = not checkpoint_state.next
                 should_continue = config.pop("should_continue", False)
 
-                if should_continue:
+                # Check for HITL dynamic interrupt - these have interrupt payloads in state
+                hitl_interrupt = self._get_hitl_interrupt(checkpoint_state)
+
+                if hitl_interrupt and not self._is_hitl_resume(input):
+                    raise RuntimeError(
+                        "Pipeline execution is paused at a Human-in-the-Loop node. "
+                        "Resume requires an explicit HITL action (approve, reject, or edit)."
+                    )
+
+                if hitl_interrupt and self._is_hitl_resume(input):
+                    # Resuming from an HITL dynamic interrupt - use Command(resume=...)
+                    hitl_resume_value = self._extract_hitl_resume(input)
+                    logger.info(f"[HITL] Resuming HITL interrupt with: {hitl_resume_value}")
+                    result = super().invoke(
+                        Command(resume=hitl_resume_value),
+                        config=config,
+                        *args,
+                        **kwargs,
+                    )
+                elif should_continue:
                     # Explicitly continuing interrupted execution - invoke with input
                     result = super().invoke(input, config=config, *args, **kwargs)
                 elif is_at_end:
@@ -1513,6 +1555,22 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             )
 
         try:
+            # Check if we're in a HITL interrupt state after execution
+            config_state = self.get_state(config)
+            hitl_interrupt = self._get_hitl_interrupt(config_state)
+            if hitl_interrupt:
+                # Graph paused at HITL node - return HITL metadata with the user_message
+                # as output.  The UI HITL control shows a minimal prompt ("Please, make
+                # your choice:") while the message bubble displays this content.  The UI
+                # clears msg.content on each HITL resume so repeated cycles don't accumulate.
+                logger.info(f"[HITL] Execution paused at HITL node: {hitl_interrupt}")
+                return {
+                    "output": hitl_interrupt.get("message", "Awaiting human review..."),
+                    "thread_id": thread_id,
+                    "execution_finished": False,
+                    "hitl_interrupt": hitl_interrupt,
+                }
+
             # Check if printer node output exists
             printer_output = result.get(PRINTER_NODE_RS)
             if printer_output == PRINTER_COMPLETED_STATE:
@@ -1558,6 +1616,63 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     result_with_state[key] = value
 
         return result_with_state
+
+    # =========================================================================
+    # HITL (Human-in-the-Loop) helpers
+    # =========================================================================
+
+    @staticmethod
+    def _get_hitl_interrupt(state_snapshot) -> Optional[dict]:
+        """
+        Check if the current state has a pending HITL dynamic interrupt.
+
+        Returns the HITL interrupt payload dict if found, None otherwise.
+        """
+        if not hasattr(state_snapshot, 'tasks') or not state_snapshot.tasks:
+            return None
+        for task in state_snapshot.tasks:
+            if hasattr(task, 'interrupts') and task.interrupts:
+                for intr in task.interrupts:
+                    if hasattr(intr, 'value') and isinstance(intr.value, dict):
+                        if intr.value.get('type') == 'hitl':
+                            return intr.value
+        return None
+
+    @staticmethod
+    def _is_hitl_resume(input_data: dict) -> bool:
+        """Check if the input represents an HITL resume action."""
+        if not isinstance(input_data, dict):
+            return False
+
+        if input_data.get('hitl_resume') is True:
+            return True
+
+        action = input_data.get('hitl_action') or input_data.get('action')
+        return action in {'approve', 'reject', 'edit'}
+
+    @staticmethod
+    def _extract_hitl_resume(input_data: dict) -> dict:
+        """
+        Extract HITL resume payload from input.
+
+        Expected input format:
+        {
+            "hitl_resume": True,
+            "hitl_action": "approve" | "reject" | "edit",
+            "hitl_value": "edited text..."  # only for edit action
+        }
+
+        Returns dict suitable for Command(resume=...).
+        """
+        action = input_data.get("hitl_action") or input_data.get("action") or "approve"
+        value = input_data.get("hitl_value")
+        if value is None:
+            value = input_data.get("value", "")
+
+        return {
+            "action": action,
+            "value": value,
+        }
 
     def _handle_graph_recursion_error(
             self,
