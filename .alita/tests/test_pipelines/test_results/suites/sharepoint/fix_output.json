@@ -1,0 +1,20 @@
+{
+  "summary": {"fixed": 0, "flaky": 1, "blocked": 0, "automation_bugs": 0, "pr_regressions": 0, "committed": true},
+  "fixed": [],
+  "flaky": [
+    {
+      "test_ids": ["SP12"],
+      "reason": "Tool returned processed error with 'SupportAlita@epam.com' contact suggestion (401 Unauthorized from SharePoint API). Pre-classified as automation_bug pending rerun. Passed on rerun (13.7s, 100% success rate) — intermittent SharePoint backend 401 response. Classified as FLAKY."
+    }
+  ],
+  "blocked": [],
+  "automation_bugs": [],
+  "pr_regressions": [],
+  "committed": true,
+  "commit_details": {
+    "branch": "at-state-check-agents",
+    "files_count": 2,
+    "pr_number": null,
+    "note": "Branch 'at-state-check-agents' created from main SHA 89e0f7fc. Committed milestone and output files only — no test YAML changes (SP12 is flaky, no fix applied)."
+  }
+}
