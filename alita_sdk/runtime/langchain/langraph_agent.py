@@ -19,7 +19,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.managed.base import is_managed_value
 from langgraph.prebuilt import InjectedStore
 from langgraph.store.base import BaseStore
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 
 from .constants import PRINTER_NODE_RS, PRINTER, PRINTER_COMPLETED_STATE, DEAULT_AGENT_NAME
 from .mixedAgentRenderes import convert_message_to_json
