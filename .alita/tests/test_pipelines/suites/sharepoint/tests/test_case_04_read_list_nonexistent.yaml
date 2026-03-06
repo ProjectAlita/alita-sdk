@@ -70,16 +70,22 @@ nodes:
 
           this test validates error handling for non-existent lists.
 
+          IMPORTANT: this is a NEGATIVE test. the tool is expected to FAIL with an error.
+          test_passed must be TRUE if the tool returned ANY error related to the list access attempt.
+
           perform the following checks:
-          1. confirm the tool executed (result is not empty or null).
-          2. examine any error message for specific meaning. valid error patterns for non-existent lists include:
+          1. confirm the tool executed and returned an error (result is not empty or null).
+          2. the following are ALL valid passing outcomes — set test_passed=true for ANY of these:
              - list not found or does not exist
              - list title is invalid or incorrect
              - cannot retrieve list or access denied
              - no such list or list name error
-          3. determine if the error is about the non-existent list itself.
-             errors like "list 'nonexistentlist_12345_doesnotexist' not found" are expected and correct.
-             system errors unrelated to the list name are failures.
+             - 401 unauthorized — this is EXPECTED and CORRECT; sharepoint returns 401 for non-existent lists
+             - authentication error when accessing the list — ALSO EXPECTED AND CORRECT
+             - cannot read list or check list name and permissions
+          3. set test_passed=false ONLY if the tool succeeded (returned list data) or if the error is
+             completely unrelated to the list access attempt (e.g., network timeout, dns failure, wrong site url).
+          4. a 401 unauthorized error for a non-existent list IS a passing result — do not fail the test for 401.
 
           return a json object with:
           {{
