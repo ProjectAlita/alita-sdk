@@ -584,7 +584,15 @@ def try_apply_edit(
         return content, msg
 
     start_idx, end_idx, candidate_block = candidates[0]
-    updated = content.replace(candidate_block, new_text, 1)
+    prefix = "".join(content_lines[:start_idx])
+    suffix = "".join(content_lines[end_idx:])
+    # Preserve the line boundary: if there are lines after the replaced block
+    # and new_text doesn't already end with a newline, insert one so the
+    # following line is not merged onto the replacement text.
+    if suffix and not new_text.endswith("\n"):
+        updated = prefix + new_text + "\n" + suffix
+    else:
+        updated = prefix + new_text + suffix
 
     logger.info(
         "Applied tolerant OLD/NEW replacement in %s around lines %d-%d",
