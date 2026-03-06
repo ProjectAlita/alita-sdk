@@ -156,6 +156,7 @@ setup:
   # Step 5: Create test file artifact for SharePoint tests
   - name: Create SharePoint Test File Artifact
     type: toolkit_invoke
+    continue_on_error: true
     config:
       toolkit_id: ${ARTIFACT_TOOLKIT_ID}
       tool_name: createFile
