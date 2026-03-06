@@ -17,8 +17,6 @@ from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.types import interrupt, Command
 
-from ..langchain.utils import propagate_the_input_mapping
-
 logger = logging.getLogger(__name__)
 
 # HITL action constants
