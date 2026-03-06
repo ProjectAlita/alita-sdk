@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-03-06T17:30:00.000000+00:00",
+  "environment": "dev",
+  "ci_target_branch": "at-state-check-agents",
+  "suite": "suites/sharepoint",
+  "initial_failures": [
+    {
+      "test_id": "SP12",
+      "error_message": "Output contains both a non-existent-file indication and a SharePoint/API '401 Unauthorized' error. The 401 Unauthorized is an authentication/authorization issue unrelated to the expected 'file not found' error, so the non-existent-file-only expectation is not met.",
+      "error_type": "automation_bug_pending_rerun",
+      "duration": 25.3
+    }
+  ],
+  "flaky_tests_from_rerun": ["SP12"],
+  "still_failing_after_rerun": [],
+  "error_patterns": [
+    {
+      "pattern_id": "sharepoint_401_processed_error_flaky",
+      "test_ids": ["SP12"],
+      "root_cause": "Tool returned a processed error containing 'SupportAlita@epam.com' contact suggestion (401 Unauthorized from SharePoint API). Pre-classified as automation_bug pending rerun. SP12 passed on rerun — classified as FLAKY (intermittent 401 from SharePoint backend).",
+      "category": "flaky"
+    }
+  ],
+  "rerun_attempts": [
+    {
+      "attempt": 1,
+      "results_per_test": {"SP12": "PASSED"},
+      "flaky_identified": ["SP12"],
+      "still_failing": [],
+      "note": "SP12 passed on rerun (100% success rate, 13.7s). Classified as FLAKY — intermittent 401 from SharePoint backend."
+    }
+  ],
+  "intent_analysis": [
+    {
+      "test_id": "SP12",
+      "test_intent": "Verify read_document returns an error when given a non-existent file path",
+      "positive_or_negative": "negative",
+      "primary_feature": "read_document error handling",
+      "sdk_behaves_correctly": true,
+      "classification": "flaky",
+      "reasoning": "Tool output contained 'SupportAlita@epam.com' processed error with 401 Unauthorized. Pre-classified as automation_bug pending rerun. Passed on rerun — intermittent SharePoint backend 401 response, not a consistent failure. Classified as FLAKY."
+    }
+  ],
+  "fix_attempts": [],
+  "pr_change_context": {
+    "available": false,
+    "pr_number": null,
+    "pr_branch": null,
+    "changed_sdk_files": [],
+    "changed_methods_by_file": {}
+  },
+  "blocked": [],
+  "commit_info": {
+    "committed": true,
+    "branch": "at-state-check-agents",
+    "files_committed": [
+      ".alita/tests/test_pipelines/test_results/suites/sharepoint/fix_milestone.json",
+      ".alita/tests/test_pipelines/test_results/suites/sharepoint/fix_output.json"
+    ],
+    "pr_number": null,
+    "note": "Branch 'at-state-check-agents' created from main SHA 89e0f7fc. Committed milestone and output files only — no test YAML changes needed (SP12 is flaky, no fix applied)."
+  },
+  "summary": {"fixed": 0, "flaky": 1, "blocked": 0, "automation_bugs": 0}
+}
