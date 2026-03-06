@@ -6,18 +6,38 @@ description: |
   Objective: Ensure tool handles position parameter correctly and adds file at beginning of page.
 
   Expected Behavior:
+  - Creates a test page dynamically
   - Tool executes successfully without errors.
   - File is uploaded and reference is prepended to page content.
   - Returns success message indicating successful upload and position.
+  - Cleans up the test page after completion.
 
 toolkits:
   - id: ${CONFLUENCE_TOOLKIT_ID}
     name: ${CONFLUENCE_TOOLKIT_NAME}
 
 state:
+  # Page creation
+  space:
+    type: str
+    value: 'AT'
+  page_title:
+    type: str
+    value: 'ART15_Test_Page_${TIMESTAMP}'
+  page_body:
+    type: str
+    value: '<p>Test page for artifact file upload (prepend mode).</p>'
+  status:
+    type: str
+    value: 'current'
+  representation:
+    type: str
+    value: 'storage'
+  create_result:
+    type: str
   page_id:
     type: str
-    value: '140869772'
+  # File upload
   filepath:
     type: str
     value: '${TEST_ARTIFACT_ID}'
@@ -29,12 +49,73 @@ state:
     value: 'prepend'
   tool_result:
     type: str
+  # Cleanup
+  delete_result:
+    type: str
   test_results:
     type: dict
 
-entry_point: invoke_add_file_to_page
+entry_point: create_page
 
 nodes:
+  - id: create_page
+    type: toolkit
+    tool: create_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - space
+      - page_title
+      - page_body
+      - status
+      - representation
+    input_mapping:
+      space:
+        type: variable
+        value: space
+      title:
+        type: variable
+        value: page_title
+      body:
+        type: variable
+        value: page_body
+      status:
+        type: variable
+        value: status
+      representation:
+        type: variable
+        value: representation
+    output:
+      - create_result
+    structured_output: true
+    transition: extract_page_id
+
+  - id: extract_page_id
+    type: llm
+    model: gpt-4o
+    input:
+      - create_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a data extraction assistant."
+      task:
+        type: fstring
+        value: |
+          Extract the page ID from the create_page result.
+
+          Create Result: {create_result}
+
+          Find the 'id' field in the page details and return ONLY the page ID as a string.
+
+          Return **EXACTLY** only the page ID as a plain string (no JSON, no quotes, no explanations).
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - page_id
+    structured_output: false
+    transition: invoke_add_file_to_page
+
   - id: invoke_add_file_to_page
     type: toolkit
     tool: add_file_to_page
@@ -101,4 +182,21 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
+    transition: delete_page
+
+  - id: delete_page
+    type: toolkit
+    tool: delete_page
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
+    input:
+      - page_title
+      - test_results
+    input_mapping:
+      page_title:
+        type: variable
+        value: page_title
+    output:
+      - delete_result
+      - test_results
+    structured_output: true
     transition: END
