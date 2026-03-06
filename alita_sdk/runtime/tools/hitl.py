@@ -74,10 +74,14 @@ class HITLNode(Runnable):
         self.routes = routes or {}
         self.edit_state_key = edit_state_key
 
-        # Validate routes - at minimum approve should exist
+        # Validate routes - approve is the typical primary path. We do not
+        # silently invent a fallback route here because that would change the
+        # pipeline's routing semantics at runtime.
         if not self.routes.get(HITL_ACTION_APPROVE):
-            logger.warning(f"HITL node '{name}' has no 'approve' route configured. "
-                          f"Defaulting to END.")
+            logger.warning(
+                f"HITL node '{name}' has no 'approve' route configured. "
+                f"The approve action will be unavailable."
+            )
 
     def _build_user_message(self, state: dict) -> str:
         """Build the user-facing message from the configured message pattern and current state."""

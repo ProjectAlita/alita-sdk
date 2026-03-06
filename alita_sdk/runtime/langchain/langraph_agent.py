@@ -1479,9 +1479,9 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # NOTE: Commented out to prevent duplicates with input['input']
                 # input['messages'] = [current_message]
         
-        # Validate that input is not empty after all processing
-        # Skip validation for HITL resume actions - they don't need text input
-        if not input.get('input') and not input.get('hitl_resume'):
+        # Validate that input is not empty after all processing.
+        # HITL resume payloads may carry only action metadata with no text body.
+        if not input.get('input') and not self._is_hitl_resume(input):
             raise RuntimeError(
                 "Empty input after processing. Cannot send empty string to LLM. "
                 "This likely means the message contained only non-text content "
@@ -1559,17 +1559,22 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             config_state = self.get_state(config)
             hitl_interrupt = self._get_hitl_interrupt(config_state)
             if hitl_interrupt:
-                # Graph paused at HITL node - return HITL metadata with the user_message
-                # as output.  The UI HITL control shows a minimal prompt ("Please, make
-                # your choice:") while the message bubble displays this content.  The UI
-                # clears msg.content on each HITL resume so repeated cycles don't accumulate.
+                # Graph paused at HITL node. Return the same result shape as the normal
+                # execution path, but override the output and attach HITL metadata.
                 logger.info(f"[HITL] Execution paused at HITL node: {hitl_interrupt}")
-                return {
+                result_with_state = {
                     "output": hitl_interrupt.get("message", "Awaiting human review..."),
                     "thread_id": thread_id,
                     "execution_finished": False,
                     "hitl_interrupt": hitl_interrupt,
                 }
+
+                if hasattr(config_state, 'values') and config_state.values:
+                    for key, value in config_state.values.items():
+                        if key != 'output':
+                            result_with_state[key] = value
+
+                return result_with_state
 
             # Check if printer node output exists
             printer_output = result.get(PRINTER_NODE_RS)
@@ -1648,7 +1653,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             return True
 
         action = input_data.get('hitl_action') or input_data.get('action')
-        return action in {'approve', 'reject', 'edit'}
+        if not isinstance(action, str):
+            return False
+
+        normalized_action = action.strip().lower()
+        return normalized_action in {'approve', 'reject', 'edit'}
 
     @staticmethod
     def _extract_hitl_resume(input_data: dict) -> dict:
