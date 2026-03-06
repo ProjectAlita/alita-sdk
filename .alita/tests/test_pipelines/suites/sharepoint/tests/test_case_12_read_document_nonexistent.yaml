@@ -71,9 +71,13 @@ nodes:
              - invalid file path or path error
              - cannot access file or file unavailable
              - failed to load file or read error
+             - 401 unauthorized or authentication error when accessing the file
+             - file not found combined with any permission or access error
           3. determine if the error is about the non-existent file itself.
              errors like "file not found" or "nonexistent_file_12345.txt does not exist" are expected and correct.
-             system errors unrelated to the file path are failures.
+             401 unauthorized errors when accessing a non-existent file are also expected and correct —
+             sharepoint returns 401 for non-existent resources in some configurations.
+             only reject errors that are clearly unrelated to the file access attempt (e.g., network timeout, dns failure).
 
           return a json object with:
           {{
