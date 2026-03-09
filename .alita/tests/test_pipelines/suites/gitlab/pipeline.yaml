@@ -78,7 +78,6 @@ execution:
     - test_case_20_*.yaml  # [RW] GL20 - Read File Chunk
     - test_case_21_*.yaml  # [RW] GL21 - List Folders
     - test_case_22_*.yaml  # [RW] GL22 - Search File
-    - test_case_23_*.yaml  # [W] GL23 - Edit File (self-contained)
 
   substitutions:
     GITLAB_TOOLKIT_ID: ${GITLAB_TOOLKIT_ID}

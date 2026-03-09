@@ -4,7 +4,7 @@ Comprehensive test suite for GitLab toolkit under `alita_sdk/tools/gitlab/`.
 
 ## Overview
 
-This test suite validates all 22 GitLab toolkit tools (18 native + 4 inherited) by replicating GitHub test patterns with GitLab-specific adaptations.
+This test suite validates all 21 GitLab toolkit tools (18 native + 3 inherited) by replicating GitHub test patterns with GitLab-specific adaptations.
 
 ## Test Coverage
 
@@ -30,9 +30,8 @@ This test suite validates all 22 GitLab toolkit tools (18 native + 4 inherited) 
 | get_commits | test_case_19 | Critical | ✅ Created |
 | read_multiple_files | - | - | ⏭️ Covered by read_file tests |
 | search_file | test_case_22 | High | ✅ Created (inherited) |
-| edit_file | test_case_23 | High | ✅ Created (inherited) |
 
-**Total:** 22 test files covering all 22 tools
+**Total:** 21 test files covering all 21 tools
 
 ## Setup Artifacts
 
@@ -82,7 +81,6 @@ SDK_BRANCH=main                              # SDK branch
 - **read_file_chunk** - Partial file reading by line range
 - **read_multiple_files** - Batch file retrieval
 - **search_file** - Content search with regex support
-- **edit_file** - Precise text replacement
 
 ## Running Tests
 
@@ -108,7 +106,7 @@ bash .alita/tests/test_pipelines/run_test.sh --all suites/gitlab GL01
 
 ## Test Naming Convention
 
-- **Test IDs:** GL01 through GL23 (GL = GitLab)
+- **Test IDs:** GL01 through GL22 (GL = GitLab)
 - **Odd Numbers:** Critical priority (happy path, core functionality)
 - **Even Numbers:** High priority (edge cases, error handling, variations)
 
@@ -122,6 +120,12 @@ bash .alita/tests/test_pipelines/run_test.sh --all suites/gitlab GL01
 - **Test Files Skipped:** 0 (new suite)
 - **Config Created:** Yes (pipeline.yaml, gitlab-config.json)
 - **Strategy:** Replicated GitHub patterns with GitLab-specific adaptations
+
+### Update: 2026-03-09
+
+- **Change:** Removed `edit_file` test (test_case_23)
+- **Reason:** `edit_file` tool removed from SDK; redundant with `update_file` tests
+- **Current Status:** 21 test files covering all 21 tools (18 native + 3 inherited)
 
 ### Adaptations from GitHub
 
