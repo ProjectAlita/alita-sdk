@@ -20,7 +20,7 @@ state:
     value: ${XRAY_PROJECT_KEY:EL}
   jql_query:
     type: str
-    value: "labels in (ELITEA_AI_CREATED) ORDER BY assignee"
+    value: "created >= -3d AND labels in (ELITEA_AI_CREATED) ORDER BY assignee"
   get_tests_result:
     type: str
   expected_success_indicators:
