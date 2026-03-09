@@ -1206,7 +1206,8 @@ class AlitaClient:
                       mcp_tokens: Optional[dict] = None, conversation_id: Optional[str] = None,
                       ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic",
                       lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None,
-                      exception_handling_enabled: bool = False, context_settings: Optional[dict] = None):
+                      exception_handling_enabled: bool = False, context_settings: Optional[dict] = None,
+                      step_limit: Optional[int] = None):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -1229,6 +1230,8 @@ class AlitaClient:
                            Enables special modes like swarm for multi-agent collaboration.
             exception_handling_enabled: Enable automatic exception handling with ToolExceptionHandlerMiddleware (default: False)
             context_settings: Optional context params
+            step_limit: Optional maximum number of tool execution iterations (default: 25).
+                       Use to limit or extend how many tool calls the agent can make per turn.
 
         Returns:
             Runnable agent ready for execution
@@ -1250,7 +1253,8 @@ class AlitaClient:
             'instructions': instructions,
             'tools': tools,  # Tool configs that will be processed by get_tools()
             'variables': variables,
-            'internal_tools': internal_tools  # Mode flags like 'swarm' for multi-agent collaboration
+            'internal_tools': internal_tools,  # Mode flags like 'swarm' for multi-agent collaboration
+            'meta': {'step_limit': step_limit} if step_limit is not None else {}
         }
 
         # Auto-create middleware based on internal_tools parameter
