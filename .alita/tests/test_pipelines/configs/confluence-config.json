@@ -5,12 +5,6 @@
   "limit": 5,
   "space": "AT",
   "selected_tools": [
-    "index_data",
-    "search_index",
-    "stepback_search_index",
-    "stepback_summary_index",
-    "remove_index",
-    "list_collections",
     "create_page",
     "create_pages",
     "delete_page",
