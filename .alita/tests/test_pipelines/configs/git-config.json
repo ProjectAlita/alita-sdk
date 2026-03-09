@@ -37,7 +37,6 @@
       "get_workflow_logs",
       "generic_github_api_call",
       "read_multiple_files",
-      "edit_file",
       "create_issue_on_project",
       "update_issue_on_project",
       "list_project_issues",
