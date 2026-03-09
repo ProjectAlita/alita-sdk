@@ -273,10 +273,47 @@ class LocalSetupStrategy(SetupStrategy):
             )
             logger.info(f"[TOOLKIT CREATE] get_tools returned {len(tools)} tools")
             
+            logger.info("[TOOLKIT CREATE] Calling get_tools from alita_sdk.runtime.toolkits.tools")
+            tools = get_tools(
+                tools_list=[tool_config],
+                alita_client=self._alita_client,
+                llm=self._llm,
+                memory_store=None,
+                debug_mode=False,
+            )
+            logger.info(f"[TOOLKIT CREATE] get_tools returned {len(tools)} tools")
+            
+            # Validate that all selected_tools were successfully created
+            # This aligns local mode behavior with remote mode (backend validation)
+            selected_tools = config.get('selected_tools', [])
+            if selected_tools:
+                created_tool_names = {t.name for t in tools if hasattr(t, 'name')}
+                missing_tools = set(selected_tools) - created_tool_names
+                
+                if missing_tools:
+                    error_msg = (
+                        f"Value error, the following tools are no longer available for '{toolkit_type}': "
+                        f"{', '.join(repr(t) for t in sorted(missing_tools))}. "
+                        f"Please remove them to continue."
+                    )
+                    logger.error(f"[TOOLKIT CREATE] {error_msg}")
+                    if ctx:
+                        ctx.log(f"[LOCAL] Configuration error: {error_msg}", "error")
+                    raise ValueError(error_msg)
+                
+                logger.info(f"[TOOLKIT CREATE] All {len(selected_tools)} selected tools validated successfully")
+            
             if ctx:
                 ctx.log(f"[LOCAL] Created {toolkit_type} toolkit '{toolkit_name}' with {len(tools)} tools", "success")
             return tools
             
+        except ValueError as e:
+            # Re-raise validation errors (e.g., selected_tools validation) to fail setup
+            # This aligns local mode with remote mode where validation errors block toolkit creation
+            logger.error(f"[TOOLKIT CREATE] Validation error: {e}", exc_info=True)
+            if ctx:
+                ctx.log(f"[LOCAL] Configuration validation failed: {e}", "error")
+            raise
         except Exception as e:
             logger.error(f"[TOOLKIT CREATE] Exception in get_tools: {e}", exc_info=True)
             if ctx:
@@ -481,6 +518,10 @@ class LocalSetupStrategy(SetupStrategy):
         try:
             tools = self._create_toolkit_tools(toolkit_info, ctx)
             logger.info(f"[TOOLKIT CREATE] _create_toolkit_tools returned {len(tools)} tools")
+        except ValueError as e:
+            # Re-raise validation errors to fail setup (aligns with remote mode behavior)
+            logger.error(f"[TOOLKIT CREATE] Validation error in _create_toolkit_tools: {e}", exc_info=True)
+            raise
         except Exception as e:
             logger.error(f"[TOOLKIT CREATE] Exception in _create_toolkit_tools: {e}", exc_info=True)
             tools = []
