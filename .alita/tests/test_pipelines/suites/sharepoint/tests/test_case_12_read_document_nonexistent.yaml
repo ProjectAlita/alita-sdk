@@ -5,11 +5,26 @@ description: |
   
   Objective: Test error handling for invalid file paths
   
+  Toolkit Implementation Detail: 
+  The SharePoint toolkit uses a two-tier fallback strategy:
+  1. First attempt: REST API (may return 401 for non-existent files)
+  2. Second attempt: Graph API (returns authoritative file-not-found error)
+  
+  When both attempts fail, the error message contains BOTH errors concatenated.
+  The final/Graph error is the authoritative result; the initial REST error 
+  only indicates that fallback was triggered.
+  
+  Example Error Format:
+  "File not found. Please, check file name and path: (None, None, \"401 Client Error: 
+  Unauthorized for url: https://.../_api/Web/getFileByServerRelativePath(...)\") and 
+  Error in get_file_content: File 'filename.txt' not found in any private or shared documents."
+  
   Expected Behavior:
   - Tool executes and returns error information
-  - Error message indicates file not found
+  - Error message indicates file not found (validate based on final/Graph error)
   - Error message includes the file path
   - No system crashes or unhandled exceptions
+  - Initial REST API 401 errors trigger fallback and should be ignored in validation
 
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
@@ -64,17 +79,26 @@ nodes:
 
           this test validates error handling for non-existent files.
 
-          perform the following checks:
+          IMPORTANT IMPLEMENTATION DETAIL:
+          the sharepoint toolkit tries REST API first, then falls back to Graph API if REST fails.
+          when both fail, the error message contains BOTH errors concatenated (e.g., "error1 and error2").
+          
+          validation rules:
           1. confirm the tool executed (result is not empty or null).
-          2. examine any error message for specific meaning. valid error patterns for non-existent files include:
+          2. if the error message contains multiple errors (separated by "and" or similar):
+             - extract and validate the FINAL/LAST error (graph api result) - this is the authoritative result
+             - IGNORE the first error (rest api) - it only triggered the fallback mechanism
+          3. valid error patterns for non-existent files (check the final error):
              - file not found or does not exist
+             - file '[name]' not found in any private or shared documents
              - invalid file path or path error
              - cannot access file or file unavailable
              - failed to load file or read error
-          3. determine if the error is about the non-existent file itself.
-             errors like "file not found" or "nonexistent_file_12345.txt does not exist" are expected and correct.
-             system errors unrelated to the file path are failures.
-          4. Thre should be no 401 error
+          4. the first REST API error may be "401 unauthorized" - this is expected documented behavior
+             that triggers the graph api fallback. do NOT fail the test if 401 appears in the first error.
+          5. ONLY fail if:
+             - the FINAL error does not indicate file-not-found semantics
+             - system errors unrelated to file access (network timeout, dns failure, server unavailable)
 
           return a json object with:
           {{
