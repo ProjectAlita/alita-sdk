@@ -548,6 +548,11 @@ class GetToolkitToolsTool(BaseTool):
     )
     args_schema: type[BaseModel] = GetToolkitToolsInput
     registry: ToolRegistry = Field(exclude=True)
+    metadata: dict = {
+        "toolkit_type": "internal",
+        "toolkit_name": "lazy_tools_mode",
+        "display_name": "Smart Tools Selection",
+    }
 
     def _run(
         self,
@@ -590,6 +595,11 @@ class GetToolSchemaTool(BaseTool):
     )
     args_schema: type[BaseModel] = GetToolSchemaInput
     registry: ToolRegistry = Field(exclude=True)
+    metadata: dict = {
+        "toolkit_type": "internal",
+        "toolkit_name": "lazy_tools_mode",
+        "display_name": "Smart Tools Selection",
+    }
 
     def _run(
         self,
@@ -647,6 +657,11 @@ class InvokeToolTool(BaseTool):
     )
     args_schema: type[BaseModel] = InvokeToolInput
     registry: ToolRegistry = Field(exclude=True)
+    metadata: dict = {
+        "toolkit_type": "internal",
+        "toolkit_name": "lazy_tools_mode",
+        "display_name": "Smart Tools Selection",
+    }
 
     def _run(
         self,

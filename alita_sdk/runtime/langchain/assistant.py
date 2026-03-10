@@ -778,6 +778,10 @@ class Assistant:
                     'toolkit_name': 'swarm',
                     'toolkit_type': 'internal',
                 })
+            # Patch invoke() so metadata is forwarded into LangGraph run config,
+            # making toolkit_type/toolkit_name available in on_tool_start kwargs["metadata"]
+            from ...tools import _patch_tool_invoke
+            _patch_tool_invoke(handoff_back_tool)
 
             def invoke_application(state: MessagesState, config: RunnableConfig = None):
                 messages = state["messages"]
@@ -950,6 +954,10 @@ class Assistant:
                         'toolkit_name': 'swarm',
                         'toolkit_type': 'internal',
                     })
+                # Patch invoke() so metadata is forwarded into LangGraph run config,
+                # making toolkit_type/toolkit_name available in on_tool_start kwargs["metadata"]
+                from ...tools import _patch_tool_invoke
+                _patch_tool_invoke(handoff)
                 handoffs.append(handoff)
             return handoffs
 
