@@ -95,38 +95,81 @@ jobs:
     needs: configure-matrix
     if: needs.configure-matrix.outputs.has-tests == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       max-parallel: 10
       matrix:
         data: ${{ fromJson(needs.configure-matrix.outputs.loader_matrix) }}
     
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-      
-      - name: Install dependencies
+      - name: Install Docker Compose
         run: |
-          python -m pip install --upgrade pip
-          pip install -e '.[loaders]'
+          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
       
-      - name: Run loader tests
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Pull Docker image
+        run: |
+          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker pull ${{ env.REGISTRY }}/$IMAGE_NAME:pyodide
+      
+      - name: Run loader tests in Docker
         id: run-tests
         run: |
           echo "::group::Running tests for ${{ matrix.data.loader }}"
-          python .alita/tests/test_loaders/run_tests.py run ${{ matrix.data.loader }}
-          exit_code=$?
+          
+          # Set test command
+          export DOCKER_COMMAND="python .alita/tests/test_loaders/run_tests.py run ${{ matrix.data.loader }}"
+          
+          # Start container
+          docker-compose up -d
+          
+          # Wait for tests to complete
+          TIMEOUT=600
+          ELAPSED=0
+          INTERVAL=5
+          
+          while [ $ELAPSED -lt $TIMEOUT ]; do
+            STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
+            
+            if [ "$STATUS" = "exited" ]; then
+              EXIT_CODE=$(docker inspect alita-sdk-dev --format='{{.State.ExitCode}}')
+              echo "Container exited with code: $EXIT_CODE"
+              break
+            fi
+            
+            sleep $INTERVAL
+            ELAPSED=$((ELAPSED + INTERVAL))
+          done
+          
+          # Copy results
+          docker cp alita-sdk-dev:/app/.alita/tests/test_loaders/test_results/ ./test_results/ || mkdir -p ./test_results
+          
+          # Stop container
+          docker-compose down --remove-orphans
+          
           echo "::endgroup::"
           
-          if [[ $exit_code -ne 0 ]]; then
+          if [ "${EXIT_CODE:-1}" -ne 0 ]; then
             echo "::error::Tests failed for ${{ matrix.data.loader }}"
-            exit $exit_code
+            exit ${EXIT_CODE:-1}
           fi
       
       - name: Upload test results
@@ -134,8 +177,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.data.loader }}
-          path: .alita/tests/test_loaders/test_results/
+          path: ./test_results/
           retention-days: 30
+      
+      - name: Clean up workspace
+        if: always()
+        run: |
+          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*
 
   summary:
     needs: [configure-matrix, test-execution]
