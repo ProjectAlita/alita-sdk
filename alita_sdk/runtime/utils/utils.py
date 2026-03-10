@@ -20,6 +20,7 @@ class IndexerKeywords(Enum):
     INDEX_META_IN_PROGRESS = 'in_progress'
     INDEX_META_COMPLETED = 'completed'
     INDEX_META_FAILED = 'failed'
+    INDEX_META_PARTLY_OK = 'partly_ok'
 
 # This pattern matches characters that are NOT alphanumeric, underscores, or hyphens
 clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')

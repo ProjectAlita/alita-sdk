@@ -177,7 +177,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             INDEX_META_UPDATE_INTERVAL,
         )
 
-        result = {"count": 0}
+        result = {"count": 0, "failed_count": 0}
         #
         try:
             if clean_index:
@@ -200,12 +200,33 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             self._save_index_generator(documents, documents_count, chunking_tool, chunking_config, index_name=index_name, result=result)
             #
             results_count = result["count"]
+            failed_count = result.get("failed_count", 0)
+            succeeded_count = results_count - failed_count
+
+            if failed_count > 0 and succeeded_count > 0:
+                final_state = IndexerKeywords.INDEX_META_PARTLY_OK.value
+                status = "partly_ok"
+                message = (f"Successfully indexed {succeeded_count} documents. "
+                           f"Failed to index {failed_count} documents.")
+            elif failed_count > 0 >= succeeded_count:
+                final_state = IndexerKeywords.INDEX_META_FAILED.value
+                status = "error"
+                message = f"Failed to index all {failed_count} documents."
+            elif succeeded_count > 0:
+                final_state = IndexerKeywords.INDEX_META_COMPLETED.value
+                status = "ok"
+                message = f"Successfully indexed {succeeded_count} documents."
+            else:
+                final_state = IndexerKeywords.INDEX_META_COMPLETED.value
+                status = "ok"
+                message = "No new documents to index."
+
             # Final update should always be forced
-            self.index_meta_update(index_name, IndexerKeywords.INDEX_META_COMPLETED.value, results_count, update_force=True, error=None)
+            self.index_meta_update(index_name, final_state, succeeded_count, update_force=True,
+                                   error=message if status != "ok" else None)
             self._emit_index_event(index_name)
             #
-            return {"status": "ok", "message": f"successfully indexed {results_count} documents" if results_count > 0
-            else "no new documents to index"}
+            return {"status": status, "message": message}
         except Exception as e:
             # Do maximum effort at least send custom event for supposed changed status
             msg = str(e)
@@ -225,6 +246,20 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
         #
         base_doc_counter = 0
         pg_vector_add_docs_chunk = []
+
+        def _flush_chunk(chunk: list):
+            """Flush a chunk of documents to the vectorstore, tracking failures in result."""
+            if not chunk:
+                return
+            try:
+                add_documents(vectorstore=self.vectorstore, documents=chunk)
+                self._log_tool_event(f"{len(chunk)} documents have been indexed. Continuing...")
+            except Exception:
+                from traceback import format_exc
+                err = format_exc()
+                logger.error(f"Failed to add {len(chunk)} documents to vectorstore: {err}")
+                result["failed_count"] = result.get("failed_count", 0) + len(chunk)
+
         for base_doc in base_documents:
             base_doc_counter += 1
             self._log_tool_event(f"Processing dependent documents for base documents #{base_doc_counter}.")
@@ -257,17 +292,12 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
                     else:
                         doc.metadata['collection'] += f";{index_name}"
                 #
-                try:
-                    pg_vector_add_docs_chunk.append(doc)
-                    dependent_docs_counter += 1
-                    if len(pg_vector_add_docs_chunk) >= self.max_docs_per_add:
-                        add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
-                        self._log_tool_event(f"{len(pg_vector_add_docs_chunk)} documents have been indexed. Continuing...")
-                        pg_vector_add_docs_chunk = []
-                except Exception:
-                    from traceback import format_exc
-                    logger.error(f"Error: {format_exc()}")
-                    return {"status": "error", "message": f"Error: {format_exc()}"}
+                pg_vector_add_docs_chunk.append(doc)
+                dependent_docs_counter += 1
+                if len(pg_vector_add_docs_chunk) >= self.max_docs_per_add:
+                    _flush_chunk(pg_vector_add_docs_chunk)
+                    pg_vector_add_docs_chunk = []
+
             msg = f"Indexed base document #{base_doc_counter} out of {base_total} (with {dependent_docs_counter} dependencies)."
             logger.debug(msg)
             self._log_tool_event(msg)
@@ -278,7 +308,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             except Exception as exc:  # best-effort, do not break indexing
                 logger.warning(f"Failed to update index meta during indexing process for index '{index_name}': {exc}")
         if pg_vector_add_docs_chunk:
-            add_documents(vectorstore=self.vectorstore, documents=pg_vector_add_docs_chunk)
+            _flush_chunk(pg_vector_add_docs_chunk)
 
     def _apply_loaders_chunkers(self, documents: Generator[Document, None, None], chunking_tool: str=None, chunking_config=None) -> Generator[Document, None, None]:
         from ..tools.chunkers import __all__ as chunkers
