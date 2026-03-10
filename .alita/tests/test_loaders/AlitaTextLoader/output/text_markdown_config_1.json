@@ -1,0 +1,182 @@
+[
+  {
+    "page_content": "# Software Architecture Guide\n\nThis comprehensive guide covers fundamental concepts in software architecture and design patterns that every developer should understand.\n\nSoftware architecture forms the foundation of any successful application. Understanding these principles helps create maintainable and scalable systems.\n\nSOLID Principles\n\nThe SOL",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " and scalable systems.\n\nSOLID Principles\n\nThe SOLID principles are five design principles intended to make software designs more understandable, flexible, and maintainable.\n\n#### Single Responsibility Principle\n\nA class should have one and only one reason to change, meaning that a",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 2,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " and only one reason to change, meaning that a class should have only one job or responsibility.\n\nWhen classes follow this principle, they become easier to test, maintain, and understand. Each class has a clear purpose and can be modified independently.\n\nKeep classes",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 3,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " clear purpose and can be modified independently.\n\nKeep classes focused and small. If a class needs many dependencies or has many methods, consider splitting it into multiple classes with distinct responsibilities.\n\n# Open/Closed Principle\n\nSoftware entities should be open for extension but closed",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 4,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "\n\nSoftware entities should be open for extension but closed for modification. This means you should be able to add new functionality without changing existing code.\n\n### Design Patterns\n\nDesign patterns are typical solutions to common problems in software design. They represent best practices used by",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 5,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " in software design. They represent best practices used by experienced developers.\n\n#### Creational Patterns\n\nThese patterns deal with object creation mechanisms, trying to create objects in a manner suitable to the situation.\n\n##### Singleton Pattern\n\nEnsures a class has only one instance",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 6,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " Pattern\n\nEnsures a class has only one instance and provides a global point of access to it. Useful for managing shared resources like database connections or configuration settings.\n\n##### Factory Pattern\n\nDefines an interface for creating objects but lets subclasses decide which class to instantiate",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 7,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " creating objects but lets subclasses decide which class to instantiate. This promotes loose coupling by eliminating the need to bind application-specific classes into code.\n\n## Structural Patterns\n\nStructural patterns explain how to assemble objects and classes into larger structures while keeping these structures flexible and",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 8,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " classes into larger structures while keeping these structures flexible and efficient.\n\n##### Adapter Pattern\n\nAllows incompatible interfaces to work together. It acts as a bridge between two incompatible interfaces by wrapping an existing class with a new interface.\n\n##### Decorator Pattern\n\nAttaches additional",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 9,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " interface.\n\n##### Decorator Pattern\n\nAttaches additional responsibilities to objects dynamically. Decorators provide a flexible alternative to subclassing for extending functionality.\n\n#### Behavioral Patterns\n\nBehavioral patterns are concerned with algorithms and the assignment of responsibilities between objects.\n\n##### Observer Pattern",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 10,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " the assignment of responsibilities between objects.\n\n##### Observer Pattern\n\nDefines a one-to-many dependency between objects so that when one object changes state, all its dependents are notified automatically.\n\n##### Strategy Pattern\n\nDefines a family of algorithms, encapsulates each one,",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 11,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " a family of algorithms, encapsulates each one, and makes them interchangeable. Strategy lets the algorithm vary independently from clients that use it.\n\n## Architecture Styles\n\nDifferent architectural styles provide blueprints for organizing code and defining how components interact.\n\n### Layered Architecture",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 12,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " and defining how components interact.\n\n### Layered Architecture\n\nOrganizes the system into layers with specific roles and responsibilities. Common layers include presentation, business logic, and data access.\n\n### Microservices Architecture\n\nStructures an application as a collection of loosely coupled",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 13,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "Structures an application as a collection of loosely coupled services. Each service is independently deployable and scalable.\n\n### Event-Driven Architecture\n\nUses events to trigger and communicate between decoupled services. Components perform actions in response to receiving one or more event",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 14,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " perform actions in response to receiving one or more event notifications.\n\n## Best Practices\n\nFollowing established best practices helps teams build robust and maintainable systems.\n\n### Code Organization\n\nKeep related code together and separate concerns clearly. Use meaningful names for classes, methods,",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 15,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " clearly. Use meaningful names for classes, methods, and variables.\n\n### Testing Strategy\n\nImplement comprehensive testing at multiple levels including unit tests, integration tests, and end-to-end tests.\n\n### Documentation\n\nMaintain clear and up-to-date documentation that explains architectural",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 16,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "ain clear and up-to-date documentation that explains architectural decisions, component interactions, and setup procedures.\n\n### Performance Optimization\n\nProfile before optimizing and focus on bottlenecks that impact user experience. Consider caching, lazy loading, and asynchronous processing.\n\n## Conclusion\n\n",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 17,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " lazy loading, and asynchronous processing.\n\n## Conclusion\n\nEffective software architecture requires understanding fundamental principles, applying appropriate patterns, and following best practices. Continuous learning and adaptation are essential for building systems that meet evolving requirements.\n",
+    "metadata": {
+      "source": "AlitaTextLoader/files/text_markdown.txt",
+      "headers": "",
+      "chunk_id": 18,
+      "chunk_type": "document",
+      "method_name": "markdown"
+    }
+  }
+]

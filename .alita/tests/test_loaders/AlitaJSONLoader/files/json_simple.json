@@ -1,0 +1,10 @@
+{
+  "name": "John Doe",
+  "age": 30,
+  "email": "john.doe@example.com",
+  "active": true,
+  "department": "Engineering",
+  "role": "Senior Software Engineer",
+  "location": "San Francisco",
+  "hire_date": "2020-01-15"
+}
