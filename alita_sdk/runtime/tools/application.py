@@ -101,7 +101,7 @@ class Application(BaseTool):
                 if key not in config['metadata']:
                     config['metadata'][key] = value
 
-        result = self._run(*config, **all_kwargs)
+        result = self._run(**all_kwargs, _invoke_config=config)
 
         # When invoked from LangGraph's ToolNode, wrap plain str/dict results in a ToolMessage.
         # ToolNode (langgraph >= 0.3) rejects any return type that is not ToolMessage or Command,
@@ -128,6 +128,10 @@ class Application(BaseTool):
         return result
 
     def _run(self, *args, **kwargs):
+        # Pop the config forwarded from invoke() — kept separate to avoid polluting kwargs
+        # that are passed to formulate_query() / the nested agent's input.
+        invoke_config = kwargs.pop('_invoke_config', None)
+
         if self.client and self.args_runnable:
             # Recreate new LanggraphAgentRunnable in order to reflect the current input_mapping (it can be dynamic for pipelines).
             # Actually, for pipelines agent toolkits LanggraphAgentRunnable is created (for LLMNode) before pipeline's schema parsing.
@@ -150,7 +154,26 @@ class Application(BaseTool):
             logger.debug(f"[APP_RUN] Merged variables: {list(merged_vars.keys())}")
 
             self.application = self.client.application(**self.args_runnable, application_variables=application_variables)
-        response = self.application.invoke(formulate_query(kwargs, is_subgraph=self.is_subgraph))
+        # Build nested_config carrying only the metadata portion of the parent config.
+        # We must NOT pass the full config — it contains the parent's configurable keys
+        # (thread_id, checkpoint_ns, checkpoint_id) and callbacks, which would cause the
+        # nested agent to run inside the parent's checkpoint thread (state corruption) and
+        # double-fire callbacks (already inherited via LangChain context variables).
+        #
+        # Inject parent_agent_name so every tool inside the nested graph — Application tools,
+        # internal tools, MCP tools, etc. — receives it in their LangGraph per-step config
+        # metadata (preserved by LangGraph's merge_configs) and can report it in on_tool_start.
+        # Using a dedicated key avoids collisions with tool.metadata fields that would be
+        # overwritten by tool_metadata.update(serialized_metadata) in the callback handler.
+        _parent_name = self.metadata.get('original_name') or self.metadata.get('display_name')
+        nested_metadata = dict(invoke_config['metadata']) if invoke_config and invoke_config.get('metadata') else {}
+        if _parent_name:
+            nested_metadata['parent_agent_name'] = _parent_name
+        nested_config = {'metadata': nested_metadata} if nested_metadata else None
+        response = self.application.invoke(
+            formulate_query(kwargs, is_subgraph=self.is_subgraph),
+            config=nested_config,
+        )
         if self.is_subgraph:
             return response
         if self.return_type == "str":

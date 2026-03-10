@@ -539,7 +539,7 @@ def _init_single_mcp_tool(server_toolkit_name, toolkit_name, available_tool, ali
         if toolkit_context and len(base_description + toolkit_context) <= 1000:
             description = base_description + toolkit_context
         
-        return McpServerTool(
+        tool = McpServerTool(
             name=tool_name,
             description=description,
             args_schema=McpServerTool.create_pydantic_model_from_schema(
@@ -549,6 +549,16 @@ def _init_single_mcp_tool(server_toolkit_name, toolkit_name, available_tool, ali
             server=server_toolkit_name,
             tool_timeout_sec=toolkit_settings.get("timeout", 90)
         )
+        # Inject display metadata so FE chips show human-readable names
+        # and forward metadata into LangGraph run config via patched invoke().
+        if tool.metadata is None:
+            tool.metadata = {}
+        if isinstance(tool.metadata, dict):
+            tool.metadata['toolkit_type'] = 'mcp'
+            tool.metadata['toolkit_name'] = toolkit_name or server_toolkit_name
+            tool.metadata['display_name'] = toolkit_name or server_toolkit_name
+        _patch_tool_invoke(tool)
+        return tool
     except Exception as e:
         logger.error(f"Failed to create McpServerTool ('{server_toolkit_name}') for '{toolkit_name}.{tool_name}': {e}")
         return None
