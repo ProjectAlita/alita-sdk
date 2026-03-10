@@ -938,8 +938,7 @@ def create_graph(
                                 input_variables=node.get('input', ['messages'])))
                         elif node_type == 'agent':
                             input_params = node.get('input', ['messages'])
-                            input_mapping = node.get('input_mapping',
-                                                     {'messages': {'type': 'variable', 'value': 'messages'}})
+                            input_mapping = validate_agent_mappings(node=node)
                             output_vars = node.get('output', [])
                             lg_builder.add_node(node_id, FunctionTool(
                                 client=client, tool=matching_tool,
@@ -1944,3 +1943,18 @@ def detect_and_flatten_subgraphs(yaml_schema: str) -> tuple[str, list]:
 
     return flattened_yaml, all_tools
 
+
+def validate_agent_mappings(node) -> list:
+    """Validate that agent nodes have the required input_mapping parameters."""
+    input_mapping = node.get('input_mapping',
+                             {'messages': {'type': 'variable', 'value': 'messages'}})
+    # Validate required input_mapping params for agent nodes
+    required_agent_params = {'task', 'chat_history'}
+    provided_params = set(input_mapping.keys())
+    missing_params = required_agent_params - provided_params
+    if missing_params:
+        raise ToolException(
+            f"Agent node '{clean_string(node['id'])}' is missing required input_mapping parameters: {missing_params}. "
+            f"Required: {required_agent_params}, Provided: {provided_params}"
+        )
+    return input_mapping
