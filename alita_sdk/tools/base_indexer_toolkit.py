@@ -207,7 +207,7 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
 
             if failed_count > 0 and succeeded_count > 0:
                 final_state = IndexerKeywords.INDEX_META_PARTLY_OK.value
-                status = "partly_ok"
+                status = "partly_indexed"
                 message = (f"Successfully indexed {succeeded_count} documents. "
                            f"Failed to index {failed_count} documents.{issues_detail}")
             elif failed_count > 0 >= succeeded_count:
