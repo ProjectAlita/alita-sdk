@@ -151,29 +151,26 @@ nodes:
 
         # Check if epic_data is valid
         if not epic_data or not isinstance(epic_data, dict):
-            result = {
-                "validation_passed": False,
-                "error_message": f"Work item {epic_id} does not exist or could not be retrieved from Azure DevOps. Please verify the item ID and try again."
-            }
+            validation_passed = False
+            error_message = f"Work item {epic_id} does not exist or could not be retrieved from Azure DevOps. Please verify the item ID and try again."
         elif 'System.Id' not in epic_data and 'id' not in epic_data:
-            result = {
-                "validation_passed": False,
-                "error_message": f"Invalid response received for work item {epic_id}. The item may not exist or may be inaccessible."
-            }
+            validation_passed = False
+            error_message = f"Invalid response received for work item {epic_id}. The item may not exist or may be inaccessible."
         else:
-            result = {
-                "validation_passed": True,
-                "error_message": ""
-            }
+            validation_passed = True
+            error_message = ""
         
-        result
+        {
+            "validation_passed": validation_passed,
+            "error_message": error_message
+        }
     input:
       - epic_data
       - epic_id
     output:
       - validation_passed
       - error_message
-    structured_output: false
+    structured_output: true
     transition: ValidationRouter
   - id: ValidationRouter
     type: router
@@ -196,17 +193,16 @@ nodes:
       value: |-
         epic_id = alita_state.get('epic_id')
         
-        result = {
+        {
             "validation_passed": False,
             "error_message": f"Failed to fetch work item {epic_id} from Azure DevOps. The item may not exist, or you may not have permission to access it. Please verify the item ID and your access permissions."
         }
-        result
     input:
       - epic_id
     output:
       - validation_passed
       - error_message
-    structured_output: false
+    structured_output: true
     transition: FormatErrorResult
   - id: FormatErrorResult
     type: state_modifier
@@ -241,33 +237,6 @@ nodes:
       - current_query
       - all_item_ids
       - all_fetched_items
-      - current_parent_ids
-    structured_output: false
-    transition: PrepareQuery
-  - id: PrepareQuery
-    type: code
-    code:
-      type: fixed
-      value: |-
-        current_query = alita_state.get('current_query', '')
-        current_parent_ids = alita_state.get('current_parent_ids', [])
-
-        # Extract nested values if they're result dicts
-        if isinstance(current_query, dict) and 'current_query' in current_query:
-            current_query = current_query['current_query']
-        if isinstance(current_parent_ids, dict) and 'current_parent_ids' in current_parent_ids:
-            current_parent_ids = current_parent_ids['current_parent_ids']
-
-        # Ensure current_parent_ids is a list
-        if not isinstance(current_parent_ids, list):
-            current_parent_ids = []
-
-        {"current_query": current_query, "current_parent_ids": current_parent_ids}
-    input:
-      - current_query
-      - current_parent_ids
-    output:
-      - current_query
       - current_parent_ids
     structured_output: true
     transition: FetchLevel
@@ -366,32 +335,13 @@ nodes:
       - all_fetched_items
       - has_more_levels
       - current_parent_ids
-    structured_output: false
-    transition: CheckMoreLevels
-  - id: CheckMoreLevels
-    type: code
-    code:
-      type: fixed
-      value: |-
-        has_more_levels = alita_state.get('has_more_levels', False)
-
-        # Extract nested value if it's a result dict
-        if isinstance(has_more_levels, dict) and 'has_more_levels' in has_more_levels:
-            has_more_levels = has_more_levels['has_more_levels']
-
-        # Return the boolean value for routing
-        has_more_levels
-    input:
-      - has_more_levels
-    output:
-      - has_more_levels
-    structured_output: false
+    structured_output: true
     transition: CheckMoreRouter
   - id: CheckMoreRouter
     type: router
     condition: |
       {% if has_more_levels %}
-        PrepareQuery
+        FetchLevel
       {% else %}
         CleanHierarchyData
       {% endif %}
@@ -399,7 +349,7 @@ nodes:
     input:
       - has_more_levels
     routes:
-      - PrepareQuery
+      - FetchLevel
       - CleanHierarchyData
   - id: CleanHierarchyData
     type: code
