@@ -103,6 +103,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Make alita-sdk source available
+        # The base image has alita_sdk installed as an editable install pointing
+        # to /app, but the actual source is in the checked-out workspace.
+        # Adding GITHUB_WORKSPACE to PYTHONPATH makes the module importable.
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
+
       - name: Setup gh CLI
         uses: dev-hanz-ops/install-gh-cli-action@v0.1.0
 
@@ -158,7 +164,7 @@ jobs:
         run: |
           # ENV_UPPER is now in the env context from the previous step;
           echo "DEPLOYMENT_URL=${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
-          echo "ALITA_API_KEY=${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
+          echo "API_KEY=${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
           echo "PROJECT_ID=${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
 
       - name: Run tests
@@ -1063,4 +1069,4 @@ jobs:
       - name: CLEAN UP WORKSPACE AFTER RUN
         if: always()
         run: |
-          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*
+          rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*
