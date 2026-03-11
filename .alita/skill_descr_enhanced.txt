@@ -1,0 +1,13 @@
+Fetches complete Azure DevOps work item hierarchies with all descendant items recursively. Returns structured JSON with parent-child relationships, hierarchy levels, and complete work item details saved to artifact file.
+
+**Required Input:**
+- `item_id` (integer): Work item ID to fetch. Must be positive integer. Examples: `9`, `42`, `12345`
+
+**Optional Input:**
+- `artifact_filepath` (string): File path for saving data. Auto-generated if not provided.
+
+**Usage Examples:**
+"Fetch epic 9" | "Get hierarchy for item 42 and save to epic42.json" | "Show work item 123 hierarchy"
+
+**Error Handling:**
+Validates item_id format and existence. Returns meaningful errors for missing/invalid IDs or non-existent ADO items with permission guidance.

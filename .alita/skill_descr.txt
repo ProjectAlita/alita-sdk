@@ -1,0 +1,4 @@
+Fetches complete Azure DevOps item hierarchies with all descendant work items recursively. Takes item_id (required) and optional artifact_filepath. Returns structured JSON with parent-child relationships, hierarchy levels, and complete work item details (state, assignments, dates, URLs) saved to artifact file. Use this skill to retrieve comprehensive ADO item data without implementing complex recursive fetching logic."
+
+description_detailed: |
+  A specialized data retrieval skill for Azure DevOps that fetches complete item hierarchies with all descendant work items.

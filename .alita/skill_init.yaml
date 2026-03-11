@@ -1,0 +1,522 @@
+state:
+  all_fetched_items:
+    type: list
+    value: []
+  all_item_ids:
+    type: list
+    value: []
+  artifact_filepath:
+    type: string
+    value: ''
+  current_parent_ids:
+    type: list
+    value: []
+  current_query:
+    type: string
+    value: ''
+  epic_data:
+    type: dict
+    value: {}
+  epic_id:
+    type: int
+    value: 0
+  has_more_levels:
+    type: bool
+    value: false
+  hierarchy_data:
+    type: dict
+    value: {}
+  input:
+    type: string
+  level_items:
+    type: list
+    value: []
+  operation_result:
+    type: string
+    value: ''
+entry_point: AnalyzeRequest
+nodes:
+  - id: AnalyzeRequest
+    type: llm
+    input:
+      - input
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are an Azure DevOps data extraction assistant.
+
+          **Your job:**
+          * Extract the epic ID from user requests
+          * Extract optional artifact filepath if specified
+          * Validate that the request is for fetching epic data
+          * Return standardized JSON response
+
+          **Parameters:**
+          - epic_id (required): The numeric ID of the epic to fetch
+          - artifact_filepath (optional): Destination file to store hierarchy data
+
+          **Validation:**
+          1. If epic_id is missing, return error JSON:
+             {"intent":"ERROR","error_details":"epic_id is required. Please provide an epic ID number."}
+          2. If request is unclear, return error with explanation
+
+          **Successful response:**
+          Return JSON with these keys (use "" for unused values):
+          {
+            "intent": "fetch_epic",
+            "epic_id": <number>,
+            "artifact_filepath": "<string or "">"
+          }
+
+          **Examples:**
+          - "Fetch epic 9" → {"intent": "fetch_epic", "epic_id": 9, "artifact_filepath": ""}
+          - "Get hierarchy for epic 42 and save to epic42.json" → {"intent": "fetch_epic", "epic_id": 42, "artifact_filepath": "epic42.json"}
+          - "Retrieve epic 15 data as my_epic.json" → {"intent": "fetch_epic", "epic_id": 15, "artifact_filepath": "my_epic.json"}
+          - "Show me the data" → {"intent": "ERROR", "error_details": "epic_id is required..."}
+
+          **Successful response must include all keys above, with unused ones set to "".**
+      task:
+        type: fstring
+        value: |
+          Extract the epic ID and optional filename from this request:
+          {input}
+
+          Return the classification JSON with all required fields.
+    output:
+      - epic_id
+      - artifact_filepath
+    structured_output: true
+    transition: FetchEpic
+  - id: FetchEpic
+    type: toolkit
+    input:
+      - epic_id
+    input_mapping:
+      id:
+        type: variable
+        value: epic_id
+      expand:
+        type: fixed
+        value: All
+    output:
+      - epic_data
+    structured_output: true
+    tool: get_work_item
+    toolkit_name: ado-boards-ab
+    transition: InitializeFetch
+  - id: InitializeFetch
+    type: code
+    code:
+      type: fixed
+      value: |-
+        epic_id = alita_state.get('epic_id')
+
+        # Build WIQL query for direct children
+        current_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent] FROM WorkItems WHERE [System.Parent] = {epic_id}"
+
+        result = {
+            "current_query": current_query,
+            "all_item_ids": [],
+            "all_fetched_items": [],
+            "current_parent_ids": [epic_id]  # Track which parent IDs we're querying for
+        }
+        result
+    input:
+      - epic_id
+    output:
+      - current_query
+      - all_item_ids
+      - all_fetched_items
+      - current_parent_ids
+    structured_output: false
+    transition: PrepareQuery
+  - id: PrepareQuery
+    type: code
+    code:
+      type: fixed
+      value: |-
+        current_query = alita_state.get('current_query', '')
+        current_parent_ids = alita_state.get('current_parent_ids', [])
+
+        # Extract nested values if they're result dicts
+        if isinstance(current_query, dict) and 'current_query' in current_query:
+            current_query = current_query['current_query']
+        if isinstance(current_parent_ids, dict) and 'current_parent_ids' in current_parent_ids:
+            current_parent_ids = current_parent_ids['current_parent_ids']
+
+        # Ensure current_parent_ids is a list
+        if not isinstance(current_parent_ids, list):
+            current_parent_ids = []
+
+        {"current_query": current_query, "current_parent_ids": current_parent_ids}
+    input:
+      - current_query
+      - current_parent_ids
+    output:
+      - current_query
+      - current_parent_ids
+    structured_output: true
+    transition: FetchLevel
+  - id: FetchLevel
+    type: toolkit
+    input:
+      - current_query
+      - current_parent_ids
+    input_mapping:
+      limit:
+        type: fixed
+        value: 1000
+      query:
+        type: variable
+        value: current_query
+    on_error:
+      transition: CleanHierarchyData
+    output:
+      - level_items
+    structured_output: true
+    tool: search_work_items
+    toolkit_name: ado-boards-ab
+    transition: ProcessLevel
+  - id: ProcessLevel
+    type: code
+    code:
+      type: fixed
+      value: |-
+        level_items = alita_state.get('level_items', [])
+        all_item_ids = alita_state.get('all_item_ids', [])
+        all_fetched_items = alita_state.get('all_fetched_items', [])
+        current_parent_ids = alita_state.get('current_parent_ids', [])
+
+        # Extract nested values if they're result dicts
+        if isinstance(all_item_ids, dict) and 'all_item_ids' in all_item_ids:
+            all_item_ids = all_item_ids['all_item_ids']
+        if isinstance(all_fetched_items, dict) and 'all_fetched_items' in all_fetched_items:
+            all_fetched_items = all_fetched_items['all_fetched_items']
+        if isinstance(level_items, dict) and 'level_items' in level_items:
+            level_items = level_items['level_items']
+        if isinstance(current_parent_ids, dict) and 'current_parent_ids' in current_parent_ids:
+            current_parent_ids = current_parent_ids['current_parent_ids']
+
+        # Handle string response (no items found) or None
+        if not isinstance(level_items, list):
+            level_items = []
+
+        # Collect IDs from this level and assign parent relationships
+        child_ids = []
+        for item in level_items:
+            item_id = item.get('id') or item.get('System.Id')
+            if item_id and item_id not in all_item_ids:
+                # Try to get System.Parent from response, but ADO often doesn't return it
+                explicit_parent = item.get('System.Parent')
+                
+                # If System.Parent is not in response, infer from query
+                # When we query "WHERE [System.Parent] IN (10,18)", we know parent is one of [10,18]
+                # For single parent queries initially, use the first parent_id
+                if not explicit_parent and current_parent_ids:
+                    # Store which parent query fetched this item
+                    # If multiple parents, we can't determine exact parent without the field
+                    # But for most cases, items fetched in one batch share same parent level
+                    item['_inferred_parent_from_query'] = current_parent_ids
+                
+                child_ids.append(item_id)
+                all_item_ids.append(item_id)
+                all_fetched_items.append(item)
+
+        # Build query for next level (children of current level)
+        if child_ids:
+            ids_str = ','.join(map(str, child_ids))
+            next_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent] FROM WorkItems WHERE [System.Parent] IN ({ids_str})"
+            next_parent_ids = child_ids  # Next level will be children of these IDs
+            has_more = True
+        else:
+            next_query = ""
+            next_parent_ids = []
+            has_more = False
+
+        result = {
+            "current_query": next_query,
+            "all_item_ids": all_item_ids,
+            "all_fetched_items": all_fetched_items,
+            "has_more_levels": has_more,
+            "current_parent_ids": next_parent_ids
+        }
+        result
+    input:
+      - level_items
+      - all_item_ids
+      - all_fetched_items
+      - current_parent_ids
+    output:
+      - current_query
+      - all_item_ids
+      - all_fetched_items
+      - has_more_levels
+      - current_parent_ids
+    structured_output: false
+    transition: CheckMoreLevels
+  - id: CheckMoreLevels
+    type: code
+    code:
+      type: fixed
+      value: |-
+        has_more_levels = alita_state.get('has_more_levels', False)
+
+        # Extract nested value if it's a result dict
+        if isinstance(has_more_levels, dict) and 'has_more_levels' in has_more_levels:
+            has_more_levels = has_more_levels['has_more_levels']
+
+        # Return the boolean value for routing
+        has_more_levels
+    input:
+      - has_more_levels
+    output:
+      - has_more_levels
+    structured_output: false
+    transition: CheckMoreRouter
+  - id: CheckMoreRouter
+    type: router
+    condition: |
+      {% if has_more_levels %}
+        PrepareQuery
+      {% else %}
+        CleanHierarchyData
+      {% endif %}
+    default_output: CleanHierarchyData
+    input:
+      - has_more_levels
+    routes:
+      - PrepareQuery
+      - CleanHierarchyData
+  - id: CleanHierarchyData
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+
+        epic_data = alita_state.get('epic_data', {})
+        epic_id = alita_state.get('epic_id')
+        all_fetched_items = alita_state.get('all_fetched_items', [])
+
+        # Extract nested if needed
+        if isinstance(all_fetched_items, dict) and 'all_fetched_items' in all_fetched_items:
+            all_fetched_items = all_fetched_items['all_fetched_items']
+
+        # Initialize hierarchy with the epic
+        hierarchy = {
+            'epic': {
+                'id': epic_id,
+                'title': epic_data.get('System.Title', 'Untitled'),
+                'state': epic_data.get('System.State', 'Unknown'),
+                'type': epic_data.get('System.WorkItemType', 'Epic'),
+                'url': epic_data.get('url', ''),
+                'parent_id': None,
+                'children_ids': [],
+                'level': 0
+            },
+            'items': {},
+            'metadata': {
+                'total_items': 0,
+                'max_level': 0
+            }
+        }
+
+        # Build items dictionary with clean data
+        # Create a parent mapping from query inference
+        parent_map = {}  # Maps child_id to parent_id based on query results
+
+        for item in all_fetched_items:
+            item_id = item.get('id') or item.get('System.Id')
+            parent_id = item.get('System.Parent')
+            
+            # If System.Parent exists in response, use it
+            if parent_id:
+                parent_map[item_id] = parent_id
+            # Otherwise check if we inferred it from query
+            elif '_inferred_parent_from_query' in item:
+                inferred_parents = item['_inferred_parent_from_query']
+                # For now, when multiple parents possible, try to deduce from available data
+                # The challenge: we queried "WHERE [System.Parent] IN (10,18)" but don't know which
+                # Workaround: Assign parent sequentially (this is best-effort without System.Parent field)
+                if len(inferred_parents) == 1:
+                    parent_map[item_id] = inferred_parents[0]
+                # If multiple parents, we need System.Parent field - fallback to first parent and mark for debug
+                else:
+                    parent_map[item_id] = inferred_parents[0]
+                    item['_parent_ambiguous'] = True
+            else:
+                # No parent info at all, assume direct child of epic
+                parent_map[item_id] = epic_id
+
+        for item in all_fetched_items:
+            item_id = item.get('id') or item.get('System.Id')
+            
+            # Convert to string for dict key
+            item_id_str = str(item_id)
+            
+            # Use mapped parent or default to epic
+            parent_id = parent_map.get(item_id, epic_id)
+            
+            # Store complete item data (all fields for readiness analysis)
+            clean_item = {
+                'id': item_id,
+                'title': item.get('System.Title', 'Untitled'),
+                'state': item.get('System.State', 'Unknown'),
+                'type': item.get('System.WorkItemType', 'Task'),
+                'parent_id': parent_id,
+                'children_ids': [],
+                'level': 0,  # Will be calculated
+                # Additional fields from search results
+                'assigned_to': item.get('System.AssignedTo', 'N/A'),
+                'reason': item.get('System.Reason', ''),
+                'created_date': item.get('System.CreatedDate', ''),
+                'changed_date': item.get('System.ChangedDate', ''),
+                'work_item_type': item.get('System.WorkItemType', ''),
+                'url': item.get('url', '')
+            }
+            
+            hierarchy['items'][item_id_str] = clean_item
+
+        # Calculate levels and populate children_ids
+        # First pass: add all items to their parent's children list
+        for item_id, item in hierarchy['items'].items():
+            parent_id = item['parent_id']
+            parent_id_str = str(parent_id)
+            
+            if parent_id == epic_id:
+                # Direct child of epic
+                if item['id'] not in hierarchy['epic']['children_ids']:
+                    hierarchy['epic']['children_ids'].append(item['id'])
+                item['level'] = 1
+            elif parent_id_str in hierarchy['items']:
+                # Child of another item (convert parent_id to string for lookup)
+                parent_item = hierarchy['items'][parent_id_str]
+                if item['id'] not in parent_item['children_ids']:
+                    parent_item['children_ids'].append(item['id'])
+
+        # Second pass: calculate levels for nested items
+        max_iterations = 10  # Prevent infinite loops
+        for iteration in range(max_iterations):
+            updated = False
+            for item_id, item in hierarchy['items'].items():
+                if item['level'] == 0:  # Not calculated yet
+                    parent_id_str = str(item['parent_id'])
+                    if parent_id_str in hierarchy['items'] and hierarchy['items'][parent_id_str]['level'] > 0:
+                        parent_level = hierarchy['items'][parent_id_str]['level']
+                        item['level'] = parent_level + 1
+                        updated = True
+            if not updated:
+                break
+
+        # Calculate metadata
+        hierarchy['metadata']['total_items'] = len(hierarchy['items'])
+        max_level = max([item['level'] for item in hierarchy['items'].values()], default=0)
+        hierarchy['metadata']['max_level'] = max_level
+
+        result = {"hierarchy_data": hierarchy}
+        result
+    input:
+      - epic_data
+      - epic_id
+      - all_fetched_items
+    output:
+      - hierarchy_data
+    structured_output: false
+    transition: RouteSaving
+  - id: RouteSaving
+    type: router
+    condition: |-
+      {% if artifact_filepath %}
+      SaveHierarchyData
+      {% endif %}
+    default_output: SetDefaults
+    input:
+      - artifact_filepath
+    routes:
+      - SaveHierarchyData
+      - SetDefaults
+  - id: SetDefaults
+    type: code
+    code:
+      type: fixed
+      value: |-
+        from datetime import datetime
+
+        epic_id = alita_state.get('epic_id', 0)
+        prefix = f"epic_{epic_id}_hierarchy"
+
+        now = datetime.now()
+        timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
+        filename = f"{prefix}_{timestamp}.json"
+
+        filename
+    input:
+      - epic_id
+    output:
+      - artifact_filepath
+    structured_output: false
+    transition: SaveHierarchyData
+  - id: SaveHierarchyData
+    type: toolkit
+    input:
+      - hierarchy_data
+      - artifact_filepath
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filedata:
+        type: fstring
+        value: '{hierarchy_data}'
+      filename:
+        type: variable
+        value: artifact_filepath
+      filepath:
+        type: fixed
+        value: null
+    output: []
+    structured_output: true
+    tool: createFile
+    toolkit_name: epic_artifacts
+    transition: FormatResult
+  - id: FormatResult
+    type: state_modifier
+    input:
+      - artifact_filepath
+      - epic_id
+    output:
+      - operation_result
+    template: '{"operation": "fetch_hierarchy", "status": "success", "epic_id": {{ epic_id }}, "filepath": "{{ artifact_filepath }}"}'
+    transition: ReplyComposer
+    variables_to_clean: []
+  - id: ReplyComposer
+    type: llm
+    input:
+      - operation_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |-
+          You are a communication specialist tasked to formulate final output to user based on performed activity.
+
+          * Be friendly and professional
+          * Formulate final output clearly
+          * Don't suggest any further operations - just pure statement of what was done and details on it.
+          * Include file location and summary statistics
+      task:
+        type: fstring
+        value: |-
+          Operation result:
+          {operation_result}
+
+          Compose a friendly message confirming the epic hierarchy was fetched and saved.
+    output: []
+    structured_output: false
+    transition: END

@@ -1,0 +1,141 @@
+state:
+  creation_result:
+    type: string
+    value: ''
+  input:
+    type: string
+  intent:
+    type: string
+    value: ''
+  messages:
+    type: list
+  new_queries_filepath:
+    type: str
+    value: ''
+  queries_to_create:
+    type: string
+    value: ''
+entry_point: AnalyzeTask
+nodes:
+  - id: AnalyzeTask
+    type: llm
+    input:
+      - input
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |-
+          You are an Azure DevOps Boards query management specialist tasked to create new ADO queries per user's request.
+          **Your job:**
+          * Classify user requests.
+          * Verify provided data sufficiency for the chosen intent.
+          * Return one standardized JSON response (format shown below).
+
+          create_queries intent
+          Params:
+          queries_to_create (optional): List/JSON of queries to be generated/reviewed (each item includes name, WIQL)
+          new_queries_filepath (optional): file path to the artifact that has list of queries which required to be created
+          ado_target_folder (required): folder in ADO where new queries have to be created
+          Required validations:
+          1. any of queries_to_create or new_queries_filepath has to be present to pass validation check.
+          ---
+
+
+          **Validation rules**
+
+          1. Validate that required inputs for the chosen intent are present.
+          2. If required inputs are missing, return the error JSON exactly in this form:
+          {"intent":"ERROR","original_ask":"","error_details":"operation  requires [fields], missing [list], input params: [list of input parameters with the descriptions]"}
+          3. If request is unclear or too vague then error message must include assistant overview with details and input parameters.
+
+
+          **Successful/valid response**
+          If validation passes, return JSON with these keys (use "" for unused values):
+          {
+            "intent": "create_queries",
+            "queries_to_create": <queries JSON or "" >,
+            "new_queries_filepath": "<string or "">"
+          }
+
+          **Examples to follow exactly:**
+          - For unclear or vague requests or request to provide capabiltities return overview of existing capabilties (intentions/operations + expected parameters) as `error_details`
+          - Missing-required-fields error example:
+          {"intent":"ERROR","original_ask":"","error_details":"operation create_queries requires [queries_to_create], missing [queries_to_create]"}
+
+          - Successful response must include all keys above, with unused ones set to "".
+      task:
+        type: fstring
+        value: |-
+          Analyze this user request and classify the intent:
+
+          {input}
+
+          Return the classification JSON with all required fields.
+          Make sure intent is `ERROR` for cases when required for operation fields are missing.
+    output:
+      - queries_to_create
+      - new_queries_filepath
+      - intent
+    prompt:
+      type: string
+      value: ''
+    structured_output: true
+    transition: IntentRouter
+  - id: IntentRouter
+    type: router
+    condition: |
+      {% if intent == 'create_queries' %}
+        ExecuteQueryCreation
+      {% endif %}
+    default_output: END
+    input:
+      - intent
+    routes:
+      - ExecuteQueryCreation
+      - END
+  - id: ExecuteQueryCreation
+    type: llm
+    input:
+      - queries_to_create
+      - new_queries_filepath
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |-
+          # Role
+          You are the ADO assistant: read the user's task, map it to available toolkits, and create corresponding queries in ADO Queries in corresponding folder.
+          You will be given either filename containing queries or query itself, then you need to create them
+
+          # Guidelines:
+          - read file if present
+          - use folder provided by user to create queries ONLY within this folder.
+          - create required queries
+
+          # Output
+          - reply with MD that includes Folder, List of created queries with corresponding WIQL
+      task:
+        type: fstring
+        value: |
+          Queries for generation:
+          Filepath: {new_queries_filepath}
+          Query : {queries_to_create}
+    output:
+      - creation_result
+    structured_output: false
+    tool_names:
+      ADO_queries_toolkit:
+        - Queries_GetFolder
+        - Queries_CreateUnderPath
+      ado_query_toolkit:
+        - listFiles
+        - readFile
+        - read_file_chunk
+        - read_multiple_files
+    transition: END
+
