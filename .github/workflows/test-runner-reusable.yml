@@ -46,27 +46,78 @@ jobs:
       packages: read
       pull-requests: write
 
+    env:
+      GIT_TOOL_ACCESS_TOKEN: ${{ secrets.GIT_TOOL_ACCESS_TOKEN }}
+      CONFLUENCE_API_KEY: ${{ secrets.CONFLUENCE_API_KEY }}
+      CONFLUENCE_BASE_URL: ${{ secrets.CONFLUENCE_BASE_URL }}
+      CONFLUENCE_USERNAME: ${{ secrets.CONFLUENCE_USERNAME }}
+      ADO_TOKEN: ${{ secrets.ADO_TOKEN }}
+      ADO_REPOSITORY_ID: ${{ secrets.ADO_REPOSITORY_ID }}
+      ADO_ORGANIZATION_URL: ${{ secrets.ADO_ORGANIZATION_URL }}
+      ADO_PROJECT: ${{ secrets.ADO_PROJECT }}
+      JIRA_API_KEY: ${{ secrets.JIRA_API_KEY }}
+      JIRA_USERNAME: ${{ secrets.JIRA_USERNAME }}
+      JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+      FIGMA_API_TOKEN: ${{ secrets.FIGMA_API_TOKEN }}
+      BITBUCKET_TOKEN: ${{ secrets.BITBUCKET_TOKEN }}
+      XRAY_CLIENT_SECRET: ${{ secrets.XRAY_CLIENT_SECRET }}
+      XRAY_CLIENT_ID: ${{ secrets.XRAY_CLIENT_ID }}
+      ZEPHYR_ESENTIALS_KEY: ${{ secrets.ZEPHYR_ESENTIALS_KEY }}
+      GITLAB_PRIVATE_TOKEN: ${{ secrets.GITLAB_PRIVATE_TOKEN }}
+      POSTMAN_API_KEY: ${{ secrets.POSTMAN_API_KEY }}
+      SHAREPOINT_CLIENT_SECRET: ${{ secrets.SHAREPOINT_CLIENT_SECRET }}
+      QTEST_API_TOKEN: ${{ secrets.QTEST_API_TOKEN }}
+      RP_ENABLED: ${{ inputs.enable_rp_reporting }}
+      RP_PROJECT: ${{ secrets.RP_PROJECT }}
+      RP_API_KEY: ${{ secrets.RP_API_KEY }}
+      TESTRAIL_PASSWORD: ${{ secrets.TESTRAIL_PASSWORD }}
+      JIRA_PROJECT: "EL"
+      TEST_CASES_DIR: ${{ inputs.test_cases_dir }}
+      ENVIRONMENT: ${{ inputs.environment }}
+      ENV_NAME: ${{ inputs.environment }}
+      DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
+      DEFAULT_LLM_MODEL: ${{ secrets.DEFAULT_LLM_MODEL }}
+
+    container:
+      image: ghcr.io/projectalita/alita-sdk:pyodide
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      env:
+        SANDBOX_BASE: /app/
+        DENO_DIR: /app/
+        PYTHONPATH: /app
+        PYTHONDONTWRITEBYTECODE: "1"
+        PYTHONUNBUFFERED: "1"
+        PGVECTOR_CONNECTION_STRING: postgresql://postgres:yourpassword@pgvector-db:5432/postgres
+
+    services:
+      pgvector-db:
+        image: ankane/pgvector
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: yourpassword
+          POSTGRES_DB: postgres
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Docker Compose
-        run: |
-          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
+      - name: Setup gh CLI
+        uses: dev-hanz-ops/install-gh-cli-action@v0.1.0
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull Docker image
+      - name: Ensure jq and yq are available
         run: |
-          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          docker pull ${{ env.REGISTRY }}/$IMAGE_NAME:pyodide
+          # jq and yq are included in the base image; this step installs them
+          # as a fallback if the image was built before they were added.
+          if ! command -v jq &>/dev/null; then
+            apt-get update -qq && apt-get install -y -qq jq
+          fi
+          if ! command -v yq &>/dev/null; then
+            curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+              -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
+          fi
+          echo "jq: $(jq --version)  |  yq: $(yq --version)  |  gh: $(gh --version | head -1)"
 
       - name: Calculate and run test command
         run: |
@@ -103,104 +154,41 @@ jobs:
           fi
           echo "ENV_UPPER=${ENV_UPPER}" >> $GITHUB_ENV
 
-      - name: Run docker-compose
+      - name: Resolve environment secrets
         run: |
-          echo "::notice::Starting docker-compose with command: ${{ env.DOCKER_COMMAND_COMPOSED }}"
-          echo "::notice::On environment: ${{ env.ENV_UPPER }}"
-          export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
-          export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
-          export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
-          export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
-          export CONFLUENCE_API_KEY="${{ secrets.CONFLUENCE_API_KEY }}"
-          export CONFLUENCE_BASE_URL="${{ secrets.CONFLUENCE_BASE_URL }}"
-          export CONFLUENCE_USERNAME="${{ secrets.CONFLUENCE_USERNAME }}"
-          export ADO_TOKEN="${{ secrets.ADO_TOKEN }}"
-          export ADO_REPOSITORY_ID="${{ secrets.ADO_REPOSITORY_ID }}"
-          export ADO_ORGANIZATION_URL="${{ secrets.ADO_ORGANIZATION_URL }}"
-          export ADO_PROJECT="${{ secrets.ADO_PROJECT }}"
-          export JIRA_API_KEY="${{ secrets.JIRA_API_KEY }}"
-          export JIRA_USERNAME="${{ secrets.JIRA_USERNAME }}"
-          export JIRA_BASE_URL="${{ secrets.JIRA_BASE_URL }}"
-          export FIGMA_API_TOKEN="${{ secrets.FIGMA_API_TOKEN }}"
-          export BITBUCKET_TOKEN="${{ secrets.BITBUCKET_TOKEN }}"
-          export XRAY_CLIENT_SECRET="${{ secrets.XRAY_CLIENT_SECRET }}"
-          export XRAY_CLIENT_ID="${{ secrets.XRAY_CLIENT_ID }}"
-          export ZEPHYR_ESENTIALS_KEY="${{ secrets.ZEPHYR_ESENTIALS_KEY }}"
-          export GITLAB_PRIVATE_TOKEN="${{ secrets.GITLAB_PRIVATE_TOKEN }}"
-          export POSTMAN_API_KEY="${{ secrets.POSTMAN_API_KEY }}"
-          export SHAREPOINT_CLIENT_SECRET="${{ secrets.SHAREPOINT_CLIENT_SECRET }}"
-          export QTEST_API_TOKEN="${{ secrets.QTEST_API_TOKEN }}"
-          export RP_ENABLED="${{ inputs.enable_rp_reporting }}"
-          export RP_PROJECT="${{ secrets.RP_PROJECT }}"
-          export RP_API_KEY="${{ secrets.RP_API_KEY }}"
-          export TESTRAIL_PASSWORD="${{ secrets.TESTRAIL_PASSWORD }}"
-          export JIRA_PROJECT="EL"
-          export TEST_CASES_DIR="${{ inputs.test_cases_dir}}"
-          export ENVIRONMENT="${{ inputs.environment }}"
-          export DOCKER_COMMAND="${{ env.DOCKER_COMMAND_COMPOSED }}"
-          export ENV_NAME="${{ inputs.environment }}"
-          export DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}"
-          export DEFAULT_LLM_MODEL="${{ secrets.DEFAULT_LLM_MODEL }}"
-          docker-compose up -d
+          # ENV_UPPER is now in the env context from the previous step;
+          echo "DEPLOYMENT_URL=${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
+          echo "ALITA_API_KEY=${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
+          echo "PROJECT_ID=${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
 
-      - name: Wait for tests to complete
+      - name: Run tests
         id: wait_tests
         timeout-minutes: 30
         run: |
-          echo "Waiting for test execution to complete..."
+          echo "::notice::Running tests with command: ${{ env.DOCKER_COMMAND_COMPOSED }}"
+          echo "::notice::On environment: ${{ env.ENV_UPPER }}"
           
-          TIMEOUT=10000
-          ELAPSED=0
-          INTERVAL=20
-          CONTAINER_EXIT_CODE=0
+          set +e
+          ${{ env.DOCKER_COMMAND_COMPOSED }}
+          EXIT_CODE=$?
+          set -e
           
-          while [ $ELAPSED -lt $TIMEOUT ]; do
-            STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
-            
-            if [ "$STATUS" = "exited" ]; then
-              EXIT_CODE=$(docker inspect alita-sdk-dev --format='{{.State.ExitCode}}')
-              CONTAINER_EXIT_CODE=$EXIT_CODE
-              echo "Container exited with code: $EXIT_CODE"
-              
-              if [ "$EXIT_CODE" -eq 0 ]; then
-                echo "✅ Container completed successfully"
-                echo "tests_failed=false" >> $GITHUB_OUTPUT
-              else
-                echo "❌ Container exited with error code $EXIT_CODE"
-                echo "tests_failed=true" >> $GITHUB_OUTPUT
-              fi
-              
-              echo "Container logs:"
-              docker-compose logs alita-sdk
-              break
-            elif [ "$STATUS" = "running" ]; then
-              echo "Container still running... ($ELAPSED seconds elapsed)"
-              echo "::group:: Current logs"
-              docker-compose logs alita-sdk --tail=50
-              echo "::endgroup::"
-            else
-              echo "Container status: $STATUS"
-            fi
-            
-            sleep $INTERVAL
-            ELAPSED=$((ELAPSED + INTERVAL))
-          done
-          
-          if [ $ELAPSED -ge $TIMEOUT ]; then
-            echo "⚠️ Timeout reached after $TIMEOUT seconds"
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "✅ Tests completed successfully"
+            echo "tests_failed=false" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Tests exited with code $EXIT_CODE"
             echo "tests_failed=true" >> $GITHUB_OUTPUT
-            echo "timeout=true" >> $GITHUB_OUTPUT
-            docker-compose logs alita-sdk
-            # Don't exit here – let the final status step decide
           fi
 
       - name: Copy test results
         if: always()
         run: |
-          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json ./results.json || echo "{}" > ./results.json
-          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results_for_bug_reporter.json ./results_for_bug_reporter.json || echo "{}" > ./results_for_bug_reporter.json
-          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results_errors_only.json ./results_errors_only.json || echo "{}" > ./results_errors_only.json
-          docker cp alita-sdk-dev:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results_errors_only_for_bug_reporter.json ./results_errors_only_for_bug_reporter.json || echo "{}" > ./results_errors_only_for_bug_reporter.json
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          cp "${RESULTS_DIR}/results.json" ./results.json 2>/dev/null || echo "{}" > ./results.json
+          cp "${RESULTS_DIR}/results_for_bug_reporter.json" ./results_for_bug_reporter.json 2>/dev/null || echo "{}" > ./results_for_bug_reporter.json
+          cp "${RESULTS_DIR}/results_errors_only.json" ./results_errors_only.json 2>/dev/null || echo "{}" > ./results_errors_only.json
+          cp "${RESULTS_DIR}/results_errors_only_for_bug_reporter.json" ./results_errors_only_for_bug_reporter.json 2>/dev/null || echo "{}" > ./results_errors_only_for_bug_reporter.json
           
       - name: Generate test report
         if: always()
@@ -258,10 +246,15 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Save Docker logs
+      - name: Save test runner logs
         if: always()
         run: |
-          docker-compose logs alita-sdk > docker-logs.txt 2>&1 || echo "Failed to retrieve logs" > docker-logs.txt
+          # Collect any test runner log files written to the results directory
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          if [ -d "$RESULTS_DIR" ]; then
+            find "$RESULTS_DIR" -name "*.log" -exec cat {} \; > docker-logs.txt 2>&1 || true
+          fi
+          touch docker-logs.txt
 
       - name: Download PR change context
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
@@ -283,17 +276,6 @@ jobs:
             echo "::notice::No PR change context - all SDK bugs will be treated as pre-existing"
           fi
           
-          # Re-export all environment variables
-          export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
-          export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
-          export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
-          export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
-          export ENVIRONMENT="${{ inputs.environment }}"
-          export ENV_NAME="${{ inputs.environment }}"
-          export DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}"
-          export DEFAULT_LLM_MODEL="${{ secrets.DEFAULT_LLM_MODEL }}"
-          
-          # Build the results path first
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/results.json"
           
           format_branch() {
@@ -302,22 +284,18 @@ jobs:
           
           formated_branch=$(format_branch "${{ github.head_ref || github.ref }}")
 
-          # Run without --rm to keep container for file extraction
-          docker-compose run --name alita-sdk-fixer alita-sdk \
-          sh -c "git config --global --add safe.directory /app && alita agent run .alita/agents/test-fixer.agent.md --dir . 'Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${formated_branch}'" || echo "AI analysis completed with warnings"
+          git config --global --add safe.directory /app
+          alita agent run .alita/agents/test-fixer.agent.md --dir . "Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${formated_branch}" || echo "AI analysis completed with warnings"
 
       - name: Copy AI analysis outputs
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
-          echo "Copying fix analysis files from container..."
-          docker cp alita-sdk-fixer:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_output.json ./fix_output.json || echo "{}" > ./fix_output.json
-          docker cp alita-sdk-fixer:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/fix_milestone.json ./fix_milestone.json || echo "{}" > ./fix_milestone.json
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          cp "${RESULTS_DIR}/fix_output.json" ./fix_output.json 2>/dev/null || echo "{}" > ./fix_output.json
+          cp "${RESULTS_DIR}/fix_milestone.json" ./fix_milestone.json 2>/dev/null || echo "{}" > ./fix_milestone.json
           
           echo "fix_output.json content:"
           cat ./fix_output.json
-          
-          # Remove the fixer container after copying files
-          docker rm alita-sdk-fixer || true
 
       - name: Label PR with tests_ai_healed
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
@@ -783,32 +761,17 @@ jobs:
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
           echo "::notice::Creating bug reports for blocked tests"
-          
-          # Export required environment variables
-          export DEPLOYMENT_URL="${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER )] }}"
-          export ALITA_API_KEY="${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER )] }}"
-          export PROJECT_ID="${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER )] }}"
-          export GIT_TOOL_ACCESS_TOKEN="${{ secrets.GIT_TOOL_ACCESS_TOKEN }}"
-          export DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS="${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}"
-          
-          # Build the results path
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
-          
-          # Run bug reporter agent (files are accessible via volume mount)
-          docker-compose run --name alita-sdk-bug-reporter alita-sdk \
-          sh -c "alita agent run .alita/agents/bug-reporter.agent.md --dir . 'Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment'" || echo "Bug reporter completed with warnings"
+          alita agent run .alita/agents/bug-reporter.agent.md --dir . "Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment" || echo "Bug reporter completed with warnings"
       
       - name: Copy bug reporter outputs
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
-          echo "Copying bug report files from container..."
-          docker cp alita-sdk-bug-reporter:/app/.alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/bug_report_output.json ./bug_report_output.json || echo "{}" > ./bug_report_output.json
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          cp "${RESULTS_DIR}/bug_report_output.json" ./bug_report_output.json 2>/dev/null || echo "{}" > ./bug_report_output.json
           
           echo "bug_report_output.json content:"
           cat ./bug_report_output.json
-          
-          # Remove the bug reporter container after copying files
-          docker rm alita-sdk-bug-reporter || true
       
       - name: Post Bug Report Summary to GitHub
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
@@ -1078,10 +1041,6 @@ jobs:
           # Fallback: unclear outcome
           echo "::error::Tests failed with unclear AI analysis outcome (fixed=$FIXED flaky=$FLAKY blocked=$BLOCKED committed=$COMMITTED) – job fails"
           exit 1
-
-      - name: Stop docker-compose
-        if: always()
-        run: docker-compose down --remove-orphans
 
       - name: Upload test results as artifact
         if: always()
