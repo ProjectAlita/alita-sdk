@@ -1,0 +1,11 @@
+Fetches Azure DevOps epic hierarchies and provides readiness analysis.
+
+**What you get:**
+- Complete work item breakdown with completion status
+- Visual hierarchy tree showing all tasks and their states
+- Two files saved: detailed JSON data + simple Markdown tree view
+
+**How to use:**
+Simply ask: "Fetch epic 9" or "Get hierarchy for epic 42"
+
+The system automatically analyzes completion percentage, identifies blockers, and presents a formatted summary.

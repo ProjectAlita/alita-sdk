@@ -65,17 +65,26 @@ jobs:
             done
           fi
           
-          # Build JSON matrix
+          # Build JSON matrix with individual test cases
           matrix_json="["
           first=true
           for loader in $loaders; do
             # Check if loader directory exists
             if [[ -d ".alita/tests/test_loaders/$loader" ]]; then
-              if [[ "$first" == "false" ]]; then
-                matrix_json+=","
+              # Find all input JSON files for this loader
+              input_dir=".alita/tests/test_loaders/$loader/input"
+              if [[ -d "$input_dir" ]]; then
+                for input_file in "$input_dir"/*.json; do
+                  if [[ -f "$input_file" ]]; then
+                    test_name=$(basename "$input_file" .json)
+                    if [[ "$first" == "false" ]]; then
+                      matrix_json+=","
+                    fi
+                    matrix_json+="{\"loader\":\"$loader\",\"test\":\"$test_name\"}"
+                    first=false
+                  fi
+                done
               fi
-              matrix_json+="{\"loader\":\"$loader\"}"
-              first=false
             fi
           done
           matrix_json+="]"
@@ -133,50 +142,37 @@ jobs:
       - name: Run loader tests in Docker
         id: run-tests
         run: |
-          echo "::group::Running tests for ${{ matrix.data.loader }}"
+          echo "::group::Running test ${{ matrix.data.loader }}/${{ matrix.data.test }}"
           
-          # Set test command
-          export DOCKER_COMMAND="python .alita/tests/test_loaders/run_tests.py run ${{ matrix.data.loader }}"
+          # Run test directly with docker-compose run (shows output)
+          docker-compose run --rm alita-sdk \
+            python .alita/tests/test_loaders/run_tests.py run ${{ matrix.data.loader }} ${{ matrix.data.test }}
           
-          # Start container
-          docker-compose up -d
-          
-          # Wait for tests to complete
-          TIMEOUT=600
-          ELAPSED=0
-          INTERVAL=5
-          
-          while [ $ELAPSED -lt $TIMEOUT ]; do
-            STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
-            
-            if [ "$STATUS" = "exited" ]; then
-              EXIT_CODE=$(docker inspect alita-sdk-dev --format='{{.State.ExitCode}}')
-              echo "Container exited with code: $EXIT_CODE"
-              break
-            fi
-            
-            sleep $INTERVAL
-            ELAPSED=$((ELAPSED + INTERVAL))
-          done
-          
-          # Copy results
-          docker cp alita-sdk-dev:/app/.alita/tests/test_loaders/test_results/ ./test_results/ || mkdir -p ./test_results
-          
-          # Stop container
-          docker-compose down --remove-orphans
+          EXIT_CODE=$?
           
           echo "::endgroup::"
           
-          if [ "${EXIT_CODE:-1}" -ne 0 ]; then
-            echo "::error::Tests failed for ${{ matrix.data.loader }}"
-            exit ${EXIT_CODE:-1}
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Test failed: ${{ matrix.data.loader }}/${{ matrix.data.test }}"
+            exit $EXIT_CODE
           fi
+          
+          echo "✅ Test passed: ${{ matrix.data.loader }}/${{ matrix.data.test }}"
+      
+      - name: Copy test results from container
+        if: always()
+        run: |
+          # Start a temporary container to copy results
+          docker-compose up -d
+          sleep 5
+          docker cp alita-sdk-dev:/app/.alita/tests/test_loaders/test_results/ ./test_results/ || mkdir -p ./test_results
+          docker-compose down --remove-orphans
       
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.data.loader }}
+          name: test-results-${{ matrix.data.loader }}-${{ matrix.data.test }}
           path: ./test_results/
           retention-days: 30
       
@@ -189,7 +185,7 @@ jobs:
     needs: [configure-matrix, test-execution]
     if: always() && needs.configure-matrix.outputs.has-tests == 'true'
     runs-on: ubuntu-latest
-    steps:
+    steps:-${{ matrix.data.test }}-${{ matrix.data.test }}
       - name: Generate test summary
         run: |
           echo "# Loader Test Execution Summary" >> $GITHUB_STEP_SUMMARY
