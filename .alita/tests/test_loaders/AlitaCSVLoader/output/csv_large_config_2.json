@@ -1,9 +1,42 @@
 [
-    {
-        "page_content": "employee_id,first_name,last_name,email,department,position,salary,hire_date,city,country\n1001,John,Smith,john.smith@company.com,Engineering,Senior Software Engineer,95000,2020-03-15,San Francisco,USA\n1002,Emma,Johnson,emma.johnson@company.com,Marketing,Marketing Manager,75000,2019-08-22,New York,USA\n1003,Michael,Williams,michael.williams@company.com,Sales,Sales Director,88000,2018-06-10,Chicago,USA\n1004,Sarah,Brown,sarah.brown@company.com,Engineering,Software Engineer,72000,2021-01-20,Austin,USA\n1005,David,Jones,david.jones@company.com,Human Resources,HR Manager,68000,2017-11-05,Boston,USA\n1006,Lisa,Garcia,lisa.garcia@company.com,Engineering,DevOps Engineer,78000,2020-09-12,Seattle,USA\n1007,James,Martinez,james.martinez@company.com,Finance,Financial Analyst,65000,2021-07-18,Denver,USA\n1008,Maria,Rodriguez,maria.rodriguez@company.com,Sales,Account Executive,61000,2022-02-28,Los Angeles,USA\n1009,Robert,Hernandez,robert.hernandez@company.com,Engineering,Lead Developer,92000,2019-04-14,Portland,USA\n1010,Jennifer,Lopez,jennifer.lopez@company.com,Marketing,Content Strategist,58000,2021-10-01,Miami,USA\n1011,William,Gonzalez,william.gonzalez@company.com,Engineering,Backend Developer,74000,2020-12-08,Atlanta,USA\n1012,Jessica,Wilson,jessica.wilson@company.com,Customer Support,Support Manager,54000,2018-09-25,Phoenix,USA\n1013,Daniel,Anderson,daniel.anderson@company.com,Sales,Regional Sales Manager,81000,2019-03-17,Dallas,USA \n1014,Ashley,Thomas,ashley.thomas@company.com,Engineering,Frontend Developer,69000,2021-05-22,San Diego,USA\n1015,Matthew,Taylor,matthew.taylor@company.com,Product,Product Manager,86000,2020-07-30,Nashville,USA\n1016,Amanda,Moore,amanda.moore@company.com,Engineering,QA Engineer,63000,2022-01-15,Raleigh,USA\n1017,Christopher,Jackson,christopher.jackson@company.com,Marketing,Digital Marketing Specialist,56000,2021-11-20,Salt Lake City,USA\n1018,Michelle,Martin,michelle.martin@company.com,Finance,Accountant,59000,2019-12-03,Minneapolis,USA\n1019,Joshua,Lee,joshua.lee@company.com,Engineering,ML Engineer,94000,2020-04-28,Boulder,USA\n1020,Stephanie,Perez,stephanie.perez@company.com,Sales,Business Development Representative,52000,2022-03-10,Orlando,USA\n1021,Andrew,Thompson,andrew.thompson@company.com,Engineering,Security Engineer,87000,2019-06-15,San Jose,USA\n1022,Rebecca,White,rebecca.white@company.com,Operations,Operations Manager,71000,2018-10-08,Philadelphia,USA\n1023,Ryan,Harris,ryan.harris@company.com,Engineering,Data Engineer,82000,2020-08-19,Columbus,USA\n1024,Laura,Sanchez,laura.sanchez@company.com,Marketing,Social Media Manager,55000,2021-09-05,Indianapolis,USA\n1025,Brandon,Clark,brandon.clark@company.com,Engineering,Cloud Architect,98000,2019-02-12,Charlotte,USA\n1026,Nicole,Ramirez,nicole.ramirez@company.com,Customer Support,Support Specialist,48000,2022-04-20,Detroit,USA\n1027,Kevin,Lewis,kevin.lewis@company.com,Sales,Senior Account Executive,76000,2018-12-14,Jacksonville,USA\n1028,Rachel,Robinson,rachel.robinson@company.com,Product,Product Designer,73000,2020-11-27,Fort Worth,USA\n1029,Jason,Walker,jason.walker@company.com,Engineering,Infrastructure Engineer,79000,2021-03-08,San Antonio,USA\n1030,Melissa,Young,melissa.young@company.com,Human Resources,Recruiter,53000,2020-06-16,El Paso,USA\n",
-        "metadata": {
-            "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv:1",
-            "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv"
-        }
+  {
+    "page_content": "employee_id,first_name,last_name,email,department,position,salary,hire_date,city,country\n1001,John,Smith,john.smith@company.com,Engineering,Senior Software Engineer,95000,2020-03-15,San Francisco,USA\n1002,Emma,Johnson,emma.johnson@company.com,Marketing,Marketing Manager,75000,2019-08-22,New York,USA\n1003,Michael,Williams,michael.williams@company.com,Sales,Sales Director,88000,2018-06-10,Chicago,USA\n1004,Sarah,Brown,sarah.brown@company.com,Engineering,Software Engineer,72000,2021-01-20,Austin,USA\n1005,David,Jones,david.jones@company.com,Human Resources,HR Manager,68000,2017-11-05,Boston,USA\n1006,Lisa,Garcia,lisa.garcia@company.com,Engineering,DevOps Engineer,78000,2020-09-12,Seattle,USA\n1007,James,Martinez,james.martinez@company.com,Finance,Financial Analyst,65000,2021-",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv:1",
+      "chunk_id": 1,
+      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv"
     }
+  },
+  {
+    "page_content": ",Financial Analyst,65000,2021-07-18,Denver,USA\n1008,Maria,Rodriguez,maria.rodriguez@company.com,Sales,Account Executive,61000,2022-02-28,Los Angeles,USA\n1009,Robert,Hernandez,robert.hernandez@company.com,Engineering,Lead Developer,92000,2019-04-14,Portland,USA\n1010,Jennifer,Lopez,jennifer.lopez@company.com,Marketing,Content Strategist,58000,2021-10-01,Miami,USA\n1011,William,Gonzalez,william.gonzalez@company.com,Engineering,Backend Developer,74000,2020-12-08,Atlanta,USA\n1012,Jessica,Wilson,jessica.wilson@company.com,Customer Support,Support Manager,54000,2018-09-25,Phoenix,USA\n1013,Daniel,Anderson,daniel.anderson@company.com,Sales,Regional Sales Manager,81000,2019-03-17,Dallas,USA \n1014,Ashley,Thomas,ashley.thomas@company.com,Engineering,Frontend",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv:2",
+      "chunk_id": 2,
+      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv"
+    }
+  },
+  {
+    "page_content": ".thomas@company.com,Engineering,Frontend Developer,69000,2021-05-22,San Diego,USA\n1015,Matthew,Taylor,matthew.taylor@company.com,Product,Product Manager,86000,2020-07-30,Nashville,USA\n1016,Amanda,Moore,amanda.moore@company.com,Engineering,QA Engineer,63000,2022-01-15,Raleigh,USA\n1017,Christopher,Jackson,christopher.jackson@company.com,Marketing,Digital Marketing Specialist,56000,2021-11-20,Salt Lake City,USA\n1018,Michelle,Martin,michelle.martin@company.com,Finance,Accountant,59000,2019-12-03,Minneapolis,USA\n1019,Joshua,Lee,joshua.lee@company.com,Engineering,ML Engineer,94000,2020-04-28,Boulder,USA\n1020,Stephanie,Perez,stephanie.perez@company.com,Sales,Business Development Representative,52000,2022-03-10,Orlando,USA\n1021,Andrew,Thompson,andrew.thompson@company.com,",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv:3",
+      "chunk_id": 3,
+      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv"
+    }
+  },
+  {
+    "page_content": ",Thompson,andrew.thompson@company.com,Engineering,Security Engineer,87000,2019-06-15,San Jose,USA\n1022,Rebecca,White,rebecca.white@company.com,Operations,Operations Manager,71000,2018-10-08,Philadelphia,USA\n1023,Ryan,Harris,ryan.harris@company.com,Engineering,Data Engineer,82000,2020-08-19,Columbus,USA\n1024,Laura,Sanchez,laura.sanchez@company.com,Marketing,Social Media Manager,55000,2021-09-05,Indianapolis,USA\n1025,Brandon,Clark,brandon.clark@company.com,Engineering,Cloud Architect,98000,2019-02-12,Charlotte,USA\n1026,Nicole,Ramirez,nicole.ramirez@company.com,Customer Support,Support Specialist,48000,2022-04-20,Detroit,USA\n1027,Kevin,Lewis,kevin.lewis@company.com,Sales,Senior Account Executive,76000,2018-12-14,Jacksonville,USA\n1028,Rachel,Robinson,rachel.robinson@company",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv:4",
+      "chunk_id": 4,
+      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv"
+    }
+  },
+  {
+    "page_content": ",Robinson,rachel.robinson@company.com,Product,Product Designer,73000,2020-11-27,Fort Worth,USA\n1029,Jason,Walker,jason.walker@company.com,Engineering,Infrastructure Engineer,79000,2021-03-08,San Antonio,USA\n1030,Melissa,Young,melissa.young@company.com,Human Resources,Recruiter,53000,2020-06-16,El Paso,USA\n",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv:5",
+      "chunk_id": 5,
+      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_large.csv"
+    }
+  }
 ]

@@ -1,0 +1,22 @@
+[
+  {
+    "page_content": "# Markdown with Code Blocks  \nThis file tests the loader's ability to handle fenced code blocks in markdown.  \n## Python Code Example  \nHere's a simple Python function:  \n```python\ndef calculate_fibonacci(n):\n\"\"\"\nCalculate Fibonacci sequence up to n terms.\nReturns a list of Fibonacci numbers.\n\"\"\"\nif n <= 0:\nreturn []\nelif n == 1:\nreturn [0]\nelif n == 2:\nreturn [0, 1]  \nfib = [0, 1]\nfor i in range(2, n):\nfib.append(fib[i-1] + fib[i-2])  \nreturn fib  \n# Example usage\nresult = calculate_fibonacci(10)\nprint(f\"Fibonacci sequence: {result}\")\n```  \n## JavaScript Code Example  \nAnd here's a JavaScript implementation:  \n```javascript\nfunction calculateFibonacci(n) {\n/**\n* Calculate Fibonacci sequence up to n terms\n* @param {number} n - Number of terms to generate\n* @returns {Array} - Array of Fibonacci numbers\n*/\nif (n <= 0) return [];\nif (n === 1) return [0];\nif (n === 2) return [0, 1];  \nconst fib = [0, 1];\nfor (let i = 2; i < n; i++) {\nfib.push(fib[i-1] + fib[i-2]);\n}  \nreturn fib;\n}  \n// Example usage\nconst result = calculateFibonacci(10);\nconsole.log(`Fibonacci sequence: ${result}`);\n```  \n## SQL Query Example  \nDatabase query with syntax highlighting:  \n```sql\n-- Select user data with join\nSELECT \nu.user_id,\nu.username,\nu.email,\np.profile_name,\np.bio,\nCOUNT(o.order_id) as total_orders\nFROM users u\nLEFT JOIN profiles p ON u.user_id = p.user_id\nLEFT JOIN orders o ON u.user_id = o.user_id\nWHERE u.status = 'active'\nAND u.created_date >= '2024-01-01'\nGROUP BY u.user_id, u.username, u.email, p.profile_name, p.bio\nHAVING COUNT(o.order_id) > 0\nORDER BY total_orders DESC\nLIMIT 100;\n```  \n## Shell Script Example  \nBash script for automation:  \n```bash\n#!/bin/bash  \n# Deploy application script\nset -e  \nAPP_NAME=\"my-application\"\nVERSION=\"1.0.0\"\nDEPLOY_DIR=\"/opt/app",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaMarkdownLoader/files/markdown_code_blocks.md",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "headers": "",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": "0.0\"\nDEPLOY_DIR=\"/opt/applications/${APP_NAME}\"  \necho \"Starting deployment of ${APP_NAME} v${VERSION}\"  \n# Create backup\nif [ -d \"${DEPLOY_DIR}\" ]; then\necho \"Creating backup...\"\ntar -czf \"${DEPLOY_DIR}_backup_$(date +%Y%m%d_%H%M%S).tar.gz\" \"${DEPLOY_DIR}\"\nfi  \n# Deploy new version\necho \"Deploying new version...\"\nmkdir -p \"${DEPLOY_DIR}\"\ncp -r ./build/* \"${DEPLOY_DIR}/\"  \n# Restart service\necho \"Restarting service...\"\nsystemctl restart \"${APP_NAME}\"  \necho \"Deployment completed successfully! 🚀\"\n```  \n## Inline Code  \nYou can also use `inline code` like this: `print(\"Hello, World!\")` or `npm install package-name`.  \n## Mixed Content with Code  \nWhen working with APIs, you might use code like this:  \n```python\nimport requests  \ndef fetch_user_data(user_id):\nurl = f\"https://api.example.com/users/{user_id}\"\nheaders = {\"Authorization\": f\"Bearer {API_TOKEN}\"}  \nresponse = requests.get(url, headers=headers)\nresponse.raise_for_status()  \nreturn response.json()\n```  \nAnd then process the data:  \n```python\nuser = fetch_user_data(12345)\nprint(f\"User: {user['name']}, Email: {user['email']}\")\n```  \n## Code Block with Unicode  \n```python\n# Unicode support test\nmessages = {\n'greeting': 'Hello 世界 🌍',\n'emoji': '✨ 🚀 💻 📊',\n'special': 'Café résumé naïve'\n}  \nfor key, value in messages.items():\nprint(f\"{key}: {value}\")\n```  \n## Conclusion  \nThis file demonstrates various code block types that the AlitaMarkdownLoader should preserve in the page_content.\n",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaMarkdownLoader/files/markdown_code_blocks.md",
+      "chunk_id": 2,
+      "chunk_type": "document",
+      "headers": "",
+      "method_name": "markdown"
+    }
+  }
+]

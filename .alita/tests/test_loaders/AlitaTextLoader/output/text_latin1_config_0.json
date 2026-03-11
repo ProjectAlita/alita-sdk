@@ -1,0 +1,12 @@
+[
+  {
+    "page_content": "Testing Latin-1 (ISO-8859-1) encoding auto-detection.\nThis file contains characters specific to Latin-1 encoding.  \nExtended ASCII characters (128-255):\nCurrency: ¢ £ ¤ ¥ §\nAccented letters: À Á Â Ã Ä Å Æ Ç È É Ê Ë\nLowercase: à á â ã ä å æ ç è é ê ë\nGerman: Ä Ö Ü ä ö ü ß\nFrench: É è ê ë à â î ô û ù ç\nSpanish: ñ Ñ á é í ó ú ü\nPortuguese: ã õ ç\nNordic: Å å Ø ø Æ æ  \nSpecial symbols: ª º ¹ ² ³ ¼ ½ ¾ ±\nCopyright and trademark: © ® ª º\nMath and logic: ¬ ± × ÷\nPunctuation: « » ¡ ¿  \nMixed text with accents:\nCafé résumé naïve façade élève\nÀÁÂÃÄÅÆÇÈÉÊË\nàáâãäåæçèéêë  \nThis file should be loaded without UnicodeDecodeError.\nThe loader should auto-detect Latin-1 encoding.\n",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaTextLoader/files/text_latin1.txt",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "headers": "",
+      "method_name": "text"
+    }
+  }
+]

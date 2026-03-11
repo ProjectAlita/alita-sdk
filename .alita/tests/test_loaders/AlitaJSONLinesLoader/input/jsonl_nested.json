@@ -1,0 +1,8 @@
+{
+  "file_path": "../files/jsonl_nested.jsonl",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 1024}
+  ]
+}

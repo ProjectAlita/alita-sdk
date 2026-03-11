@@ -1,0 +1,23 @@
+[
+  {
+    "page_content": "{\"id\": 1, \"name\": \"Alice\", \"role\": \"developer\"}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLinesLoader/files/jsonl_simple.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"id\": 2, \"name\": \"Bob\", \"role\": \"designer\"}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLinesLoader/files/jsonl_simple.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"id\": 3, \"name\": \"Charlie\", \"role\": \"manager\"}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLinesLoader/files/jsonl_simple.jsonl",
+      "chunk_id": 1
+    }
+  }
+]

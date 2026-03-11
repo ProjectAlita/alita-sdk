@@ -170,22 +170,22 @@ nodes:
     output:
       - trimmed_result
     structured_output: true
-    transition: cleanup_branch
+  #   transition: cleanup_branch
 
-  - id: cleanup_branch
-    type: toolkit
-    continue_on_error: true
-    input:
-      - test_branch_name
-    input_mapping:
-      branch_name:
-        type: variable
-        value: test_branch_name
-    output:
-      - cleanup_branch_result
-    structured_output: true
-    tool: delete_branch
-    toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
+  # - id: cleanup_branch
+  #   type: toolkit
+  #   continue_on_error: true
+  #   input:
+  #     - test_branch_name
+  #   input_mapping:
+  #     branch_name:
+  #       type: variable
+  #       value: test_branch_name
+  #   output:
+  #     - cleanup_branch_result
+  #   structured_output: true
+  #   tool: delete_branch
+  #   toolkit_name: ${BITBUCKET_TOOLKIT_NAME}
     transition: validate_results
 
   - id: validate_results

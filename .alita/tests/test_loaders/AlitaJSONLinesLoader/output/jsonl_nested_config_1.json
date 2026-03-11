@@ -1,0 +1,23 @@
+[
+  {
+    "page_content": "{\"user\": {\"id\": 1, \"profile\": {\"name\": \"Alice\", \"email\": \"alice@example.com\", \"preferences\": {\"theme\": \"dark\", \"notifications\": true}}}}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLinesLoader/files/jsonl_nested.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"user\": {\"id\": 2, \"profile\": {\"name\": \"Bob\", \"email\": \"bob@example.com\", \"preferences\": {\"theme\": \"light\", \"notifications\": false}}}}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLinesLoader/files/jsonl_nested.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"user\": {\"id\": 3, \"profile\": {\"name\": \"Charlie\", \"email\": \"charlie@example.com\", \"preferences\": {\"theme\": \"auto\", \"notifications\": true}}}}",
+    "metadata": {
+      "source": ".alita/tests/test_loaders/AlitaJSONLinesLoader/files/jsonl_nested.jsonl",
+      "chunk_id": 1
+    }
+  }
+]

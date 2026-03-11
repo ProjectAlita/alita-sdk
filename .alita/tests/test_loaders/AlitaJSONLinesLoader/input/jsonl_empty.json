@@ -1,0 +1,7 @@
+{
+  "file_path": "../files/jsonl_empty.jsonl",
+  "configs": [
+    {},
+    {"max_tokens": 512}
+  ]
+}

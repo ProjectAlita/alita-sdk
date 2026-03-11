@@ -15,6 +15,7 @@ Usage:
   python run_tests.py tokenize -f file.txt                      # tokenize file content
   python run_tests.py tokenize -f file.txt -m 50                # chunk file with 50 tokens/chunk, 10 token overlap
   python run_tests.py tokenize -f file.txt -m 100 -o 15         # chunk with 100 tokens/chunk, 15 token overlap
+  python run_tests.py tokenize -f file.txt -m 50 -md            # markdown mode: replace '\n\n' with '  \n' and strip leading whitespace
   python run_tests.py tokenize -f file.txt -m 50 -out chunks.json  # save chunks as documents to file
 """
 
@@ -48,7 +49,7 @@ DATA_DIR = SCRIPT_DIR
 # ---------------------------------------------------------------------------
 
 def cmd_run(args):
-    from loader_test_runner import (
+    from scripts.loader_test_runner import (
         LoaderTestInput,
         format_results_json,
         format_results_text,
@@ -162,6 +163,13 @@ def cmd_tokenize(args):
     else:
         text = args.text
     
+    # Apply markdown mode if requested: strip leading whitespace from each line first,
+    # then replace double newlines with markdown line breaks (simulates markdown_chunker behavior)
+    if args.md:
+        lines = text.split('\n')
+        text = '\n'.join(line.lstrip() for line in lines)
+        text = text.replace('\n\n', '  \n')
+    
     # If no chunking params, return token strings
     if args.max_tokens is None:
         token_ids = encoding.encode(text)
@@ -265,6 +273,7 @@ def build_parser():
     group.add_argument("-f", "--file", type=str, help="File path to read and tokenize")
     p_tokenize.add_argument("-m", "--max-tokens", type=int, default=None, help="Max tokens per chunk (enables chunking mode)")
     p_tokenize.add_argument("-o", "--overlap", type=int, default=10, help="Token overlap between chunks (default: 10)")
+    p_tokenize.add_argument("-md", "--md", action="store_true", help="Markdown mode: replace '\\n\\n' with '  \\n' and strip leading whitespace from lines")
     p_tokenize.add_argument("-out", "--out", type=str, default=None, help="Output file path to save chunks as documents with page_content and empty metadata")
     p_tokenize.set_defaults(func=cmd_tokenize)
 

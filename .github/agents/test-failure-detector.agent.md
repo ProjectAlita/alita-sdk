@@ -2,7 +2,7 @@
 name: Test Failure Detector
 description: Diagnose test failures and perform root cause analysis
 model: Claude Sonnet 4.5 (copilot)
-tools: ['execute/runInTerminal', 'read/terminalSelection', 'read/terminalLastCommand', 'read/getNotebookSummary', 'read/problems', 'read/readFile', 'atlassian/atlassian-mcp-server/search', 'sequentialthinking/sequentialthinking', 'search/changes', 'search/codebase', 'search/fileSearch', 'search/listDirectory', 'search/searchResults', 'search/textSearch', 'search/usages', 'digitarald.agent-memory/memory', 'todo']
+tools: [vscode/getProjectSetupInfo, vscode/installExtension, vscode/memory, vscode/newWorkspace, vscode/runCommand, vscode/vscodeAPI, vscode/extensions, vscode/askQuestions, execute/runNotebookCell, execute/testFailure, execute/getTerminalOutput, execute/awaitTerminal, execute/killTerminal, execute/createAndRunTask, execute/runInTerminal, execute/runTests, read/getNotebookSummary, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent/runSubagent, edit/createDirectory, edit/createFile, edit/createJupyterNotebook, edit/editFiles, edit/editNotebook, edit/rename, search/changes, search/codebase, search/fileSearch, search/listDirectory, search/searchResults, search/textSearch, search/usages, web/fetch, web/githubRepo, browser/openBrowserPage, todo]
 handoffs:
   - label: Get Fix Proposals
     agent: Test Fixer
