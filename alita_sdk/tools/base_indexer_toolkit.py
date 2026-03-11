@@ -202,16 +202,18 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             results_count = result["count"]
             failed_count = result.get("failed_count", 0)
             succeeded_count = results_count - failed_count
+            errors = result.get("errors", [])
+            issues_detail = ("\nIssues: " + "; ".join(errors)) if errors else ""
 
             if failed_count > 0 and succeeded_count > 0:
                 final_state = IndexerKeywords.INDEX_META_PARTLY_OK.value
                 status = "partly_ok"
                 message = (f"Successfully indexed {succeeded_count} documents. "
-                           f"Failed to index {failed_count} documents.")
+                           f"Failed to index {failed_count} documents.{issues_detail}")
             elif failed_count > 0 >= succeeded_count:
                 final_state = IndexerKeywords.INDEX_META_FAILED.value
                 status = "error"
-                message = f"Failed to index all {failed_count} documents."
+                message = f"Failed to index all {failed_count} documents.{issues_detail}"
             elif succeeded_count > 0:
                 final_state = IndexerKeywords.INDEX_META_COMPLETED.value
                 status = "ok"
@@ -254,11 +256,14 @@ class BaseIndexerToolkit(VectorStoreWrapperBase):
             try:
                 add_documents(vectorstore=self.vectorstore, documents=chunk)
                 self._log_tool_event(f"{len(chunk)} documents have been indexed. Continuing...")
-            except Exception:
+            except Exception as exc:
                 from traceback import format_exc
                 err = format_exc()
                 logger.error(f"Failed to add {len(chunk)} documents to vectorstore: {err}")
                 result["failed_count"] = result.get("failed_count", 0) + len(chunk)
+                error_msg = str(exc)
+                if error_msg not in result.setdefault("errors", []):
+                    result["errors"].append(error_msg)
 
         for base_doc in base_documents:
             base_doc_counter += 1
