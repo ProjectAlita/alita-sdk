@@ -3,6 +3,7 @@ import string
 from gensim.parsing import remove_stopwords
 
 from ..tools.utils import bytes_to_base64
+from ..utils import extract_text_from_completion
 from langchain_core.messages import HumanMessage
 
 
@@ -48,7 +49,7 @@ def perform_llm_prediction_for_image_bytes(image_bytes: bytes, llm, prompt: str)
             ]
         )
     ])
-    return result.content
+    return extract_text_from_completion(result)
 
 def create_temp_file(file_content: bytes):
     import tempfile
