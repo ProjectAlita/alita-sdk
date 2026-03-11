@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import io
+import logging
 import os
 from typing import Iterator
 import pandas as pd
@@ -22,6 +23,8 @@ from xlrd import open_workbook
 from langchain_core.documents import Document
 from .AlitaTableLoader import AlitaTableLoader
 from alita_sdk.runtime.langchain.constants import LOADER_MAX_TOKENS_DEFAULT
+
+logger = logging.getLogger(__name__)
 
 cell_delimiter = " | "
 
@@ -59,36 +62,59 @@ class AlitaExcelLoader(AlitaTableLoader):
             self.add_header_to_chunks = False
 
     def get_content(self):
-        try:
-            # Determine file extension
-            file_extension = os.path.splitext(self.file_name)[-1].lower()
+        """Reads Excel file and returns dict of {sheet_name: list_of_chunks}."""
+        # Determine file extension
+        file_extension = os.path.splitext(self.file_name)[-1].lower()
 
-            if file_extension == '.xlsx':
-                # Use openpyxl for .xlsx files
-                return self._read_xlsx()
-            elif file_extension == '.xls':
-                # Use xlrd for .xls files
-                return self._read_xls()
-            else:
-                raise ValueError(f"Unsupported file format: {file_extension}")
+        if file_extension == '.xlsx':
+            return self._read_xlsx()
+        elif file_extension == '.xls':
+            return self._read_xls()
+        else:
+            raise ValueError(f"Unsupported file format: {file_extension}")
+
+    def _compute_formula_values(self, file_path):
+        """Uses formulas library to evaluate formula cells that openpyxl cannot resolve."""
+        try:
+            import formulas
+            xl_model = formulas.ExcelModel().loads(file_path).finish()
+            solution = xl_model.calculate()
+            books = xl_model.write(solution=solution)
+            # books: {'FILENAME.XLSX': {Book: <openpyxl.Workbook>}}
+            computed = {}
+            for book_data in books.values():
+                for wb in book_data.values():
+                    if not hasattr(wb, 'sheetnames'):
+                        continue
+                    for sheet_name in wb.sheetnames:
+                        ws = wb[sheet_name]
+                        for row in ws.iter_rows():
+                            for cell in row:
+                                if cell.value is not None:
+                                    computed[(sheet_name, cell.coordinate)] = cell.value
+            return computed
         except Exception as e:
-            return f"Error reading Excel file: {e}"
+            logger.debug("Formula evaluation skipped: %s", e)
+            return {}
 
     def _read_xlsx(self):
-        """
-        Reads .xlsx files using openpyxl.
-        """
-        workbook = load_workbook(self.file_path, data_only=True)  # `data_only=True` ensures we get cell values, not formulas
+        """Reads .xlsx files using openpyxl, with formula evaluation fallback."""
+        workbook = load_workbook(self.file_path, data_only=True)
+
+        # Compute formula values for cells where openpyxl returns None
+        computed_values = {}
+        if isinstance(self.file_path, str):
+            computed_values = self._compute_formula_values(self.file_path)
+
         sheets = workbook.sheetnames
         if self.sheet_name:
             if self.sheet_name in sheets:
-                sheet_content = self.parse_sheet(workbook[self.sheet_name])
+                sheet_content = self.parse_sheet(workbook[self.sheet_name], computed_values)
             else:
                 sheet_content = [f"Sheet '{self.sheet_name}' does not exist in the workbook."]
             return {self.sheet_name: sheet_content}
         else:
-            # Dictionary comprehension for all sheets
-            return {name: self.parse_sheet(workbook[name]) for name in sheets}
+            return {name: self.parse_sheet(workbook[name], computed_values) for name in sheets}
 
     def _read_xls(self):
         """
@@ -106,27 +132,27 @@ class AlitaExcelLoader(AlitaTableLoader):
             # Dictionary comprehension for all sheets
             return {name: self.parse_sheet_xls(workbook.sheet_by_name(name)) for name in sheets}
 
-    def parse_sheet(self, sheet):
-        """
-        Parses a single .xlsx sheet, extracting text and hyperlinks, and formats them.
-        """
+    def parse_sheet(self, sheet, computed_values=None):
+        """Parses a .xlsx sheet, extracting text/hyperlinks with formula evaluation fallback."""
         sheet_content = []
 
         for row in sheet.iter_rows():
             row_content = []
             for cell in row:
+                value = cell.value
+                # Fall back to computed formula value when openpyxl returns None
+                # formulas library stores sheet names uppercased, so normalize for lookup
+                if value is None and computed_values:
+                    value = computed_values.get((sheet.title.upper(), cell.coordinate))
+
                 if cell.hyperlink:
-                    # If the cell has a hyperlink, format it as Markdown
                     hyperlink = cell.hyperlink.target
-                    cell_value = cell.value or ''  # Use cell value or empty string
+                    cell_value = value or ''
                     row_content.append(f"[{cell_value}]({hyperlink})")
                 else:
-                    # If no hyperlink, use the cell value (computed value if formula)
-                    row_content.append(str(cell.value) if cell.value is not None else "")
-            # Join the row content into a single line using `|` as the delimiter
+                    row_content.append(str(value) if value is not None else "")
             sheet_content.append(cell_delimiter.join(row_content))
 
-        # Format the sheet content based on the return type
         return self._format_sheet_content(sheet_content)
 
     def parse_sheet_xls(self, sheet):
@@ -229,16 +255,15 @@ class AlitaExcelLoader(AlitaTableLoader):
         return chunks
 
     def load(self) -> list:
+        """Loads Excel file into a list of Documents, one per chunk per sheet."""
         docs = []
         content_per_sheet = self.get_content()
-        # content_per_sheet is a dict of sheet_name: list of chunk strings
         for sheet_name, content_chunks in content_per_sheet.items():
             metadata = {
                 "source": f'{self.file_path}:{sheet_name}',
                 "sheet_name": sheet_name,
                 "file_type": "excel",
             }
-            # Each chunk is a separate Document
             for chunk in content_chunks:
                 docs.append(Document(page_content=chunk, metadata=metadata))
         return docs
