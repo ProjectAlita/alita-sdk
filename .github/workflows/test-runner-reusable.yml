@@ -128,15 +128,15 @@ jobs:
           # Determine which script to use based on tests_to_run
           if [ "$TESTS_TO_RUN" = "all" ] || [ -z "$TESTS_TO_RUN" ]; then
             # Run all tests in suite using run_all_suites.sh
-            TEST_COMMAND="/app/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
+            TEST_COMMAND="$GITHUB_WORKSPACE/.alita/tests/test_pipelines/run_all_suites.sh $ENV_FLAG $PARALLEL_FLAG -v suites/${{ inputs.test_cases_dir }}"
           else
             # Run specific tests using run_test.sh
             # Convert comma-separated list to space-separated for run_test.sh
             TEST_PATTERNS=$(echo "$TESTS_TO_RUN" | tr ',' ' ')
             if [ "${{ inputs.environment }}" = "local" ]; then
-              TEST_COMMAND="/app/.alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
+              TEST_COMMAND="$GITHUB_WORKSPACE/.alita/tests/test_pipelines/run_test.sh --local --setup --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
             else
-              TEST_COMMAND="/app/.alita/tests/test_pipelines/run_test.sh --all --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
+              TEST_COMMAND="$GITHUB_WORKSPACE/.alita/tests/test_pipelines/run_test.sh --all --timeout 180 -v suites/${{ inputs.test_cases_dir }} $TEST_PATTERNS"
             fi
           fi
           
@@ -284,7 +284,7 @@ jobs:
           
           formated_branch=$(format_branch "${{ github.head_ref || github.ref }}")
 
-          git config --global --add safe.directory /app
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           alita agent run .alita/agents/test-fixer.agent.md --dir . "Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${formated_branch}" || echo "AI analysis completed with warnings"
 
       - name: Copy AI analysis outputs
