@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from datetime import datetime, timezone
 from dateutil import parser
 
+from langchain_core.tools import ToolException
 from pydantic import BaseModel, Field, model_validator
 
 # Remove the import of GraphQLClient
@@ -106,11 +107,8 @@ class GraphQLClientWrapper(BaseModel):
         except Exception as e:
             return {'error': True, 'details': str(e)}
     
-    def get_project(self, owner: str, repo_name: str, project_title: str) -> Union[Dict[str, Any], str]:
-        """
-        Retrieves project details from a GitHub repository using GraphQL.
-
-        This method formulates a GraphQL query to fetch project details, labels, and assignable users based on the owner and repository name provided.
+    def get_project(self, owner: str, repo_name: str, project_title: str) -> Dict[str, Any]:
+        """Retrieves project details from a GitHub repository using GraphQL.
 
         Args:
             owner (str): Repository owner.
@@ -118,19 +116,21 @@ class GraphQLClientWrapper(BaseModel):
             project_title (str): Project title to search within the repository.
 
         Returns:
-            Union[Dict[str, Any], str]: Returns project details or an error message.
+            Dict[str, Any]: Project details including project data, ID, repository ID, labels, and assignable users.
 
+        Raises:
+            ToolException: If the GraphQL query fails, repository is not found, or project title doesn't match.
         """
         query_template = GraphQLTemplates.QUERY_GET_PROJECT_INFO_TEMPLATE.value
         query = query_template.safe_substitute(owner=owner, repo_name=repo_name)
         result = self._run_graphql_query(query)
         
         if result['error']:
-            return f"Error occurred: {result['details']}"
+            raise ToolException(self._format_project_error(f"Error occurred: {result['details']}"))
         
         repository = result.get('data', {}).get('repository')
         if not repository:
-            return "No repository data found."
+            raise ToolException(self._format_project_error("No repository data found."))
         
         projects = repository.get('projectsV2', {}).get('nodes', [])
         labels = repository.get('labels', {}).get('nodes', [])
@@ -138,7 +138,11 @@ class GraphQLClientWrapper(BaseModel):
         
         project = next((prj for prj in projects if prj.get('title').lower() == project_title.lower()), None)
         if not project:
-            return f"Project '{project_title}' not found."
+            available = [p.get('title') for p in projects if p.get('title')]
+            raise ToolException(
+                f"Project '{project_title}' not found. "
+                f"Available projects: {available}"
+            )
         
         return {
             "project": project,
@@ -148,30 +152,29 @@ class GraphQLClientWrapper(BaseModel):
             "assignableUsers": assignable_users
         }
     
-    def get_issue_repo(self, owner: str, repo_name: str) -> Union[Dict[str, Any], str]:
-        """
-        Retrieves issue's repository details from a GitHub using GraphQL.
-
-        This method formulates a GraphQL query to fetch repository details, labels, and assignable users based on the owner and repository name provided.
+    def get_issue_repo(self, owner: str, repo_name: str) -> Dict[str, Any]:
+        """Retrieves issue's repository details from GitHub using GraphQL.
 
         Args:
             owner (str): Repository owner.
             repo_name (str): Repository name.
 
         Returns:
-            Union[Dict[str, Any], str]: Returns repository details or an error message.
+            Dict[str, Any]: Repository details including ID, labels, and assignable users.
 
+        Raises:
+            ToolException: If the GraphQL query fails or repository is not found.
         """
         query_template = GraphQLTemplates.QUERY_GET_REPO_INFO_TEMPLATE.value
         query = query_template.safe_substitute(owner=owner, repo_name=repo_name)
         result = self._run_graphql_query(query)
         
         if result['error']:
-            return f"Error occurred: {result['details']}"
+            raise ToolException(self._format_repo_error(f"Error occurred: {result['details']}"))
         
         repository = result.get('data', {}).get('repository')
         if not repository:
-            return "No repository data found."
+            raise ToolException(self._format_repo_error("No repository data found."))
         
         labels = repository.get('labels', {}).get('nodes', [])
         assignable_users = repository.get('assignableUsers', {}).get('nodes', [])
@@ -1405,8 +1408,7 @@ class GraphQLClientWrapper(BaseModel):
     def create_issue_on_project(self, board_repo: str, project_title: str, title: str, 
                                body: str, fields: Optional[Dict[str, str]] = None,
                                issue_repo: Optional[str] = None) -> str:
-        """
-        Creates an issue within a specified project.
+        """Creates an issue within a specified project.
 
         Args:
             board_repo: The organization and repository for the board (project).
@@ -1418,34 +1420,22 @@ class GraphQLClientWrapper(BaseModel):
 
         Returns:
             str: A message indicating the outcome of the operation.
+
+        Raises:
+            ToolException: If any step of issue creation fails.
         """
-        try:
-            owner_name, repo_name = self._parse_repo(board_repo)
-        except ValueError as e:
-            return str(e)
+        owner_name, repo_name = self._parse_repo(board_repo)
 
-        # Get project data with type safety check
+        # get_project() raises ToolException on error
         result = self.get_project(owner=owner_name, repo_name=repo_name, project_title=project_title)
-
-        # Type check: get_project() returns str on error, dict on success
-        if isinstance(result, str):
-            return self._format_project_error(result)
 
         project = result.get("project")
         project_id = result.get("projectId")
 
         if issue_repo:
-            try:
-                issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
-            except ValueError as e:
-                return str(e)
-
+            issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
+            # get_issue_repo() raises ToolException on error
             issue_repo_result = self.get_issue_repo(owner=issue_owner_name, repo_name=issue_repo_name)
-
-            # Type check: get_issue_repo() returns str on error, dict on success
-            if isinstance(issue_repo_result, str):
-                return self._format_repo_error(issue_repo_result)
-
             repository_id, labels, assignable_users = self._get_repo_extra_info(issue_repo_result)
         else:
             repository_id, labels, assignable_users = self._get_repo_extra_info(result)
@@ -1459,7 +1449,7 @@ class GraphQLClientWrapper(BaseModel):
                     project, fields, labels, assignable_users
                 )
             except Exception as e:
-                return f"Project fields are not returned. Error: {str(e)}"
+                raise ToolException(f"Project fields are not returned. Error: {str(e)}")
 
         try:
             draft_issue_item_id = self.create_draft_issue(
@@ -1468,7 +1458,7 @@ class GraphQLClientWrapper(BaseModel):
                 body=body,
             )
         except Exception as e:
-            return f"Draft Issue Not Created. Error: {str(e)}"
+            raise ToolException(f"Draft Issue Not Created. Error: {str(e)}")
 
         try:
             issue_number, item_id, issue_item_id = self.convert_draft_issue(
@@ -1476,7 +1466,7 @@ class GraphQLClientWrapper(BaseModel):
                 draft_issue_id=draft_issue_item_id,
             )
         except Exception as e:
-            return f"Convert Issue Failed. Error: {str(e)}"
+            raise ToolException(f"Convert Issue Failed. Error: {str(e)}")
 
         if fields:
             try:
@@ -1487,7 +1477,7 @@ class GraphQLClientWrapper(BaseModel):
                     fields=fields_to_update
                 )
             except Exception as e:
-                return f"Issue fields are not updated. Error: {str(e)}"
+                raise ToolException(f"Issue fields are not updated. Error: {str(e)}")
 
         base_message = f"The issue with number '{issue_number}' has been created."
         fields_message = ""
@@ -1499,12 +1489,8 @@ class GraphQLClientWrapper(BaseModel):
         return f"{base_message}\n{fields_message}"
     
     def _find_issue_in_project(self, owner: str, repo_name: str, project_number: int,
-                               issue_number: str) -> Union[Dict[str, Any], str]:
-        """
-        Finds a specific issue in a project by paginating through all project items.
-
-        This method handles projects with more than 100 issues by paginating through
-        all items until the target issue is found. It stops as soon as the issue is located.
+                               issue_number: str) -> Dict[str, Any]:
+        """Finds a specific issue in a project by paginating through all project items.
 
         Args:
             owner: Repository owner.
@@ -1513,7 +1499,10 @@ class GraphQLClientWrapper(BaseModel):
             issue_number: The issue number to find.
 
         Returns:
-            Dict with issue data (item_id, issue_item_id, item_labels, item_assignees) or error string.
+            Dict with issue data (item_id, issue_item_id, item_labels, item_assignees).
+
+        Raises:
+            ToolException: If a GraphQL error occurs or the issue is not found.
         """
         has_next_page = True
         after_cursor = None
@@ -1532,15 +1521,15 @@ class GraphQLClientWrapper(BaseModel):
             )
 
             if page_result['error']:
-                return f"Error occurred while searching for issue: {page_result['details']}"
+                raise ToolException(f"Error occurred while searching for issue: {page_result['details']}")
 
             page_repository = page_result.get('data', {}).get('repository')
             if not page_repository:
-                return "No repository data found during pagination."
+                raise ToolException("No repository data found during pagination.")
 
             page_project = page_repository.get('projectV2')
             if not page_project:
-                return "No project data found during pagination."
+                raise ToolException("No project data found during pagination.")
 
             items_connection = page_project.get('items', {})
             items = items_connection.get('nodes', [])
@@ -1567,13 +1556,12 @@ class GraphQLClientWrapper(BaseModel):
                 break
 
         # Issue not found after checking all pages
-        return f"Issue number {issue_number} not found in project."
+        raise ToolException(f"Issue number {issue_number} not found in project.")
 
     def update_issue_on_project(self, board_repo: str, issue_number: str, project_title: str,
                                title: str, body: str, fields: Optional[Dict[str, str]] = None,
                                issue_repo: Optional[str] = None) -> str:
-        """
-        Updates an existing issue within a project.
+        """Updates an existing issue within a project.
 
         Args:
             board_repo: The organization and repository for the board (project).
@@ -1585,35 +1573,23 @@ class GraphQLClientWrapper(BaseModel):
             issue_repo: The issue's organization and repository to link issue on the board.
 
         Returns:
-            str: Summary of the update operation and any changes applied or errors encountered.
+            str: Summary of the update operation and any changes applied.
+
+        Raises:
+            ToolException: If any step of the update operation fails.
         """
-        try:
-            owner_name, repo_name = self._parse_repo(board_repo)
-        except Exception as e:
-            return str(e)
+        owner_name, repo_name = self._parse_repo(board_repo)
 
-        # Get project data with type safety check
+        # get_project() raises ToolException on error
         result = self.get_project(owner=owner_name, repo_name=repo_name, project_title=project_title)
-
-        # Type check: get_project() returns str on error, dict on success
-        if isinstance(result, str):
-            return self._format_project_error(result)
 
         project = result.get("project")
         project_id = result.get("projectId")
 
         if issue_repo:
-            try:
-                issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
-            except ValueError as e:
-                return str(e)
-
+            issue_owner_name, issue_repo_name = self._parse_repo(issue_repo)
+            # get_issue_repo() raises ToolException on error
             issue_repo_result = self.get_issue_repo(owner=issue_owner_name, repo_name=issue_repo_name)
-
-            # Type check: get_issue_repo() returns str on error, dict on success
-            if isinstance(issue_repo_result, str):
-                return self._format_repo_error(issue_repo_result)
-
             repository_id, labels, assignable_users = self._get_repo_extra_info(issue_repo_result)
         else:
             repository_id, labels, assignable_users = self._get_repo_extra_info(result)
@@ -1628,7 +1604,7 @@ class GraphQLClientWrapper(BaseModel):
                     project, fields, labels, assignable_users
                 )
             except Exception as e:
-                return f"Project fields are not returned. Error: {str(e)}"
+                raise ToolException(f"Project fields are not returned. Error: {str(e)}")
 
         # Try to find issue in the first 100 items (from get_project)
         issue_item_id = None
@@ -1650,17 +1626,15 @@ class GraphQLClientWrapper(BaseModel):
         if not issue_item_id:
             project_number = project.get('number')
             if not project_number:
-                return "Project number not available for pagination search."
+                raise ToolException("Project number not available for pagination search.")
 
+            # _find_issue_in_project() raises ToolException on error
             find_result = self._find_issue_in_project(
                 owner=owner_name,
                 repo_name=repo_name,
                 project_number=project_number,
                 issue_number=issue_number
             )
-
-            if isinstance(find_result, str):
-                return find_result  # Error message
 
             # Extract the found issue data
             item_id = find_result['item_id']
@@ -1675,7 +1649,7 @@ class GraphQLClientWrapper(BaseModel):
                 body=body
             )
         except Exception as e:
-            return f"Issue title and body have not updated. Error: {str(e)}"
+            raise ToolException(f"Issue title and body have not updated. Error: {str(e)}")
 
         if fields_to_update:
             try:
@@ -1691,7 +1665,7 @@ class GraphQLClientWrapper(BaseModel):
                     item_assignee_ids=item_assignee_ids
                 )
             except Exception as e:
-                return f"Issue fields are not updated. Error: {str(e)}"
+                raise ToolException(f"Issue fields are not updated. Error: {str(e)}")
 
         base_message = f"The issue with number '{issue_number}' has been updated."
         fields_message = ""
