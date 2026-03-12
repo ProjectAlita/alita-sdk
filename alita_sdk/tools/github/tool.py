@@ -15,6 +15,7 @@ class GitHubAction(BaseTool):
     mode: str = ""
     description: str = ""
     args_schema: Optional[Type[BaseModel]] = None
+    handle_tool_error: bool = True
     
     @field_validator('name', mode='before')
     @classmethod
