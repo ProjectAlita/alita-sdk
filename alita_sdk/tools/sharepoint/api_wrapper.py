@@ -83,8 +83,16 @@ ReadDocument = create_model(
 UploadFile = create_model(
     "UploadFile",
     folder_path=(str, Field(
-        description="Server-relative folder path for upload "
-                    "(e.g., '/sites/MySite/Shared Documents/folder')")),
+        description=(
+            "Server-relative folder path for upload, including the document-library name. "
+            "Accepted formats:\n"
+            "  - Default library with subfolder: '/sites/MySite/Shared Documents/folder'\n"
+            "  - Non-default library with subfolder: '/sites/MySite/Alita_test/folder'\n"
+            "  - Non-default library root: '/sites/MySite/Alita_test'\n"
+            "The document-library segment (e.g. 'Shared Documents', 'Alita_test') is "
+            "resolved automatically to the correct drive."
+        )
+    )),
     filepath=(Optional[str], Field(
         description="File path in format /{bucket}/{filename} from artifact storage. "
                     "Either filepath or filedata must be provided.", default=None)),

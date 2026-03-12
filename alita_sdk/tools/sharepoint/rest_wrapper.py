@@ -362,8 +362,12 @@ class SharepointRestWrapper(BaseSharepointWrapper):
         PUT, larger files use chunked upload sessions (5 MB chunks).
 
         Args:
-            folder_path: Server-relative folder path
-                         (e.g., '/sites/MySite/Shared Documents/folder')
+            folder_path: Server-relative folder path including the document-library name.
+                         Accepted formats:
+
+                         * Default library:     ``'/sites/MySite/Shared Documents/folder'``
+                         * Non-default library: ``'/sites/MySite/Alita_test/folder'``
+                         * Library root:        ``'/sites/MySite/Alita_test'``
             filepath: File path in format /{bucket}/{filename} from artifact storage
                       (mutually exclusive with filedata)
             filedata: String content to upload as a file
