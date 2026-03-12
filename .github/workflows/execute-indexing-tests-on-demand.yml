@@ -300,19 +300,49 @@ jobs:
           junit_path="tests/reports/test-results.xml"
           extra_args="${{ inputs.extra_pytest_args }}"
 
+            echo "ReportPortal enabled: ${{ inputs.reportportal }}"
+            echo "RP_LAUNCH: ${RP_LAUNCH:-<unset>}"
+            if [[ -n "${RP_PROJECT:-}" ]]; then
+              echo "RP_PROJECT: configured"
+            else
+              echo "RP_PROJECT: missing"
+            fi
+            if [[ -n "${RP_API_KEY:-}" ]]; then
+              echo "RP_API_KEY: configured"
+            else
+              echo "RP_API_KEY: missing"
+            fi
+
+            cmd=(python -m pytest -q)
+
           if [[ "$mode" == "mark" ]]; then
             mark_expr="${{ matrix.data.mark_expr }}"
-            # shellcheck disable=SC2086
-            python -m pytest -q tests/runtime/langchain/document_loaders/ -m "$mark_expr" $reportportal_flag --junit-xml="$junit_path" $extra_args
+              cmd+=(tests/runtime/langchain/document_loaders/ -m "$mark_expr")
           elif [[ "$mode" == "nodeid" ]]; then
             nodeid="${{ matrix.data.nodeid }}"
-            # shellcheck disable=SC2086
-            python -m pytest -q "$nodeid" $reportportal_flag --junit-xml="$junit_path" $extra_args
+              cmd+=("$nodeid")
           else
             test_path="${{ matrix.data.test_path }}"
-            # shellcheck disable=SC2086
-            python -m pytest -q "$test_path" $reportportal_flag --junit-xml="$junit_path" $extra_args
+              cmd+=("$test_path")
           fi
+
+            if [[ -n "$reportportal_flag" ]]; then
+              cmd+=("$reportportal_flag")
+            fi
+            cmd+=("--junit-xml=$junit_path")
+
+            if [[ -n "$extra_args" ]]; then
+              # Preserve the existing workflow behavior of shell-style splitting for extra args.
+              # shellcheck disable=SC2206
+              extra_args_array=($extra_args)
+              cmd+=("${extra_args_array[@]}")
+            fi
+
+            printf 'Running command: '
+            printf '%q ' "${cmd[@]}"
+            echo
+
+            "${cmd[@]}"
 
           echo "::endgroup::"
 
