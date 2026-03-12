@@ -61,7 +61,7 @@ ReadFile = create_model(
 
 UpdateFile = create_model(
     "UpdateFile",
-    file_query=(str, Field(description=UPDATE_FILE_PROMPT_WITH_PATH)),
+    file_query=(str, Field(description=UPDATE_FILE_PROMPT_WITH_PATH, json_schema_extra={'multiline': True})),
     repo_name=(Optional[str], Field(default=None, description="Name of the repository (e.g., 'owner/repo'). If None, uses the default repository.")),
     commit_message=(Optional[str], Field(default=None, description="Commit message for the update operation")),
 )

@@ -163,7 +163,7 @@ NEW <<<<
 new content
 >>>> NEW
 
-Multiple OLD/NEW pairs can be provided for multiple edits.""")),
+Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra={'multiline': True})),
     branch=(Optional[str], Field(description="Branch name. If None, uses active branch.", default=None)),
     commit_message=(Optional[str], Field(description="Commit message for the change (VCS toolkits only)", default=None)),
 )
