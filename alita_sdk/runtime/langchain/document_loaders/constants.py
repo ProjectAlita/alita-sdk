@@ -284,6 +284,8 @@ code_extensions = [
     '.java',  # Java
     '.cpp',  # C++
     '.c',  # C
+    '.h',  # C/C++ header
+    '.hpp',  # C++ header
     '.cs',  # C#
     '.rb',  # Ruby
     '.go',  # Go
