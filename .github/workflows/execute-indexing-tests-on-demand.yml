@@ -262,8 +262,18 @@ jobs:
         # rather than only what is baked into the container image.
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
 
+      - name: Ensure pytest dependencies are available
+        shell: bash
+        run: |
+          python -m pip install -q pytest pytest-dotenv
+          if [[ "${{ inputs.reportportal }}" == "true" ]]; then
+            python -m pip install -q pytest-reportportal
+          fi
+          python -m pytest --version
+
       - name: Run document loader tests with pytest
         id: run-tests
+        shell: bash
         run: |
           echo "::group::Running tests for ${{ matrix.data.loader }}"
 
