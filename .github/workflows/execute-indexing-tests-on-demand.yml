@@ -392,6 +392,5 @@ jobs:
         with:
           name: test-results-${{ matrix.data.loader }}
           path: |
-            ./test_results/
             ./tests/reports/
           retention-days: 30
