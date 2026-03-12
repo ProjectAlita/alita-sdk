@@ -300,20 +300,42 @@ jobs:
           junit_path="tests/reports/test-results.xml"
           extra_args="${{ inputs.extra_pytest_args }}"
 
-            echo "ReportPortal enabled: ${{ inputs.reportportal }}"
-            echo "RP_LAUNCH: ${RP_LAUNCH:-<unset>}"
-            if [[ -n "${RP_PROJECT:-}" ]]; then
-              echo "RP_PROJECT: configured"
-            else
-              echo "RP_PROJECT: missing"
-            fi
-            if [[ -n "${RP_API_KEY:-}" ]]; then
-              echo "RP_API_KEY: configured"
-            else
-              echo "RP_API_KEY: missing"
-            fi
+          if [[ "${{ inputs.reportportal }}" == "true" && -z "${RP_ENDPOINT:-}" ]]; then
+            RP_ENDPOINT="https://tms.onetest.ai/api/receiver"
+            export RP_ENDPOINT
+            echo "RP_ENDPOINT: defaulted to ${RP_ENDPOINT}"
+          fi
 
-            cmd=(python -m pytest -q)
+          echo "ReportPortal enabled: ${{ inputs.reportportal }}"
+          echo "RP_LAUNCH: ${RP_LAUNCH:-<unset>}"
+          if [[ -n "${RP_ENDPOINT:-}" ]]; then
+            echo "RP_ENDPOINT: configured"
+          else
+            echo "RP_ENDPOINT: missing"
+          fi
+          if [[ -n "${RP_PROJECT:-}" ]]; then
+            echo "RP_PROJECT: configured"
+          else
+            echo "RP_PROJECT: missing"
+          fi
+          if [[ -n "${RP_API_KEY:-}" ]]; then
+            echo "RP_API_KEY: configured"
+          else
+            echo "RP_API_KEY: missing"
+          fi
+
+          if [[ "${{ inputs.reportportal }}" == "true" ]]; then
+            missing=()
+            [[ -z "${RP_ENDPOINT:-}" ]] && missing+=("RP_ENDPOINT")
+            [[ -z "${RP_PROJECT:-}" ]] && missing+=("RP_PROJECT")
+            [[ -z "${RP_API_KEY:-}" ]] && missing+=("RP_API_KEY")
+            if (( ${#missing[@]} > 0 )); then
+              echo "::error::ReportPortal enabled but missing required env: ${missing[*]}"
+              exit 1
+            fi
+          fi
+
+          cmd=(python -m pytest -q)
 
           if [[ "$mode" == "mark" ]]; then
             mark_expr="${{ matrix.data.mark_expr }}"
