@@ -75,17 +75,17 @@ nodes:
           **Operation: fetch_epic_hierarchy**
           Required parameters:
           - item_id (required): The numeric ID of the work item (epic, feature, etc.) to fetch. Must be a positive integer.
-          
+
           Optional parameters:
           - artifact_filepath (optional): Destination file path to store hierarchy data. If not provided, auto-generated filename will be used (format: epic_{id}_hierarchy_{timestamp}.json)
 
           **Validation rules:**
           1. If item_id is missing, return error JSON:
              {"intent":"ERROR","error_details":"item_id is required. Please provide a work item ID number. Example: 'Fetch epic 42' or 'Get hierarchy for item 123'"}
-          
+
           2. If item_id is not a valid positive integer, return error:
              {"intent":"ERROR","error_details":"item_id must be a positive integer. Provided value: {value}"}
-          
+
           3. If request is unclear or ambiguous, return error with explanation and examples
 
           **Successful response format:**
@@ -148,7 +148,7 @@ nodes:
       - epic_data
     structured_output: true
     tool: get_work_item
-    toolkit_name: ado-boards-ab
+    toolkit_name: LFAADOBoardReader
     transition: ValidateEpicData
   - id: ValidateEpicData
     type: code
@@ -168,7 +168,7 @@ nodes:
         else:
             validation_passed = True
             error_message = ""
-        
+
         {
             "validation_passed": validation_passed,
             "error_message": error_message
@@ -201,7 +201,7 @@ nodes:
       type: fixed
       value: |-
         epic_id = alita_state.get('epic_id')
-        
+
         {
             "validation_passed": False,
             "error_message": f"Failed to fetch work item {epic_id} from Azure DevOps. The item may not exist, or you may not have permission to access it. Please verify the item ID and your access permissions."
@@ -267,7 +267,7 @@ nodes:
       - level_items
     structured_output: true
     tool: search_work_items
-    toolkit_name: ado-boards-ab
+    toolkit_name: LFAADOBoardReader
     transition: ProcessLevel
   - id: ProcessLevel
     type: code
@@ -502,33 +502,33 @@ nodes:
       type: fixed
       value: |-
         hierarchy_data = alita_state.get('hierarchy_data', {})
-        
+
         # Extract nested if needed
         if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
             hierarchy_data = hierarchy_data['hierarchy_data']
-        
+
         epic = hierarchy_data.get('epic', {})
         items = hierarchy_data.get('items', {})
-        
+
         # Define completed states (case-insensitive)
         completed_states = {'done', 'closed', 'completed', 'resolved'}
-        
+
         # Count total and completed items (including epic)
         total_items = len(items) + 1  # +1 for epic itself
         completed_items = 0
-        
+
         # Check if epic is completed
         epic_state = epic.get('state', '').lower()
         epic_is_done = epic_state in completed_states
         if epic_is_done:
             completed_items += 1
-        
+
         # Collect blockers (non-completed items)
         blockers = []
-        
+
         # Break down by type
         by_type = {}
-        
+
         for item_id, item in items.items():
             state = item.get('state', '').lower()
             work_type = item.get('type', 'Unknown')
@@ -552,10 +552,10 @@ nodes:
                     'assigned_to': item.get('assigned_to', 'N/A'),
                     'url': item.get('url', '')
                 })
-        
+
         # Calculate completion percentage
         completion_percentage = (completed_items / total_items * 100) if total_items > 0 else 0
-        
+
         # Determine readiness status based on rules
         if completion_percentage >= 95 and epic_is_done:
             readiness_status = 'COMPLETE'
@@ -569,7 +569,7 @@ nodes:
         else:
             readiness_status = 'AT_RISK'
             status_reason = 'completion < 50%'
-        
+
         # Generate breakdown by type
         type_breakdown = []
         for work_type, counts in by_type.items():
@@ -580,7 +580,7 @@ nodes:
                 'completed': counts['completed'],
                 'percentage': round(type_pct, 1)
             })
-        
+
         # Build formatted markdown report
         report_lines = []
         report_lines.append(f"# Readiness report for Epic {epic.get('id')}:\n")
@@ -589,13 +589,13 @@ nodes:
         report_lines.append(f"Title: {epic.get('title')}")
         report_lines.append(f"State: {epic.get('state')}")
         report_lines.append(f"URL: {epic.get('url')}\n")
-        
+
         report_lines.append("## Readiness status")
         report_lines.append(f"Total work items (including epic): {total_items}")
         report_lines.append(f"Completed items: {completed_items}")
         report_lines.append(f"Completion: {round(completion_percentage, 1)}% ({completed_items} / {total_items})")
         report_lines.append(f"Overall status: {readiness_status} ({status_reason})\n")
-        
+
         # Add blockers section
         if blockers:
             report_lines.append(f"## Blockers (non-completed items — {len(blockers)} item(s))")
@@ -607,9 +607,9 @@ nodes:
         else:
             report_lines.append("## Blockers")
             report_lines.append("No blockers — all items completed!")
-        
+
         formatted_report = "\n".join(report_lines)
-        
+
         # Build structured readiness report
         readiness_report = {
             'readiness_status': readiness_status,
@@ -628,10 +628,10 @@ nodes:
             'max_hierarchy_level': hierarchy_data.get('metadata', {}).get('max_level', 0),
             'formatted_report': formatted_report
         }
-        
+
         # Add report to hierarchy data
         hierarchy_data['readiness'] = readiness_report
-        
+
         {
             'hierarchy_data': hierarchy_data,
             'readiness_report': readiness_report
@@ -649,14 +649,14 @@ nodes:
       type: fixed
       value: |-
         hierarchy_data = alita_state.get('hierarchy_data', {})
-        
+
         # Extract nested if needed
         if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
             hierarchy_data = hierarchy_data['hierarchy_data']
-        
+
         epic = hierarchy_data.get('epic', {})
         items = hierarchy_data.get('items', {})
-        
+
         # Define status icons based on state
         def get_status_icon(state):
             state_lower = state.lower()
@@ -666,7 +666,7 @@ nodes:
                 return '⚠️'
             else:
                 return '❌'
-        
+
         # Build tree structure recursively
         def build_tree(item_id, prefix='', is_last=True):
             lines = []
@@ -707,15 +707,15 @@ nodes:
                     lines.extend(build_tree(child_id, child_prefix, is_last_child))
             
             return lines
-        
+
         # Build the hierarchy markdown
         md_lines = []
         md_lines.append("# Work item hierarchy\n")
         md_lines.extend(build_tree(epic.get('id')))
         md_lines.append("\n(Status icons: ✅ Done/Closed/Completed — ⚠️ In Progress/Active — ❌ To Do/New/other)")
-        
+
         hierarchy_markdown = "\n".join(md_lines)
-        
+
         {
             'hierarchy_markdown': hierarchy_markdown
         }
@@ -727,8 +727,7 @@ nodes:
     transition: RouteSaving
   - id: RouteSaving
     type: router
-    condition: |-
-      {% if artifact_filepath %}SaveHierarchyData{% endif %}
+    condition: '{% if artifact_filepath %}SaveHierarchyData{% endif %}'
     default_output: SetDefaults
     input:
       - artifact_filepath
@@ -787,7 +786,7 @@ nodes:
       type: fixed
       value: |-
         artifact_filepath = alita_state.get('artifact_filepath', '')
-        
+
         # artifact_filepath should always be set at this point (from SetDefaults or user input)
         # Simply convert .json to .md
         if artifact_filepath and artifact_filepath.strip():
@@ -798,7 +797,7 @@ nodes:
         else:
             # Fallback: should not happen, but handle gracefully
             md_filepath = 'hierarchy.md'
-        
+
         {'md_filepath': md_filepath}
     input:
       - artifact_filepath
