@@ -1,31 +1,66 @@
 name: Execute Indexing Tests on Demand
-run-name: "Loader Tests on Demand: ${{ inputs.test_suites == 'custom' && inputs.custom_suites || inputs.test_suites }}"
+run-name: "Loader Tests on Demand (${{ inputs.run_mode }})"
 
 on:
   workflow_dispatch:
     inputs:
+      run_mode:
+        description: 'How to run tests: matrix (suite-based), mark (-m expression), nodeid (single pytest node), path (test file or dir)'
+        required: true
+        type: choice
+        default: 'matrix'
+        options:
+          - matrix
+          - mark
+          - nodeid
+          - path
       test_suites:
-        description: 'Loader tests to execute (all will execute all loaders, custom allows specifying comma-separated list, or choose specific loader)'
+        description: 'Loader tests to execute (all discovers all document loader pytest files; custom allows comma-separated loader names or test file names/paths)'
         required: true
         type: choice
         default: 'all'
         options:
           - all
           - custom
-          - AlitaCSVLoader
-          - AlitaJSONLoader
-          - AlitaMarkdownLoader
-          - AlitaTextLoader
+          - csv
+          - json
+          - markdown
+          - text
       custom_suites:
-        description: 'Comma-separated loader names (used only when test_suites is "custom")'
+        description: 'Comma-separated values for custom mode: AlitaXLoader, test_alita_x_loader.py, x, or full test path'
         required: false
         type: string
         default: ''
+      pytest_mark:
+        description: 'Pytest -m expression (used when run_mode=mark), e.g. loader_csv and feature_chunking'
+        required: false
+        type: string
+        default: ''
+      pytest_nodeid:
+        description: 'Pytest node id (used when run_mode=nodeid), e.g. tests/.../test_alita_text_loader.py::test_loader[text_simple-config0]'
+        required: false
+        type: string
+        default: ''
+      pytest_path:
+        description: 'Pytest target path (used when run_mode=path), e.g. tests/runtime/langchain/document_loaders/ or specific test file'
+        required: false
+        type: string
+        default: 'tests/runtime/langchain/document_loaders/'
       exclude_suites:
         description: 'Comma-separated loader names to exclude from execution (applies to "all" mode)'
         required: false
         type: string
-        default: 'AlitaPDFLoader,AlitaExcelLoader,AlitaDocxMammothLoader,AlitaImageLoader'
+        default: ''
+      reportportal:
+        description: 'Add --reportportal to pytest command'
+        required: false
+        type: boolean
+        default: false
+      extra_pytest_args:
+        description: 'Additional pytest args appended as-is (optional), e.g. -v -s'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   configure-matrix:
@@ -38,17 +73,103 @@ jobs:
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
-            .alita/tests/test_loaders/
+            tests/runtime/langchain/document_loaders/
           sparse-checkout-cone-mode: false
       
       - name: Generate loader test matrix
         id: set-matrix
         shell: bash
         run: |
+          TEST_ROOT="tests/runtime/langchain/document_loaders"
+
+          trim() {
+            echo "$1" | xargs
+          }
+
+          normalize_loader_name() {
+            local value="$1"
+
+            # full path or filename like test_alita_csv_loader.py
+            if [[ "$value" =~ (^|/)test_alita_([a-z0-9_]+)_loader\.py$ ]]; then
+              local snake="${BASH_REMATCH[2]}"
+              local camel
+              camel=$(echo "$snake" | awk -F'_' '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}; OFS=""; print $0}')
+              echo "Alita${camel}Loader"
+              return
+            fi
+
+            # already in AlitaXLoader format
+            if [[ "$value" =~ ^Alita[A-Za-z0-9]+Loader$ ]]; then
+              echo "$value"
+              return
+            fi
+
+            # bare x or snake_case name
+            local normalized
+            normalized=$(echo "$value" | sed -E 's/[^A-Za-z0-9_]+/_/g')
+            local camel
+            camel=$(echo "$normalized" | awk -F'_' '{for(i=1;i<=NF;i++){$i=toupper(substr($i,1,1)) substr($i,2)}; OFS=""; print $0}')
+            echo "Alita${camel}Loader"
+          }
+
+          loader_to_test_path() {
+            local loader="$1"
+            local base="${loader#Alita}"
+            base="${base%Loader}"
+            local snake
+            snake=$(echo "$base" | sed -E 's/([A-Z]+)([A-Z][a-z])/\1_\2/g; s/([a-z0-9])([A-Z])/\1_\2/g' | tr '[:upper:]' '[:lower:]')
+            echo "${TEST_ROOT}/test_alita_${snake}_loader.py"
+          }
+
+          run_mode="${{ inputs.run_mode }}"
+          matrix_json="[]"
+
+          # Non-matrix modes generate a single matrix item
+          if [[ "$run_mode" == "mark" ]]; then
+            mark_expr=$(trim "${{ inputs.pytest_mark }}")
+            if [[ -z "$mark_expr" ]]; then
+              echo "::error::run_mode=mark requires pytest_mark input"
+              echo "has-tests=false" >> $GITHUB_OUTPUT
+              echo "loader_matrix=[]" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            matrix_json="[{\"loader\":\"mark:${mark_expr}\",\"mode\":\"mark\",\"mark_expr\":\"${mark_expr//\"/\\\"}\"}]"
+          elif [[ "$run_mode" == "nodeid" ]]; then
+            nodeid=$(trim "${{ inputs.pytest_nodeid }}")
+            if [[ -z "$nodeid" ]]; then
+              echo "::error::run_mode=nodeid requires pytest_nodeid input"
+              echo "has-tests=false" >> $GITHUB_OUTPUT
+              echo "loader_matrix=[]" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            matrix_json="[{\"loader\":\"nodeid\",\"mode\":\"nodeid\",\"nodeid\":\"${nodeid//\"/\\\"}\"}]"
+          elif [[ "$run_mode" == "path" ]]; then
+            target_path=$(trim "${{ inputs.pytest_path }}")
+            if [[ -z "$target_path" ]]; then
+              echo "::error::run_mode=path requires pytest_path input"
+              echo "has-tests=false" >> $GITHUB_OUTPUT
+              echo "loader_matrix=[]" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            if [[ ! -e "$target_path" ]]; then
+              echo "::error::pytest_path does not exist: $target_path"
+              echo "has-tests=false" >> $GITHUB_OUTPUT
+              echo "loader_matrix=[]" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            matrix_json="[{\"loader\":\"path\",\"mode\":\"path\",\"test_path\":\"${target_path//\"/\\\"}\"}]"
+          fi
+
+          if [[ "$run_mode" != "matrix" ]]; then
+            echo "has-tests=true" >> $GITHUB_OUTPUT
+            echo "loader_matrix=$matrix_json" >> $GITHUB_OUTPUT
+            echo "Generated matrix: $matrix_json"
+            exit 0
+          fi
+
           # Determine which loaders to test
           if [[ "${{ inputs.test_suites }}" == "all" ]]; then
-            # Find all loader directories
-            loaders=$(find .alita/tests/test_loaders -maxdepth 1 -type d -name "Alita*Loader" -exec basename {} \; | sort)
+            loaders=$(find "$TEST_ROOT" -maxdepth 1 -type f -name "test_alita_*_loader.py" -printf '%f\n' | sort)
           elif [[ "${{ inputs.test_suites }}" == "custom" ]]; then
             # Use custom comma-separated list
             loaders=$(echo "${{ inputs.custom_suites }}" | tr ',' '\n')
@@ -57,27 +178,43 @@ jobs:
             loaders="${{ inputs.test_suites }}"
           fi
           
-          # Apply exclusions if specified
+          # Parse exclusions as normalized loader names
+          normalized_excludes=""
           if [[ -n "${{ inputs.exclude_suites }}" && "${{ inputs.test_suites }}" != "custom" ]]; then
             exclude_list="${{ inputs.exclude_suites }}"
             for exclude in ${exclude_list//,/ }; do
-              loaders=$(echo "$loaders" | grep -v "^${exclude}$" || true)
+              exclude_trimmed=$(trim "$exclude")
+              [[ -z "$exclude_trimmed" ]] && continue
+              normalized_excludes+=$(normalize_loader_name "$exclude_trimmed")
+              normalized_excludes+=$'\n'
             done
           fi
           
           # Build JSON matrix
           matrix_json="["
           first=true
-          for loader in $loaders; do
-            # Check if loader directory exists
-            if [[ -d ".alita/tests/test_loaders/$loader" ]]; then
+          while IFS= read -r raw_loader; do
+            raw_loader=$(trim "$raw_loader")
+            [[ -z "$raw_loader" ]] && continue
+
+            loader=$(normalize_loader_name "$raw_loader")
+            test_path=$(loader_to_test_path "$loader")
+
+            if [[ -n "$normalized_excludes" ]] && echo "$normalized_excludes" | grep -qx "$loader"; then
+              echo "Skipping excluded loader: $raw_loader -> $loader"
+              continue
+            fi
+
+            if [[ -n "$test_path" && -f "$test_path" ]]; then
               if [[ "$first" == "false" ]]; then
                 matrix_json+=","
               fi
-              matrix_json+="{\"loader\":\"$loader\"}"
+              matrix_json+="{\"loader\":\"$loader\",\"mode\":\"file\",\"test_path\":\"$test_path\"}"
               first=false
+            else
+              echo "Skipping unknown or missing loader test: $raw_loader -> $loader ($test_path)"
             fi
-          done
+          done <<< "$loaders"
           matrix_json+="]"
           
           # Check if we have any tests
@@ -103,105 +240,73 @@ jobs:
       max-parallel: 10
       matrix:
         data: ${{ fromJson(needs.configure-matrix.outputs.loader_matrix) }}
-    
-    env:
-      REGISTRY: ghcr.io
-      IMAGE_NAME: ${{ github.repository }}
+
+    container:
+      image: ghcr.io/projectalita/alita-sdk:pyodide
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      env:
+        SANDBOX_BASE: /app/
+        DENO_DIR: /app/
+        PYTHONPATH: /app
+        PYTHONDONTWRITEBYTECODE: "1"
+        PYTHONUNBUFFERED: "1"
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      
-      - name: Install Docker Compose
-        run: |
-          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
-      
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      
-      - name: Pull Docker image
-        run: |
-          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          docker pull ${{ env.REGISTRY }}/$IMAGE_NAME:pyodide
-      
-      - name: Run loader tests in Docker
+
+      - name: Make alita-sdk source available
+        # Match reusable runner behavior so imports resolve to checked-out code
+        # rather than only what is baked into the container image.
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
+
+      - name: Run document loader tests with pytest
         id: run-tests
         run: |
           echo "::group::Running tests for ${{ matrix.data.loader }}"
-          
-          # Set test command
-          export DOCKER_COMMAND="python .alita/tests/test_loaders/run_tests.py run ${{ matrix.data.loader }}"
-          
-          # Start container
-          docker-compose up -d
-          
-          # Wait for tests to complete
-          TIMEOUT=600
-          ELAPSED=0
-          INTERVAL=5
-          
-          while [ $ELAPSED -lt $TIMEOUT ]; do
-            STATUS=$(docker inspect alita-sdk-dev --format='{{.State.Status}}' 2>/dev/null || echo "not-found")
-            
-            if [ "$STATUS" = "exited" ]; then
-              EXIT_CODE=$(docker inspect alita-sdk-dev --format='{{.State.ExitCode}}')
-              echo "Container exited with code: $EXIT_CODE"
-              break
-            fi
-            
-            sleep $INTERVAL
-            ELAPSED=$((ELAPSED + INTERVAL))
-          done
-          
-          # Copy results
-          docker cp alita-sdk-dev:/app/.alita/tests/test_loaders/test_results/ ./test_results/ || mkdir -p ./test_results
-          
-          # Stop container
-          docker-compose down --remove-orphans
-          
-          echo "::endgroup::"
-          
-          if [ "${EXIT_CODE:-1}" -ne 0 ]; then
-            echo "::error::Tests failed for ${{ matrix.data.loader }}"
-            exit ${EXIT_CODE:-1}
+
+          mkdir -p ./test_results
+          mkdir -p ./tests/reports
+
+          mode="${{ matrix.data.mode }}"
+          reportportal_flag=""
+          if [[ "${{ inputs.reportportal }}" == "true" ]]; then
+            reportportal_flag="--reportportal"
           fi
+
+          junit_path="tests/reports/test-results.xml"
+          extra_args="${{ inputs.extra_pytest_args }}"
+
+          if [[ "$mode" == "mark" ]]; then
+            mark_expr="${{ matrix.data.mark_expr }}"
+            # shellcheck disable=SC2086
+            python -m pytest -q tests/runtime/langchain/document_loaders/ -m "$mark_expr" $reportportal_flag --junit-xml="$junit_path" $extra_args
+          elif [[ "$mode" == "nodeid" ]]; then
+            nodeid="${{ matrix.data.nodeid }}"
+            # shellcheck disable=SC2086
+            python -m pytest -q "$nodeid" $reportportal_flag --junit-xml="$junit_path" $extra_args
+          else
+            test_path="${{ matrix.data.test_path }}"
+            # shellcheck disable=SC2086
+            python -m pytest -q "$test_path" $reportportal_flag --junit-xml="$junit_path" $extra_args
+          fi
+
+          echo "::endgroup::"
+
+      - name: PUBLISH TEST REPORT
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: 'tests/reports/test-results.xml'
       
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ matrix.data.loader }}
-          path: ./test_results/
+          path: |
+            ./test_results/
+            ./tests/reports/
           retention-days: 30
-      
-      - name: Clean up workspace
-        if: always()
-        run: |
-          sudo rm -rf $GITHUB_WORKSPACE/{,.[!.],..?}*
-
-  summary:
-    needs: [configure-matrix, test-execution]
-    if: always() && needs.configure-matrix.outputs.has-tests == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Generate test summary
-        run: |
-          echo "# Loader Test Execution Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Test Suites**: ${{ inputs.test_suites }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Execution Mode**: Parallel (max 10 concurrent)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ needs.test-execution.result }}" == "success" ]]; then
-            echo "✅ All loader tests passed successfully" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.test-execution.result }}" == "failure" ]]; then
-            echo "❌ Some loader tests failed" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "⚠️ Test execution status: ${{ needs.test-execution.result }}" >> $GITHUB_STEP_SUMMARY
-          fi

@@ -37,6 +37,7 @@ tools = [ "dulwich==0.21.6", "paramiko==3.3.1", "pygithub==2.3.0", "python-gitla
 community = [ "retry-extended==0.2.3", "pyobjtojson==0.3", "elitea-analyse==0.1.2", "networkx>=3.0",]
 all = [ "alita-sdk[runtime]", "alita-sdk[tools]", "alita-sdk[community]",]
 dev = [ "pytest", "pytest-cov", "black", "flake8", "mypy",]
+reporting = [ "pytest-reportportal>=5.3", "pytest-dotenv",]
 cli = [ "click>=8.1.0", "rich>=13.0.0", "pyyaml>=6.0", "langchain-mcp-adapters",]
 
 [project.scripts]
@@ -45,6 +46,38 @@ alita = "alita_sdk.cli.cli:main"
 [project.urls]
 Homepage = "https://projectalita.ai"
 Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
+
+[tool.pytest.ini_options]
+addopts = "-v -s --junit-xml=tests/reports/test-results.xml"
+testpaths = ["tests"]
+env_files = [".env"]
+markers = [
+    "loader_csv: tests for AlitaCSVLoader",
+    "loader_json: tests for AlitaJSONLoader",
+    "loader_markdown: tests for AlitaMarkdownLoader",
+    "loader_text: tests for AlitaTextLoader",
+    "content_empty: tests with empty input files",
+    "content_simple: tests with simple/minimal content",
+    "content_large: tests with large content files",
+    "content_unicode: tests with unicode/multi-byte content",
+    "content_special_characters: tests with special characters",
+    "content_nested: tests with nested data structures",
+    "content_array: tests with array/list data structures",
+    "content_headers: tests with header-structured content",
+    "content_markdown: tests with markdown-formatted content",
+    "feature_chunking: tests exercising chunking / max_tokens logic",
+    "performance: tests using large files (slow, performance-sensitive)",
+    "edge_empty_input: edge case - empty input file",
+    "edge_encoding: edge case - encoding / unicode handling",
+    "edge_special_chars: edge case - special character handling",
+    "edge_markdown_in_txt: edge case - markdown content in plain-text files",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning",
+    "ignore::cryptography.utils.CryptographyDeprecationWarning",
+]
 
 [tool.setuptools.package-data]
 alita_sdk = [ "*.md", "*.txt", "*.yml", "*.yaml", "prompts/*.md", "docs/*.md", "docs/code/*.md", "docs/faq/*.md", "docs/prompts/*.md",]

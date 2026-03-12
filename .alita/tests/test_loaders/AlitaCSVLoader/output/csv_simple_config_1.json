@@ -1,9 +1,0 @@
-[
-  {
-    "page_content": "name,age,city\nAlice,30,New York\nBob,25,San Francisco\nCharlie,35,Boston",
-    "metadata": {
-      "source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_simple.csv",
-      "table_source": ".alita/tests/test_loaders/AlitaCSVLoader/files/csv_simple.csv"
-    }
-  }
-]

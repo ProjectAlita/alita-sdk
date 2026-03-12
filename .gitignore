@@ -182,3 +182,7 @@ node_modules/
 alita_sdk/docs/
 .playwright-mcp
 .claude
+
+# tests
+!tests/reports/.gitkeep
+tests/reports/*

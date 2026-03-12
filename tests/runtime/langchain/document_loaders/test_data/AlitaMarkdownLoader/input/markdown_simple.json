@@ -1,0 +1,9 @@
+{
+  "tags": ["loader:markdown", "content:simple", "feature:chunking"],
+  "file_path": "../files/markdown_simple.md",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 1024}
+  ]
+}

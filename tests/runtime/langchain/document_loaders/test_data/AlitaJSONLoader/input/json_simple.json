@@ -1,0 +1,9 @@
+{
+  "tags": ["loader:json", "content:simple", "feature:chunking"],
+  "file_path": "../files/json_simple.json",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 1024}
+  ]
+}

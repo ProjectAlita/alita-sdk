@@ -1,0 +1,12 @@
+[
+  {
+    "page_content": "Unicode test file with diverse characters:  \nEmoji: 😀 🚀 ⭐ 🎉 💻 🌍\nChinese (中文): 你好世界，这是一个测试文件。\nJapanese (日本語): こんにちは世界、これはテストファイルです。\nKorean (한국어): 안녕하세요 세계, 이것은 테스트 파일입니다.\nArabic (العربية): مرحبا بالعالم، هذا ملف اختبار.\nGreek (Ελληνικά): Γειά σου κόσμε, αυτό είναι ένα αρχείο δοκιμής.\nCyrillic (Кириллица): Привет мир, это тестовый файл.  \nSpecial symbols: © ® ™ € £ ¥ § ¶ † ‡ • … ‰ ‱\nMath: ∀ ∃ ∈ ∉ ∋ ∏ ∑ √ ∞ ∫ ≈ ≠ ≤ ≥",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaTextLoader/files/text_unicode.txt",
+      "headers": "",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "method_name": "text"
+    }
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "tags": ["loader:json", "content:large", "feature:chunking", "performance"],
+  "file_path": "../files/json_large.json",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 1024}
+  ]
+}

@@ -46,7 +46,7 @@ on:
         description: 'Comma-separated suite names to exclude from execution (applies to "all" and "custom" modes)'
         required: false
         type: string
-        default: 'bitbucket,postman,figma'
+        default: 'bitbucket,postman,figma,qtest'
       enable_bug_reporting:
         description: 'Enable automatic bug report creation on GitHub (disable for testing)'
         required: false
