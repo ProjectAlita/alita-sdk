@@ -15,8 +15,8 @@ from __future__ import annotations
 import base64
 import logging
 import re
-from typing import Optional, List
-from urllib.parse import quote
+from typing import Optional, List, Tuple
+from urllib.parse import quote, unquote
 
 import requests
 from langchain_core.tools import ToolException
@@ -51,6 +51,7 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         # Lazily resolved and cached
         self.__site_id: Optional[str] = None
         self.__drive_id: Optional[str] = None
+        self.__drives_cache: Optional[List[dict]] = None
 
     # ------------------------------------------------------------------ #
     #  Low-level HTTP helpers                                              #
@@ -102,6 +103,103 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         data = self._get(f"{_GRAPH_BASE}/sites/{self._resolve_site_id()}/drive")
         self.__drive_id = data['id']
         return self.__drive_id
+
+    def _list_drives(self) -> List[dict]:
+        """Return all document-library drives for the site (cached).
+
+        Each entry is a Graph drive object with at least ``id``, ``name``,
+        and ``webUrl`` fields.
+        """
+        if self.__drives_cache is not None:
+            return self.__drives_cache
+        data = self._get(
+            f"{_GRAPH_BASE}/sites/{self._resolve_site_id()}/drives",
+            params={"$select": "id,name,webUrl"},
+        )
+        self.__drives_cache = data.get('value', [])
+        return self.__drives_cache
+
+    def _resolve_drive_and_folder(self, folder_path: str) -> Tuple[str, str]:
+        """Resolve a server-relative *folder_path* to a ``(drive_id, drive_relative_folder)`` pair.
+
+        The method enumerates all document-library drives on the site and
+        matches the first path segment (after the site prefix) against each
+        drive's URL.  This correctly handles:
+
+        * Default ``Shared Documents`` library::
+
+            '/sites/MySite/Shared Documents/upload'
+            → (default_drive_id, 'upload')
+
+        * Non-default document libraries::
+
+            '/sites/MySite/Alita_test/subfolder'
+            → (alita_test_drive_id, 'subfolder')
+
+            '/sites/MySite/Alita_test'
+            → (alita_test_drive_id, '')
+
+        Falls back to the default drive (keeping the full cleaned path) when
+        no drive matches, so existing callers that already pass a drive-relative
+        path continue to work.
+        """
+        # Derive the site-relative path portion of the site URL
+        # e.g. "https://tenant.sharepoint.com/sites/MyTeam" → "sites/MyTeam"
+        site_path = re.sub(r'^https?://[^/]+', '', self.site_url).strip('/')
+
+        # Clean the incoming folder_path (strip leading slash, decode percent-encoding)
+        folder_clean = unquote(folder_path).strip('/')
+
+        # Strip the site prefix so we are left with:
+        # "Shared Documents/upload" or "Alita_test/subfolder"
+        if folder_clean.lower().startswith(site_path.lower()):
+            folder_clean = folder_clean[len(site_path):].lstrip('/')
+
+        # Walk all drives and find the best (longest) prefix match
+        best_drive_id: Optional[str] = None
+        best_relative: str = folder_clean
+        best_lib_len: int = -1
+
+        for drive in self._list_drives():
+            drive_weburl = unquote(drive.get('webUrl', ''))
+            # Extract the drive's path relative to the host
+            # e.g. "https://tenant.sharepoint.com/sites/MyTeam/Shared%20Documents"
+            # → "sites/MyTeam/Shared Documents"
+            drive_full_path = re.sub(r'^https?://[^/]+', '', drive_weburl).strip('/')
+
+            # Strip site prefix to get the library name segment
+            # e.g. "Shared Documents" or "Alita_test"
+            if not drive_full_path.lower().startswith(site_path.lower()):
+                continue
+            drive_lib = drive_full_path[len(site_path):].lstrip('/')
+            if not drive_lib:
+                continue
+
+            # Check if folder_clean starts with this library name (case-insensitive)
+            folder_lower = folder_clean.lower()
+            lib_lower = drive_lib.lower()
+            if folder_lower == lib_lower or folder_lower.startswith(lib_lower + '/'):
+                remainder = folder_clean[len(drive_lib):].lstrip('/')
+                # Prefer the most-specific (longest) library match
+                if len(drive_lib) > best_lib_len:
+                    best_drive_id = drive.get('id', '')
+                    best_relative = remainder
+                    best_lib_len = len(drive_lib)
+
+        if best_drive_id:
+            logging.debug(
+                "_resolve_drive_and_folder: folder_path=%r → drive_id=%s, relative=%r",
+                folder_path, best_drive_id, best_relative,
+            )
+            return best_drive_id, best_relative
+
+        # Fallback: use the default drive and pass folder_clean as-is
+        logging.warning(
+            "_resolve_drive_and_folder: no drive matched folder_path=%r; "
+            "falling back to default drive with relative path=%r",
+            folder_path, folder_clean,
+        )
+        return self._resolve_drive_id(), folder_clean
 
     def _resolve_list_id(self, list_title: str) -> str:
         """Resolve list display-name → Graph list id (case-insensitive)."""
@@ -276,9 +374,15 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         return filedata.encode('utf-8'), filename
 
     def _build_drive_item_path(self, folder_path: str, actual_filename: str) -> str:
-        """Strip the site prefix from folder_path and append filename.
+        """Build a URL-safe, drive-relative item path from *folder_path* and *actual_filename*.
 
-        Returns a drive-relative, URL-safe item path ready for Graph API calls.
+        .. deprecated::
+            Prefer :meth:`_resolve_drive_and_folder` which correctly identifies
+            the target drive.  This method is kept for backwards compatibility with
+            callers that already pass a drive-relative path.
+
+        The method strips the site prefix (if present) but does **not** strip the
+        document-library segment — use :meth:`_resolve_drive_and_folder` for that.
         """
         site_path = re.sub(r'^https?://[^/]+', '', self.site_url).strip('/')
         folder_clean = folder_path.strip('/')
@@ -499,8 +603,18 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         PUT, larger files use chunked upload sessions (5 MB chunks).
 
         Args:
-            folder_path: Server-relative folder path
-                         (e.g., '/sites/MySite/Shared Documents/folder')
+            folder_path: Server-relative folder path including the document-library name.
+                         Supported formats:
+
+                         * Full server-relative path (default library):
+                           ``'/sites/MySite/Shared Documents/subfolder'``
+                         * Full server-relative path (non-default library):
+                           ``'/sites/MySite/Alita_test/subfolder'``
+                         * Library root (upload directly into the library):
+                           ``'/sites/MySite/Alita_test'``
+
+                         The document-library segment is automatically resolved to the
+                         correct drive — you do **not** need to know the drive ID.
             filepath: File path in format /{bucket}/{filename} from artifact storage
                       (mutually exclusive with filedata)
             filedata: String content to upload as a file
@@ -517,8 +631,16 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             filepath, filedata, filename
         )
         mime_type = detect_mime_type(file_bytes, actual_filename)
-        drive_id = self._resolve_drive_id()
-        safe_item_path = self._build_drive_item_path(folder_path, actual_filename)
+
+        # Resolve the correct drive and the path relative to that drive's root.
+        # This fixes two issues:
+        #   1. "Shared Documents" was being passed as a subfolder of the default
+        #      drive instead of being stripped (→ nested Shared Documents folder).
+        #   2. Non-default libraries (e.g. "Alita_test") were silently routed to
+        #      the default drive instead of their own drive.
+        drive_id, rel_folder = self._resolve_drive_and_folder(folder_path)
+        item_path = f"{rel_folder}/{actual_filename}".strip('/')
+        safe_item_path = quote(item_path, safe='/')
         conflict = "replace" if replace else "fail"
 
         try:
@@ -527,7 +649,8 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             else:
                 result = self._upload_large_file(drive_id, safe_item_path, conflict, file_bytes)
 
-            logging.info("Uploaded '%s' to '%s' via Graph API", actual_filename, folder_path)
+            logging.info("Uploaded '%s' to '%s' via Graph API (drive=%s, rel=%r)",
+                         actual_filename, folder_path, drive_id, rel_folder)
             return {
                 'id': result.get('id', ''),
                 'webUrl': result.get('webUrl', ''),
