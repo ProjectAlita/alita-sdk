@@ -1509,6 +1509,23 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Resuming from an HITL dynamic interrupt - use Command(resume=...)
                     hitl_resume_value = self._extract_hitl_resume(input)
                     logger.info(f"[HITL] Resuming HITL interrupt with: {hitl_resume_value}")
+
+                    # For sensitive_tool guardrail interrupts, inject context into
+                    # config so the LLMNode can skip the non-deterministic LLM call
+                    # and instead create a synthetic AIMessage with the approved
+                    # (or rejected) tool call.  This avoids the fundamental issue
+                    # where re-executing the LLM produces a different response.
+                    guardrail_type = hitl_interrupt.get('guardrail_type')
+                    if guardrail_type == 'sensitive_tool':
+                        tool_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args', {})
+                        resume_ctx = {
+                            'tool_name': hitl_interrupt.get('tool_name', ''),
+                            'tool_args': tool_args if isinstance(tool_args, dict) else {},
+                            'tool_call_id': f"call_{uuid4().hex[:24]}",
+                            'action': hitl_resume_value.get('action', 'approve'),
+                            'value': hitl_resume_value.get('value', ''),
+                        }
+                        config['configurable']['_hitl_resume_context'] = resume_ctx
                     result = super().invoke(
                         Command(resume=hitl_resume_value),
                         config=config,
@@ -1561,11 +1578,16 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # Graph paused at HITL node. Return the same result shape as the normal
                 # execution path, but override the output and attach HITL metadata.
                 logger.info(f"[HITL] Execution paused at HITL node: {hitl_interrupt}")
+
+                # Strip internal-only fields (e.g. unmasked tool args) before
+                # returning results that will be emitted to UI clients.
+                hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k != 'tool_args_raw'}
+
                 result_with_state = {
                     "output": hitl_interrupt.get("message", "Awaiting human review..."),
                     "thread_id": thread_id,
                     "execution_finished": False,
-                    "hitl_interrupt": hitl_interrupt,
+                    "hitl_interrupt": hitl_for_ui,
                 }
 
                 if hasattr(config_state, 'values') and config_state.values:

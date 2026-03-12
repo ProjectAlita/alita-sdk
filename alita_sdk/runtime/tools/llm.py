@@ -7,6 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
 from langchain_core.callbacks import dispatch_custom_event
+from langgraph.errors import GraphBubbleUp
 from pydantic import Field
 
 from ..langchain.constants import ELITEA_RS
@@ -565,6 +566,10 @@ class LLMNode(BaseTool):
         # Do LLM invocation
         try:
             result = self._invoke_llm_internal(state, config, middleware_updates)
+        except GraphBubbleUp:
+            # GraphInterrupt (from interrupt()) must propagate to the graph executor
+            # for proper HITL / checkpoint handling.
+            raise
         except Exception as e:
             model_info = getattr(self.client, 'model_name', None) or getattr(self.client, 'model', 'unknown')
             logger.error(f"Error in LLM Node: {format_exc()}")
@@ -709,7 +714,42 @@ class LLMNode(BaseTool):
             return result
 
         # Handle regular completion
-        completion = llm_client.invoke(messages, config=config)
+        #
+        # HITL guardrail resume: If a sensitive-tool guard paused execution via
+        # interrupt(), LangGraph re-executes this node from scratch.  The LLM
+        # call is non-deterministic, so re-calling it may produce a completely
+        # different response (no tool call → tool never runs).  To avoid this,
+        # the graph-level resume path injects `_hitl_resume_context` into the
+        # config.  When present, we skip the LLM call and build a synthetic
+        # AIMessage with the pre-approved tool call so that the existing
+        # __perform_tool_calling flow handles execution and the guard's
+        # interrupt() returns the resume value harmlessly.
+        hitl_ctx = (config.get('configurable', {}) or {}).get('_hitl_resume_context') if config else None
+        if hitl_ctx and hitl_ctx.get('tool_name'):
+            hitl_action = hitl_ctx.get('action', 'approve')
+
+            if hitl_action == 'reject':
+                # User rejected — skip tool call entirely, return rejection message
+                tool_name = hitl_ctx['tool_name']
+                action_label = hitl_ctx.get('value') or f"sensitive action on '{tool_name}'"
+                rejection_msg = f"User blocked the sensitive action '{action_label}'."
+                result_messages = list(messages) + [AIMessage(content=rejection_msg)]
+                output = {"messages": self._prepare_output_messages(result_messages, middleware_updates)}
+                if self.output_variables and self.output_variables[0] != 'messages':
+                    output[self.output_variables[0]] = rejection_msg
+                return output
+
+            # Approved — create synthetic AIMessage with the pre-approved tool call
+            completion = AIMessage(
+                content='',
+                tool_calls=[{
+                    'name': hitl_ctx['tool_name'],
+                    'args': hitl_ctx.get('tool_args', {}),
+                    'id': hitl_ctx.get('tool_call_id', 'hitl_resume_call'),
+                }],
+            )
+        else:
+            completion = llm_client.invoke(messages, config=config)
         logger.info(f"Initial completion: {completion}")
 
         # Handle both tool-calling and regular responses
@@ -1008,6 +1048,10 @@ class LLMNode(BaseTool):
                     try:
                         result = new_loop.run_until_complete(coro)
                         result_container.append(result)
+                    except GraphBubbleUp as gb:
+                        # GraphInterrupt must propagate — store and re-raise
+                        # from the calling thread via exception_container.
+                        exception_container.append(gb)
                     except Exception as ex:
                         logger.debug(f"Exception in async thread: {ex}")
                         exception_container.append(ex)
@@ -1135,6 +1179,10 @@ class LLMNode(BaseTool):
                             )
                         new_messages.append(tool_message)
 
+                    except GraphBubbleUp:
+                        # GraphInterrupt (from interrupt()) and other graph-level
+                        # signals must propagate to the graph executor.
+                        raise
                     except Exception as e:
                         import traceback
                         error_details = traceback.format_exc()

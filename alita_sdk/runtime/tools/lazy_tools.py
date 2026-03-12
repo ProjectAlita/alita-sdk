@@ -36,6 +36,7 @@ from collections import defaultdict
 
 from langchain_core.tools import BaseTool, ToolException
 from langchain_core.callbacks import CallbackManagerForToolRun
+from langgraph.errors import GraphBubbleUp
 from pydantic import BaseModel, Field
 
 from ..utils.constants import TOOLKIT_NAME_META, TOOL_NAME_META, TOOLKIT_TYPE_META
@@ -706,6 +707,8 @@ class InvokeToolTool(BaseTool):
             logger.info(f"[LazyTools] Invoking {toolkit}.{tool} with args: {arguments}")
             result = actual_tool.invoke(arguments)
             return str(result) if result is not None else "Tool executed successfully (no output)"
+        except GraphBubbleUp:
+            raise
         except ToolException as e:
             # Even for ToolException, show the expected schema
             return self._format_invocation_error(toolkit, tool, arguments, str(e))
@@ -837,6 +840,8 @@ class InvokeToolTool(BaseTool):
             else:
                 result = actual_tool.invoke(arguments)
             return str(result) if result is not None else "Tool executed successfully (no output)"
+        except GraphBubbleUp:
+            raise
         except ToolException as e:
             return self._format_invocation_error(toolkit, tool, arguments, str(e))
         except Exception as e:

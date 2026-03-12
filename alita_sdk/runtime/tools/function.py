@@ -7,6 +7,7 @@ from langchain_core.callbacks import dispatch_custom_event
 from langchain_core.messages import ToolCall
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
+from langgraph.errors import GraphBubbleUp
 from typing import Any, Optional, Union
 from langchain_core.utils.function_calling import convert_to_openai_tool
 
@@ -157,6 +158,7 @@ alita_state = json.loads(state_json)
         # special handler for PyodideSandboxTool
         if self._is_pyodide_tool():
             func_args['code'] = f"{self._prepare_pyodide_input(state, self.input_variables)}\n{func_args['code']}"
+
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
             dispatch_custom_event(
@@ -198,6 +200,8 @@ alita_state = json.loads(state_json)
                     return messages_dict
                 else:
                     return { self.output_variables[0]: object_to_dict(tool_result) }
+        except GraphBubbleUp:
+            raise
         except ValueError as value_error:
             # re-raise the error as ToolException since it is related to toolkit configuration:
             # example: incorrect input mappings etc.

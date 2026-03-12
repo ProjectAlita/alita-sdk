@@ -1,24 +1,4 @@
-"""
-Toolkit Security Module
-
-Provides runtime security filtering for toolkits and tools.
-This is a fail-safe layer that prevents blocked toolkits/tools from
-being instantiated, even if they exist in the database.
-
-The blocklist can be configured by:
-1. Calling configure_blocklist() at application startup
-2. Setting environment variables ALITA_BLOCKED_TOOLKITS and ALITA_BLOCKED_TOOLS
-
-Example:
-    # At indexer startup
-    from alita_sdk.runtime.toolkits.security import configure_blocklist
-    configure_blocklist(
-        blocked_toolkits=['shell', 'browser'],
-        blocked_tools={'github': ['delete_repository'], 'jira': ['delete_issue']}
-    )
-
-    # Later, get_tools() will automatically filter blocked items
-"""
+"""Runtime toolkit security and sensitive-action guardrails."""
 
 import logging
 import os
@@ -27,10 +7,28 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_SENSITIVE_ACTION_COMPANY_NAME = 'Your organization'
+DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPLATE = (
+    "{company_name} requires approval before running the sensitive action '{action_name}'."
+)
+
 # Module-level configuration
 _blocked_toolkits: List[str] = []
 _blocked_tools: Dict[str, List[str]] = {}
-_initialized: bool = False
+_blocklist_initialized: bool = False
+
+_sensitive_tools: Dict[str, List[str]] = {}
+_sensitive_action_company_name: str = DEFAULT_SENSITIVE_ACTION_COMPANY_NAME
+_sensitive_action_message_template: str = DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPLATE
+_sensitive_tools_initialized: bool = False
+
+
+def _normalize_tools_mapping(tool_map: Optional[Dict[str, List[str]]]) -> Dict[str, List[str]]:
+    return {
+        str(key).strip().lower(): [str(item).strip().lower() for item in (values or []) if str(item).strip()]
+        for key, values in (tool_map or {}).items()
+        if str(key).strip()
+    }
 
 
 def configure_blocklist(
@@ -44,14 +42,11 @@ def configure_blocklist(
         blocked_toolkits: List of toolkit types to block completely
         blocked_tools: Dict mapping toolkit type to list of blocked tool names
     """
-    global _blocked_toolkits, _blocked_tools, _initialized
+    global _blocked_toolkits, _blocked_tools, _blocklist_initialized
 
     _blocked_toolkits = [t.lower() for t in (blocked_toolkits or [])]
-    _blocked_tools = {
-        k.lower(): [t.lower() for t in (v or [])]
-        for k, v in (blocked_tools or {}).items()
-    }
-    _initialized = True
+    _blocked_tools = _normalize_tools_mapping(blocked_tools)
+    _blocklist_initialized = True
 
     if _blocked_toolkits:
         logger.info(f"[SECURITY] Configured blocked toolkits: {_blocked_toolkits}")
@@ -59,14 +54,28 @@ def configure_blocklist(
         logger.info(f"[SECURITY] Configured blocked tools: {_blocked_tools}")
 
 
-def _load_from_env() -> None:
-    """Load blocklist from environment variables if not configured."""
-    global _blocked_toolkits, _blocked_tools, _initialized
+def configure_sensitive_tools(
+    sensitive_tools: Optional[Dict[str, List[str]]] = None,
+    company_name: Optional[str] = None,
+    message_template: Optional[str] = None,
+) -> None:
+    global _sensitive_tools, _sensitive_action_company_name, _sensitive_action_message_template
+    global _sensitive_tools_initialized
 
-    if _initialized:
+    _sensitive_tools = _normalize_tools_mapping(sensitive_tools)
+    _sensitive_action_company_name = company_name or DEFAULT_SENSITIVE_ACTION_COMPANY_NAME
+    _sensitive_action_message_template = (
+        message_template or DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPLATE
+    )
+    _sensitive_tools_initialized = True
+
+def _load_blocklist_from_env() -> None:
+    """Load blocklist from environment variables if not configured."""
+    global _blocked_toolkits, _blocked_tools, _blocklist_initialized
+
+    if _blocklist_initialized:
         return
 
-    # Try loading from environment
     env_toolkits = os.environ.get('ALITA_BLOCKED_TOOLKITS', '')
     env_tools = os.environ.get('ALITA_BLOCKED_TOOLS', '')
 
@@ -80,15 +89,38 @@ def _load_from_env() -> None:
     if env_tools:
         try:
             parsed = json.loads(env_tools)
-            _blocked_tools = {
-                k.lower(): [t.lower() for t in (v or [])]
-                for k, v in parsed.items()
-            }
+            _blocked_tools = _normalize_tools_mapping(parsed)
             logger.info(f"[SECURITY] Loaded blocked tools from env: {_blocked_tools}")
         except Exception as e:
             logger.warning(f"[SECURITY] Failed to parse ALITA_BLOCKED_TOOLS: {e}")
 
-    _initialized = True
+    _blocklist_initialized = True
+
+
+def _load_sensitive_tools_from_env() -> None:
+    global _sensitive_tools, _sensitive_action_company_name, _sensitive_action_message_template
+    global _sensitive_tools_initialized
+
+    if _sensitive_tools_initialized:
+        return
+
+    env_sensitive_tools = os.environ.get('ALITA_SENSITIVE_TOOLS', '')
+    env_company_name = os.environ.get('ALITA_SENSITIVE_ACTION_COMPANY_NAME', '')
+    env_message_template = os.environ.get('ALITA_SENSITIVE_ACTION_MESSAGE_TEMPLATE', '')
+
+    if env_sensitive_tools:
+        try:
+            _sensitive_tools = _normalize_tools_mapping(json.loads(env_sensitive_tools))
+        except Exception as e:
+            logger.warning(f"[SECURITY] Failed to parse ALITA_SENSITIVE_TOOLS: {e}")
+
+    if env_company_name:
+        _sensitive_action_company_name = env_company_name
+
+    if env_message_template:
+        _sensitive_action_message_template = env_message_template
+
+    _sensitive_tools_initialized = True
 
 
 def is_toolkit_blocked(toolkit_type: str) -> bool:
@@ -101,7 +133,7 @@ def is_toolkit_blocked(toolkit_type: str) -> bool:
     Returns:
         True if the toolkit is blocked, False otherwise
     """
-    _load_from_env()
+    _load_blocklist_from_env()
 
     blocked = toolkit_type.lower() in _blocked_toolkits
     if blocked:
@@ -120,7 +152,7 @@ def is_tool_blocked(toolkit_type: str, tool_name: str) -> bool:
     Returns:
         True if the tool is blocked, False otherwise
     """
-    _load_from_env()
+    _load_blocklist_from_env()
 
     # First check if entire toolkit is blocked
     if is_toolkit_blocked(toolkit_type):
@@ -146,7 +178,7 @@ def get_blocked_tools_for_toolkit(toolkit_type: str) -> List[str]:
     Returns:
         List of blocked tool names (lowercase) for this toolkit
     """
-    _load_from_env()
+    _load_blocklist_from_env()
     return _blocked_tools.get(toolkit_type.lower(), [])
 
 
@@ -157,16 +189,106 @@ def get_blocklist_config() -> Dict:
     Returns:
         Dict with 'blocked_toolkits' and 'blocked_tools'
     """
-    _load_from_env()
+    _load_blocklist_from_env()
     return {
         'blocked_toolkits': _blocked_toolkits.copy(),
         'blocked_tools': {k: v.copy() for k, v in _blocked_tools.items()}
     }
 
 
+def find_sensitive_tool_match(
+    tool_name: str,
+    toolkit_identifiers: Optional[List[Optional[str]]] = None,
+) -> Optional[str]:
+    _load_sensitive_tools_from_env()
+
+    normalized_tool_name = str(tool_name or '').strip().lower()
+    if not normalized_tool_name:
+        return None
+
+    normalized_identifiers = []
+    for identifier in toolkit_identifiers or []:
+        normalized = str(identifier or '').strip().lower()
+        if normalized and normalized not in normalized_identifiers:
+            normalized_identifiers.append(normalized)
+
+    for identifier in normalized_identifiers:
+        if normalized_tool_name in _sensitive_tools.get(identifier, []):
+            return identifier
+
+    if normalized_tool_name in _sensitive_tools.get('*', []):
+        return '*'
+
+    return None
+
+
+def get_sensitive_tool_policy(
+    tool_name: str,
+    toolkit_identifiers: Optional[List[Optional[str]]] = None,
+    toolkit_label: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    matched_identifier = find_sensitive_tool_match(tool_name, toolkit_identifiers)
+    if not matched_identifier:
+        return None
+
+    company_name = _sensitive_action_company_name or DEFAULT_SENSITIVE_ACTION_COMPANY_NAME
+    message_template = _sensitive_action_message_template or DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPLATE
+    resolved_toolkit_label = toolkit_label or matched_identifier or 'this toolkit'
+    action_name = f'{resolved_toolkit_label}.{tool_name}' if resolved_toolkit_label else tool_name
+
+    try:
+        policy_message = message_template.format(
+            company_name=company_name,
+            tool_name=tool_name,
+            toolkit_name=resolved_toolkit_label,
+            toolkit_type=resolved_toolkit_label,
+            toolkit_label=resolved_toolkit_label,
+            action_name=action_name,
+        )
+    except Exception:
+        policy_message = DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPLATE.format(
+            company_name=company_name,
+            tool_name=tool_name,
+            toolkit_label=resolved_toolkit_label,
+            action_name=action_name,
+        )
+
+    return {
+        'matched_identifier': matched_identifier,
+        'company_name': company_name,
+        'message_template': message_template,
+        'policy_message': policy_message,
+        'toolkit_label': resolved_toolkit_label,
+        'action_name': action_name,
+    }
+
+
+def get_sensitive_tools_config() -> Dict:
+    _load_sensitive_tools_from_env()
+    return {
+        'sensitive_tools': {k: v.copy() for k, v in _sensitive_tools.items()},
+        'sensitive_action_company_name': _sensitive_action_company_name,
+        'sensitive_action_message_template': _sensitive_action_message_template,
+    }
+
+
+def has_sensitive_tools_config() -> bool:
+    _load_sensitive_tools_from_env()
+    return bool(_sensitive_tools)
+
+
 def reset_blocklist() -> None:
     """Reset the blocklist configuration (mainly for testing)."""
-    global _blocked_toolkits, _blocked_tools, _initialized
+    global _blocked_toolkits, _blocked_tools, _blocklist_initialized
     _blocked_toolkits = []
     _blocked_tools = {}
-    _initialized = False
+    _blocklist_initialized = False
+
+
+def reset_sensitive_tools() -> None:
+    global _sensitive_tools, _sensitive_action_company_name, _sensitive_action_message_template
+    global _sensitive_tools_initialized
+    _sensitive_tools = {}
+    _sensitive_action_company_name = DEFAULT_SENSITIVE_ACTION_COMPANY_NAME
+    _sensitive_action_message_template = DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPLATE
+    _sensitive_tools_initialized = False
