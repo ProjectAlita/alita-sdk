@@ -236,6 +236,10 @@ jobs:
       contents: read
       packages: read
       checks: write
+    env:
+      RP_ENABLED: ${{ inputs.reportportal }}
+      RP_PROJECT: ${{ secrets.RP_PROJECT }}
+      RP_API_KEY: ${{ secrets.RP_API_KEY }}
     strategy:
       fail-fast: false
       max-parallel: 10
@@ -262,6 +266,12 @@ jobs:
         # Match reusable runner behavior so imports resolve to checked-out code
         # rather than only what is baked into the container image.
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
+
+      - name: Set ReportPortal launch name
+        shell: bash
+        run: |
+          launch_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          echo "RP_LAUNCH=Loader Tests on Demand - ${launch_time}" >> $GITHUB_ENV
 
       - name: Ensure pytest dependencies are available
         shell: bash
