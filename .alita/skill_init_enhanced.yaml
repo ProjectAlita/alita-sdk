@@ -29,6 +29,9 @@ state:
   hierarchy_data:
     type: dict
     value: {}
+  hierarchy_markdown:
+    type: string
+    value: ''
   input:
     type: string
   intent:
@@ -37,9 +40,15 @@ state:
   level_items:
     type: list
     value: []
+  md_filepath:
+    type: string
+    value: ''
   operation_result:
     type: string
     value: ''
+  readiness_report:
+    type: dict
+    value: {}
   validation_passed:
     type: bool
     value: false
@@ -486,13 +495,240 @@ nodes:
     output:
       - hierarchy_data
     structured_output: false
+    transition: CalculateReadiness
+  - id: CalculateReadiness
+    type: code
+    code:
+      type: fixed
+      value: |-
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        
+        # Extract nested if needed
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        
+        epic = hierarchy_data.get('epic', {})
+        items = hierarchy_data.get('items', {})
+        
+        # Define completed states (case-insensitive)
+        completed_states = {'done', 'closed', 'completed', 'resolved'}
+        
+        # Count total and completed items (including epic)
+        total_items = len(items) + 1  # +1 for epic itself
+        completed_items = 0
+        
+        # Check if epic is completed
+        epic_state = epic.get('state', '').lower()
+        epic_is_done = epic_state in completed_states
+        if epic_is_done:
+            completed_items += 1
+        
+        # Collect blockers (non-completed items)
+        blockers = []
+        
+        # Break down by type
+        by_type = {}
+        
+        for item_id, item in items.items():
+            state = item.get('state', '').lower()
+            work_type = item.get('type', 'Unknown')
+            
+            # Count by type
+            if work_type not in by_type:
+                by_type[work_type] = {'total': 0, 'completed': 0}
+            by_type[work_type]['total'] += 1
+            
+            # Check if completed
+            if state in completed_states:
+                completed_items += 1
+                by_type[work_type]['completed'] += 1
+            else:
+                # Add to blockers
+                blockers.append({
+                    'id': item.get('id'),
+                    'title': item.get('title', 'Untitled'),
+                    'type': work_type,
+                    'state': item.get('state', 'Unknown'),
+                    'assigned_to': item.get('assigned_to', 'N/A'),
+                    'url': item.get('url', '')
+                })
+        
+        # Calculate completion percentage
+        completion_percentage = (completed_items / total_items * 100) if total_items > 0 else 0
+        
+        # Determine readiness status based on rules
+        if completion_percentage >= 95 and epic_is_done:
+            readiness_status = 'COMPLETE'
+            status_reason = 'completion ≥ 95% and epic completed'
+        elif completion_percentage >= 90:
+            readiness_status = 'READY'
+            status_reason = 'completion ≥ 90%'
+        elif completion_percentage >= 50:
+            readiness_status = 'IN_PROGRESS'
+            status_reason = '50% ≤ completion < 90%'
+        else:
+            readiness_status = 'AT_RISK'
+            status_reason = 'completion < 50%'
+        
+        # Generate breakdown by type
+        type_breakdown = []
+        for work_type, counts in by_type.items():
+            type_pct = (counts['completed'] / counts['total'] * 100) if counts['total'] > 0 else 0
+            type_breakdown.append({
+                'type': work_type,
+                'total': counts['total'],
+                'completed': counts['completed'],
+                'percentage': round(type_pct, 1)
+            })
+        
+        # Build formatted markdown report
+        report_lines = []
+        report_lines.append(f"# Readiness report for Epic {epic.get('id')}:\n")
+        report_lines.append("## Epic summary")
+        report_lines.append(f"Epic ID: {epic.get('id')}")
+        report_lines.append(f"Title: {epic.get('title')}")
+        report_lines.append(f"State: {epic.get('state')}")
+        report_lines.append(f"URL: {epic.get('url')}\n")
+        
+        report_lines.append("## Readiness status")
+        report_lines.append(f"Total work items (including epic): {total_items}")
+        report_lines.append(f"Completed items: {completed_items}")
+        report_lines.append(f"Completion: {round(completion_percentage, 1)}% ({completed_items} / {total_items})")
+        report_lines.append(f"Overall status: {readiness_status} ({status_reason})\n")
+        
+        # Add blockers section
+        if blockers:
+            report_lines.append(f"## Blockers (non-completed items — {len(blockers)} item(s))")
+            for blocker in blockers:
+                report_lines.append(f"ID {blocker['id']} — {blocker['type']}: {blocker['title']}")
+                report_lines.append(f"State: {blocker['state']}")
+                report_lines.append(f"Assigned to: {blocker['assigned_to']}")
+                report_lines.append(f"URL: {blocker['url']}")
+        else:
+            report_lines.append("## Blockers")
+            report_lines.append("No blockers — all items completed!")
+        
+        formatted_report = "\n".join(report_lines)
+        
+        # Build structured readiness report
+        readiness_report = {
+            'readiness_status': readiness_status,
+            'status_reason': status_reason,
+            'epic_id': epic.get('id'),
+            'epic_title': epic.get('title'),
+            'epic_state': epic.get('state'),
+            'summary': {
+                'total_items': total_items,
+                'completed_items': completed_items,
+                'pending_items': total_items - completed_items,
+                'completion_percentage': round(completion_percentage, 1)
+            },
+            'breakdown_by_type': type_breakdown,
+            'blockers': blockers,
+            'max_hierarchy_level': hierarchy_data.get('metadata', {}).get('max_level', 0),
+            'formatted_report': formatted_report
+        }
+        
+        # Add report to hierarchy data
+        hierarchy_data['readiness'] = readiness_report
+        
+        {
+            'hierarchy_data': hierarchy_data,
+            'readiness_report': readiness_report
+        }
+    input:
+      - hierarchy_data
+    output:
+      - hierarchy_data
+      - readiness_report
+    structured_output: true
+    transition: BuildHierarchyMarkdown
+  - id: BuildHierarchyMarkdown
+    type: code
+    code:
+      type: fixed
+      value: |-
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        
+        # Extract nested if needed
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        
+        epic = hierarchy_data.get('epic', {})
+        items = hierarchy_data.get('items', {})
+        
+        # Define status icons based on state
+        def get_status_icon(state):
+            state_lower = state.lower()
+            if state_lower in {'done', 'closed', 'completed', 'resolved'}:
+                return '✅'
+            elif state_lower in {'in progress', 'active', 'doing'}:
+                return '⚠️'
+            else:
+                return '❌'
+        
+        # Build tree structure recursively
+        def build_tree(item_id, prefix='', is_last=True):
+            lines = []
+            
+            # Get item data
+            if item_id == epic.get('id'):
+                item = epic
+                is_epic = True
+            else:
+                item = items.get(str(item_id), {})
+                is_epic = False
+            
+            # Format current item
+            title = item.get('title', 'Untitled')
+            state = item.get('state', 'Unknown')
+            item_type = item.get('type', 'Item')
+            status_icon = get_status_icon(state)
+            
+            if is_epic:
+                lines.append(f"{item_type}: {title}")
+            else:
+                connector = '└── ' if is_last else '├── '
+                lines.append(f"{prefix}{connector}{item_type}: {title} (ID {item_id}) {status_icon} {state}")
+            
+            # Get children
+            children_ids = item.get('children_ids', [])
+            
+            if children_ids:
+                for idx, child_id in enumerate(children_ids):
+                    is_last_child = (idx == len(children_ids) - 1)
+                    
+                    if is_epic:
+                        child_prefix = ''
+                    else:
+                        extension = '    ' if is_last else '│   '
+                        child_prefix = prefix + extension
+                    
+                    lines.extend(build_tree(child_id, child_prefix, is_last_child))
+            
+            return lines
+        
+        # Build the hierarchy markdown
+        md_lines = []
+        md_lines.append("# Work item hierarchy\n")
+        md_lines.extend(build_tree(epic.get('id')))
+        md_lines.append("\n(Status icons: ✅ Done/Closed/Completed — ⚠️ In Progress/Active — ❌ To Do/New/other)")
+        
+        hierarchy_markdown = "\n".join(md_lines)
+        
+        {
+            'hierarchy_markdown': hierarchy_markdown
+        }
+    input:
+      - hierarchy_data
+    output:
+      - hierarchy_markdown
+    structured_output: true
     transition: RouteSaving
   - id: RouteSaving
     type: router
     condition: |-
-      {% if artifact_filepath %}
-      SaveHierarchyData
-      {% endif %}
+      {% if artifact_filepath %}SaveHierarchyData{% endif %}
     default_output: SetDefaults
     input:
       - artifact_filepath
@@ -513,12 +749,14 @@ nodes:
         timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
         filename = f"{prefix}_{timestamp}.json"
 
-        filename
+        {
+            "artifact_filepath": filename
+        }
     input:
       - epic_id
     output:
       - artifact_filepath
-    structured_output: false
+    structured_output: true
     transition: SaveHierarchyData
   - id: SaveHierarchyData
     type: toolkit
@@ -542,15 +780,65 @@ nodes:
     structured_output: true
     tool: createFile
     toolkit_name: epic_artifacts
+    transition: PrepareMarkdownFilename
+  - id: PrepareMarkdownFilename
+    type: code
+    code:
+      type: fixed
+      value: |-
+        artifact_filepath = alita_state.get('artifact_filepath', '')
+        
+        # artifact_filepath should always be set at this point (from SetDefaults or user input)
+        # Simply convert .json to .md
+        if artifact_filepath and artifact_filepath.strip():
+            if artifact_filepath.endswith('.json'):
+                md_filepath = artifact_filepath[:-5] + '.md'
+            else:
+                md_filepath = artifact_filepath + '.md'
+        else:
+            # Fallback: should not happen, but handle gracefully
+            md_filepath = 'hierarchy.md'
+        
+        {'md_filepath': md_filepath}
+    input:
+      - artifact_filepath
+    output:
+      - md_filepath
+    structured_output: true
+    transition: SaveHierarchyMarkdown
+  - id: SaveHierarchyMarkdown
+    type: toolkit
+    input:
+      - hierarchy_markdown
+      - md_filepath
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filedata:
+        type: variable
+        value: hierarchy_markdown
+      filename:
+        type: variable
+        value: md_filepath
+      filepath:
+        type: fixed
+        value: null
+    output: []
+    structured_output: true
+    tool: createFile
+    toolkit_name: epic_artifacts
     transition: FormatSuccessResult
   - id: FormatSuccessResult
     type: state_modifier
     input:
       - artifact_filepath
+      - md_filepath
       - epic_id
+      - readiness_report
     output:
       - operation_result
-    template: '{"operation": "fetch_hierarchy", "status": "success", "item_id": {{ epic_id }}, "filepath": "{{ artifact_filepath }}"}'
+    template: '{"operation": "fetch_hierarchy", "status": "success", "item_id": {{ epic_id }}, "filepath": "{{ artifact_filepath }}", "md_filepath": "{{ md_filepath }}", "readiness_report": {{ readiness_report | tojson }}}'
     transition: ReplyComposer
     variables_to_clean: []
   - id: ReplyComposer
@@ -568,7 +856,10 @@ nodes:
 
           * Be friendly and professional
           * Formulate final output clearly
-          * For successful operations: Include file location and summary statistics (items count, hierarchy depth)
+          * For successful operations: 
+            - Display the formatted readiness report from operation_result.readiness_report.formatted_report
+            - Include both file locations (JSON and MD) at the end
+            - Do NOT summarize or rewrite the report - output it verbatim as markdown
           * For errors: Provide clear explanation and suggest next steps
           * Don't suggest further operations unless it's error recovery guidance
       task:
@@ -577,7 +868,8 @@ nodes:
           Operation result:
           {operation_result}
 
-          Compose a clear message about the operation outcome.
+          Extract and display the formatted_report exactly as provided in the readiness_report field.
+          Then mention both saved file locations (JSON and Markdown).
     output: []
     structured_output: false
     transition: END
