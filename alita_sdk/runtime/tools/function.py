@@ -198,6 +198,10 @@ alita_state = json.loads(state_json)
                     return messages_dict
                 else:
                     return { self.output_variables[0]: object_to_dict(tool_result) }
+        except ValueError as value_error:
+            # re-raise the error as ToolException since it is related to toolkit configuration:
+            # example: incorrect input mappings etc.
+            raise ToolException(str(value_error))
         # save the whole error message to the tool's output
         except Exception as e:
             return {"messages": [
