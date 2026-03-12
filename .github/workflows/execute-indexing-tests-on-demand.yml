@@ -235,6 +235,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      checks: write
     strategy:
       fail-fast: false
       max-parallel: 10
