@@ -56,6 +56,11 @@ on:
         required: false
         type: boolean
         default: false
+      is_pr:
+        description: 'Whether this run should publish PR test annotations'
+        required: false
+        type: boolean
+        default: false
       extra_pytest_args:
         description: 'Additional pytest args appended as-is (optional), e.g. -v -s'
         required: false
@@ -373,6 +378,13 @@ jobs:
         if: always()
         with:
           report_paths: 'tests/reports/test-results.xml'
+
+      - name: PUBLISH TEST RESULTS
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: inputs.is_pr == true
+        with:
+          files: |
+            tests/reports/**/*.xml
       
       - name: Upload test results
         if: always()
