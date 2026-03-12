@@ -17,7 +17,7 @@ from langchain_anthropic import ChatAnthropic
 
 from ..langchain.assistant import Assistant as LangChainAssistant
 from .artifact import Artifact
-from ..middleware import TransformErrorStrategy, LoggingStrategy
+from ..middleware import TransformErrorStrategy, LoggingStrategy, SensitiveToolGuardMiddleware
 from ..utils.mcp_oauth import McpAuthorizationRequired
 from ...tools import get_available_toolkit_models, instantiate_toolkit
 from ...tools.base_indexer_toolkit import IndexTools
@@ -702,6 +702,25 @@ class AlitaClient:
         except Exception as e:
             logger.warning(f"Failed to auto-inject SummarizationMiddleware: {e}")
 
+    def _inject_sensitive_tool_guard(
+        self,
+        middleware_list: list,
+        conversation_id: Optional[str] = None,
+    ) -> None:
+        """Inject sensitive tool authorization middleware when configured."""
+        try:
+            from ..toolkits.security import has_sensitive_tools_config
+
+            if not has_sensitive_tools_config():
+                return
+
+            if any(isinstance(mw, SensitiveToolGuardMiddleware) for mw in middleware_list):
+                return
+
+            middleware_list.append(SensitiveToolGuardMiddleware(conversation_id=conversation_id))
+        except Exception as e:
+            logger.warning(f"Failed to auto-inject SensitiveToolGuardMiddleware: {e}")
+
     def application(self, application_id: int, application_version_id: int,
                     tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
                     app_type=None, memory=None, runtime='langchain',
@@ -761,6 +780,9 @@ class AlitaClient:
             )
             middleware_list.append(planning_middleware)
             logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
+
+        # Inject sensitive tool authorization guard when configured
+        self._inject_sensitive_tool_guard(middleware_list, conversation_id)
 
         # add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
         # Can be disabled by setting exception_handling_enabled=False
@@ -1287,6 +1309,9 @@ class AlitaClient:
 
         # Automatically compresses conversation history when a threshold is exceeded
         self._inject_summarization(middleware_list, context_settings, conversation_id)
+
+        # Inject sensitive tool authorization guard when configured
+        self._inject_sensitive_tool_guard(middleware_list, conversation_id)
 
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler

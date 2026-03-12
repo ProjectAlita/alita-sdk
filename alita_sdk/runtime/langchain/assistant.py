@@ -192,26 +192,24 @@ class Assistant:
                 if context_messages:
                     logger.info(f"Middleware context: {context_messages}")
 
-            # Apply tool wrapping from ToolExceptionHandlerMiddleware if present
+            # Validate only one ToolExceptionHandlerMiddleware
             exception_handlers = [mw for mw in middleware if isinstance(mw, ToolExceptionHandlerMiddleware)]
-            if exception_handlers:
-                # Validate only one exception handler is present
-                if len(exception_handlers) > 1:
-                    raise ValueError(
-                        f"Only one ToolExceptionHandlerMiddleware is supported per assistant. "
-                        f"Found {len(exception_handlers)} instances."
-                    )
+            if len(exception_handlers) > 1:
+                raise ValueError(
+                    f"Only one ToolExceptionHandlerMiddleware is supported per assistant. "
+                    f"Found {len(exception_handlers)} instances."
+                )
 
-                # Use the exception handler middleware
-                exception_handler = exception_handlers[0]
-                wrapped_tools = []
-                for tool in self.tools:
-                    wrapped_tool = exception_handler.wrap_tool(tool)
-                    wrapped_tools.append(wrapped_tool)
-                self.tools = wrapped_tools
-                # Also wrap always-bind tools
-                self._always_bind_tools = [exception_handler.wrap_tool(t) for t in self._always_bind_tools]
-                logger.info(f"Wrapped {len(self.tools)} tools with ToolExceptionHandlerMiddleware")
+            # Apply tool wrapping from all middleware that support wrap_tool
+            wrapped_tools = list(self.tools)
+            wrapped_always_bind_tools = list(self._always_bind_tools)
+            for mw in middleware:
+                if hasattr(mw, 'wrap_tool'):
+                    wrapped_tools = [mw.wrap_tool(tool) for tool in wrapped_tools]
+                    wrapped_always_bind_tools = [mw.wrap_tool(tool) for tool in wrapped_always_bind_tools]
+
+            self.tools = wrapped_tools
+            self._always_bind_tools = wrapped_always_bind_tools
 
         # In lazy tools mode, don't rename tools - ToolRegistry handles namespacing by toolkit.
         # Only add suffixes in non-lazy mode where tools are bound directly to LLM.
