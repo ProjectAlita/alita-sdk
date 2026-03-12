@@ -76,7 +76,7 @@ GitLabReadFile = create_model(
 GitLabUpdateFile = create_model(
     "GitLabUpdateFile",
     file_path=(str, Field(description="Path of the file to update")),
-    update_query=(str, Field(description=UPDATE_FILE_PROMPT_NO_PATH)),
+    update_query=(str, Field(description=UPDATE_FILE_PROMPT_NO_PATH, json_schema_extra={'multiline': True})),
     repository=(Optional[str], Field(description="Name of the repository", default=None)),
     branch=(str, Field(description=branch_description))
 )

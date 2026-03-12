@@ -44,7 +44,7 @@ CreateFileModel = create_model(
 UpdateFileModel = create_model(
     "UpdateFileModel",
     file_path=(str, Field(description="The path of the file")),
-    update_query=(str, Field(description=UPDATE_FILE_PROMPT_NO_PATH)),
+    update_query=(str, Field(description=UPDATE_FILE_PROMPT_NO_PATH, json_schema_extra={'multiline': True})),
     branch=(str, Field(description="The branch to update the file in")),
 )
 

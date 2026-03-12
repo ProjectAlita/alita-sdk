@@ -141,7 +141,7 @@ class ArgsSchema(Enum):
         ),
         update_query=(
             str,
-            Field(description=UPDATE_FILE_PROMPT_NO_PATH),
+            Field(description=UPDATE_FILE_PROMPT_NO_PATH, json_schema_extra={'multiline': True}),
         ),
     )
     DeleteFile = create_model(

@@ -38,7 +38,7 @@ ReadFileModel = create_model(
 )
 UpdateFileModel = create_model(
     "UpdateFileModel",
-    file_query=(str, Field(description=UPDATE_FILE_PROMPT_WITH_PATH)),
+    file_query=(str, Field(description=UPDATE_FILE_PROMPT_WITH_PATH, json_schema_extra={'multiline': True})),
     branch=(str, Field(description="The branch to update the file in")),
 )
 CommentOnIssueModel = create_model(

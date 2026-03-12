@@ -253,7 +253,7 @@ NEW <<<<
 new content
 >>>> NEW
 
-Multiple OLD/NEW pairs can be provided for multiple edits.""")),
+Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra={'multiline': True})),
             bucket_name=(Optional[str], Field(
                 description="Bucket name. If not provided, uses toolkit-configured default bucket.",
                 default=None
