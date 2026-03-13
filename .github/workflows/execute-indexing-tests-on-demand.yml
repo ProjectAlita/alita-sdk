@@ -217,6 +217,7 @@ jobs:
       checks: write
     env:
       RP_ENABLED: ${{ inputs.reportportal }}
+      RP_ENDPOINT: ${{ secrets.RP_ENDPOINT }}
       RP_PROJECT: ${{ secrets.RP_PROJECT }}
       RP_API_KEY: ${{ secrets.RP_API_KEY }}
     strategy:
@@ -250,14 +251,14 @@ jobs:
         shell: bash
         run: |
           launch_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          echo "RP_LAUNCH=Loader Tests on Demand - ${launch_time}" >> $GITHUB_ENV
+          echo "RP_LAUNCH=Loader Tests on Demand - ${{ matrix.data.loader }} - ${launch_time}" >> $GITHUB_ENV
 
       - name: Ensure pytest dependencies are available
         shell: bash
         run: |
           python -m pip install -q pytest pytest-dotenv
           if [[ "${{ inputs.reportportal }}" == "true" ]]; then
-            python -m pip install -q pytest-reportportal
+            python -m pip install -q pytest-reportportal reportportal-client
           fi
           python -m pytest --version
 

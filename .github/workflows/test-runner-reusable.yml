@@ -69,6 +69,7 @@ jobs:
       QTEST_API_TOKEN: ${{ secrets.QTEST_API_TOKEN }}
       RP_ENABLED: ${{ inputs.enable_rp_reporting }}
       RP_PROJECT: ${{ secrets.RP_PROJECT }}
+      RP_ENDPOINT: ${{ secrets.RP_ENDPOINT }}
       RP_API_KEY: ${{ secrets.RP_API_KEY }}
       TESTRAIL_PASSWORD: ${{ secrets.TESTRAIL_PASSWORD }}
       JIRA_PROJECT: "EL"
