@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       run_mode:
-        description: 'How to run tests: matrix (suite-based), mark (-m expression), nodeid (single pytest node), path (test file or dir)'
+        description: 'How to run tests: matrix (suite-based), mark (-m expression), nodeid (single pytest node)'
         required: true
         type: choice
         default: 'matrix'
@@ -13,7 +13,6 @@ on:
           - matrix
           - mark
           - nodeid
-          - path
       test_suites:
         description: 'Loader tests to execute (all discovers all document loader pytest files; custom allows comma-separated loader names or test file names/paths)'
         required: true
@@ -41,11 +40,6 @@ on:
         required: false
         type: string
         default: ''
-      pytest_path:
-        description: 'Pytest target path (used when run_mode=path), e.g. tests/runtime/langchain/document_loaders/ or specific test file'
-        required: false
-        type: string
-        default: 'tests/runtime/langchain/document_loaders/'
       exclude_suites:
         description: 'Comma-separated loader names to exclude from execution (applies to "all" mode)'
         required: false
@@ -53,11 +47,6 @@ on:
         default: ''
       reportportal:
         description: 'Add --reportportal to pytest command'
-        required: false
-        type: boolean
-        default: false
-      is_pr:
-        description: 'Whether this run should publish PR test annotations'
         required: false
         type: boolean
         default: false
@@ -148,21 +137,6 @@ jobs:
               exit 0
             fi
             matrix_json="[{\"loader\":\"nodeid\",\"mode\":\"nodeid\",\"nodeid\":\"${nodeid//\"/\\\"}\"}]"
-          elif [[ "$run_mode" == "path" ]]; then
-            target_path=$(trim "${{ inputs.pytest_path }}")
-            if [[ -z "$target_path" ]]; then
-              echo "::error::run_mode=path requires pytest_path input"
-              echo "has-tests=false" >> $GITHUB_OUTPUT
-              echo "loader_matrix=[]" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            if [[ ! -e "$target_path" ]]; then
-              echo "::error::pytest_path does not exist: $target_path"
-              echo "has-tests=false" >> $GITHUB_OUTPUT
-              echo "loader_matrix=[]" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            matrix_json="[{\"loader\":\"path\",\"mode\":\"path\",\"test_path\":\"${target_path//\"/\\\"}\"}]"
           fi
 
           if [[ "$run_mode" != "matrix" ]]; then
@@ -379,13 +353,6 @@ jobs:
         with:
           report_paths: 'tests/reports/test-results.xml'
 
-      - name: PUBLISH TEST RESULTS
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always() && inputs.is_pr == true
-        with:
-          files: |
-            tests/reports/**/*.xml
-      
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

@@ -51,27 +51,6 @@ Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
 addopts = "-v -s --junit-xml=tests/reports/test-results.xml"
 testpaths = ["tests"]
 env_files = [".env"]
-markers = [
-    "loader_csv: tests for AlitaCSVLoader",
-    "loader_json: tests for AlitaJSONLoader",
-    "loader_markdown: tests for AlitaMarkdownLoader",
-    "loader_text: tests for AlitaTextLoader",
-    "content_empty: tests with empty input files",
-    "content_simple: tests with simple/minimal content",
-    "content_large: tests with large content files",
-    "content_unicode: tests with unicode/multi-byte content",
-    "content_special_characters: tests with special characters",
-    "content_nested: tests with nested data structures",
-    "content_array: tests with array/list data structures",
-    "content_headers: tests with header-structured content",
-    "content_markdown: tests with markdown-formatted content",
-    "feature_chunking: tests exercising chunking / max_tokens logic",
-    "performance: tests using large files (slow, performance-sensitive)",
-    "edge_empty_input: edge case - empty input file",
-    "edge_encoding: edge case - encoding / unicode handling",
-    "edge_special_chars: edge case - special character handling",
-    "edge_markdown_in_txt: edge case - markdown content in plain-text files",
-]
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",

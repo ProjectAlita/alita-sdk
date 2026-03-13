@@ -12,38 +12,61 @@ Directory layout (base_dir = tests/runtime/langchain/document_loaders/test_data/
 import json
 import logging
 from dataclasses import dataclass, field
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 try:
+    # Recommended pytest integration path from ReportPortal docs:
+    # use Python logging with RPLogger and run pytest with --reportportal.
+    from reportportal_client import RPLogger
     from reportportal_client import step as rp_step
-    from reportportal_client import current as _rp_current
-    from reportportal_client.helpers import timestamp as _rp_timestamp
+except Exception:  # pragma: no cover - RP is optional in local runs
+    RPLogger = None  # type: ignore[assignment]
+    rp_step = None  # type: ignore[assignment]
 
-    def _rp_log(msg: str) -> None:
-        """Log directly to the current RP item, bypassing Python log-level filters."""
-        rp = _rp_current()
-        if rp:
-            item_id = rp.current_item()
-            if item_id:
-                rp.log(_rp_timestamp(), msg, level="INFO", item_id=item_id)
-                # Ensure logs are sent immediately by flushing the batcher
-                if hasattr(rp, '_log_batcher'):
-                    rp._log_batcher.flush()
 
-except Exception as e:  # pragma: no cover - test fallback when RP is unavailable
-    import sys
-    print(f"Failed to import RP logging: {e}", file=sys.stderr)
-    from contextlib import contextmanager
+def _get_loader_rp_logger() -> logging.Logger:
+    """Create logger compatible with pytest-reportportal integration.
 
+    With ``--reportportal`` enabled, INFO+ records are forwarded by the plugin
+    handler to ReportPortal. Without RP plugin or package, this still logs
+    locally through normal Python logging.
+    """
+    if RPLogger is not None:
+        current_logger_cls = logging.getLoggerClass()
+        if not issubclass(current_logger_cls, RPLogger):
+            logging.setLoggerClass(RPLogger)
+    rp_logger = logging.getLogger("tests.document_loaders")
+    rp_logger.setLevel(logging.INFO)
+    return rp_logger
+
+
+_RP_LOGGER = _get_loader_rp_logger()
+
+
+if rp_step is None:  # pragma: no cover - fallback when RP is unavailable
     @contextmanager
     def rp_step(_message: str):  # type: ignore[misc]
         yield
 
-    def _rp_log(msg: str) -> None:  # type: ignore[misc]
-        pass
+
+def _rp_log(msg: str, *, attachment: Optional[Dict[str, Any]] = None) -> None:
+    """Emit loader logs through the RP-compatible Python logger.
+
+    If attachment is provided and RPLogger is active, attach artifact to the log
+    item (per ReportPortal pytest integration docs). Otherwise log plain text.
+    """
+    if (
+        attachment is not None
+        and RPLogger is not None
+        and isinstance(_RP_LOGGER, RPLogger)
+    ):
+        _RP_LOGGER.info(msg, attachment=attachment)
+        return
+    _RP_LOGGER.info(msg)
 
 
 def _load_documents_with_production_config(file_path: Path, config: Dict[str, Any]) -> List:
@@ -115,7 +138,16 @@ def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_n
         status = "PASSED" if cmp.passed else "FAILED"
         _rp_log(f"Result: {status} | actual={cmp.actual_count} docs, expected={cmp.expected_count} docs")
         if cmp.diffs:
-            _rp_log("Diffs:\n" + "\n".join(str(d) for d in cmp.diffs))
+            diffs_text = "\n".join(str(d) for d in cmp.diffs)
+            _rp_log("Diffs:\n" + diffs_text)
+            _rp_log(
+                "Diff details attachment",
+                attachment={
+                    "name": f"{loader_name}_diffs.txt",
+                    "data": diffs_text.encode("utf-8"),
+                    "mime": "text/plain",
+                },
+            )
         return cmp
 
 # ---------------------------------------------------------------------------

@@ -11,8 +11,9 @@ from typing import Any, Dict, List
 
 import pytest
 
-_PROJECT_ROOT = Path(__file__).parent.parent.resolve()
-LOADERS_DIR = _PROJECT_ROOT / "tests" / "runtime" / "langchain" / "document_loaders" / "test_data"
+# This module lives in: .../document_loaders/test_data/scripts/
+# test_data directory is one level up from here.
+LOADERS_DIR = Path(__file__).resolve().parent.parent
 
 
 def collect_loader_test_params(loader_name: str) -> List:

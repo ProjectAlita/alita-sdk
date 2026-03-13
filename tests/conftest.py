@@ -13,10 +13,10 @@ Custom markers
 
 Shared helpers
 --------------
-  See loader_helpers.py for collect_loader_test_params() and run_loader_assert().
+  See tests/runtime/langchain/document_loaders/test_data/scripts/loader_helpers.py
+  for collect_loader_test_params() and run_loader_assert().
 """
 
-import logging
 import os
 import sys
 from pathlib import Path
@@ -55,43 +55,11 @@ _RP_ENV_MAP = {
 }
 
 
-def pytest_sessionstart(session):
-  """Warm up toolkit registry before loader constants are imported.
-
-  Some test paths import ``document_loaders.constants`` very early, which can
-  indirectly traverse ``alita_sdk.tools.chunkers`` and trigger a partial-init
-  circular import window around ``loaders_map``. Preloading ``alita_sdk.tools``
-  once at session start avoids that timing issue in tests without changing
-  production code paths.
-  """
-  import alita_sdk.tools  # noqa: F401
-
-
-class _SuppressOptionalToolkitImportWarnings(logging.Filter):
-  """Hide optional toolkit import warnings during tests.
-
-  Loader tests import chunkers through ``alita_sdk.tools`` which may attempt
-  optional toolkit discovery and emit a warning listing failed imports.
-  That warning is noisy and irrelevant for loader-focused tests, so suppress
-  only that specific log record here instead of changing runtime behavior.
-  """
-
-  def filter(self, record: logging.LogRecord) -> bool:
-    return not (
-      record.name == "alita_sdk.tools"
-      and record.levelno == logging.WARNING
-      and record.getMessage().startswith("Failed imports:")
-    )
-
-
 def pytest_configure(config):
   config.addinivalue_line(
     "markers",
     "risky: known-unstable or non-critical test; skip with -m 'not risky'",
   )
-  filter_instance = _SuppressOptionalToolkitImportWarnings()
-  logging.getLogger().addFilter(filter_instance)
-  logging.getLogger("alita_sdk.tools").addFilter(filter_instance)
   for ini_key, env_key in _RP_ENV_MAP.items():
     val = os.environ.get(env_key)
     if val and not config.inicfg.get(ini_key):
