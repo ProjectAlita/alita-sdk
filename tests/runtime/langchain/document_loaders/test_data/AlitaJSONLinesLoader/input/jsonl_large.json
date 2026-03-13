@@ -1,0 +1,11 @@
+{
+  "tags": ["loader:jsonlines", "content:large", "feature:chunking"],
+  "file_path": "../files/jsonl_large.jsonl",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 512},
+    {"max_tokens": 1024},
+    {"max_tokens": 2000}
+  ]
+}

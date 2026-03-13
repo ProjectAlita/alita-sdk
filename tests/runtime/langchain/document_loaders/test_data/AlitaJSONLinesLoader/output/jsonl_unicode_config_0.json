@@ -1,0 +1,30 @@
+[
+  {
+    "page_content": "{\"text\": \"Hello \\u4e16\\u754c\", \"emoji\": \"\\ud83c\\udf0d\\ud83d\\ude80\", \"language\": \"mixed\"}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_unicode.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"text\": \"\\u0645\\u0631\\u062d\\u0628\\u0627 \\u0627\\u0644\\u0639\\u0627\\u0644\\u0645\", \"emoji\": \"\\ud83c\\udf19\\u2728\", \"language\": \"arabic\"}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_unicode.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"text\": \"\\u041f\\u0440\\u0438\\u0432\\u0435\\u0442 \\u043c\\u0438\\u0440\", \"emoji\": \"\\u2744\\ufe0f\\ud83c\\udfd4\\ufe0f\", \"language\": \"russian\"}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_unicode.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"text\": \"\\u65e5\\u672c\\u8a9e\\u30c6\\u30b9\\u30c8\", \"emoji\": \"\\ud83d\\uddfe\\ud83c\\udf63\", \"language\": \"japanese\"}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_unicode.jsonl",
+      "chunk_id": 1
+    }
+  }
+]

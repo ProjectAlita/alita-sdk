@@ -1,0 +1,23 @@
+{
+  "file_path": "../files/snail.bmp",
+  "tags": ["loader_image", "feature_llm", "feature_multimodal", "format_bmp"],
+  "configs": [
+    {
+      "_name": "ocr_only",
+      "use_llm": false,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_default_prompt",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_nature_analysis",
+      "use_llm": true,
+      "prompt": "Describe this nature/wildlife image in detail including: 1) Main subject (snail characteristics, shell patterns, body features), 2) Environment and setting, 3) Colors and textures, 4) Any additional elements visible (plants, background, etc.), 5) Image quality and style (photo, illustration, macro, etc.).",
+      "max_tokens": 2048
+    }
+  ]
+}

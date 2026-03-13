@@ -22,6 +22,7 @@ on:
           - all
           - custom
           - csv
+          - image
           - json
           - markdown
           - text
@@ -237,6 +238,10 @@ jobs:
         PYTHONPATH: /app
         PYTHONDONTWRITEBYTECODE: "1"
         PYTHONUNBUFFERED: "1"
+        DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
+        ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_STAGE }}
+        PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
+        DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
     
     steps:
       - name: Checkout repository
@@ -293,6 +298,13 @@ jobs:
             python -m pip install -q pytest
           fi
           python -m pytest --version
+
+      - name: Install additional Python dependencies
+        shell: bash
+        run: |
+          # Install packages not bundled in the base image.
+          # Add new packages here instead of rebuilding the Docker image.
+          pip install --no-cache-dir "deepeval>=3.4.6"
 
       - name: Run document loader tests with pytest
         id: run-tests
@@ -393,4 +405,5 @@ jobs:
           name: test-results-${{ matrix.data.loader }}
           path: |
             ./tests/reports/
+            ./tests/runtime/langchain/document_loaders/test_results/
           retention-days: 30

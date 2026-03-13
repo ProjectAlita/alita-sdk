@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "## Detailed Image Description\n\n### Overall Object\nThis is a **children's bicycle** designed for young kids, displayed against a white background.\n\n---\n\n### Colors\n- **Primary color**: Bright **magenta/hot pink** frame\n- **Secondary colors**: **Pink** accents, **silver/chrome** metal parts, **black** tires\n- **Accent colors**: **Yellow** decorative elements\n\n---\n\n### Key Components\n\n#### Frame & Structure\n- **Pink/magenta bicycle frame** with a low, child-friendly design\n- **Silver/chrome handlebar stem and support bars**\n- **Training wheels** on both sides (small pink wheels for stability)\n\n#### Wheels\n- **Two main black rubber tires** with white/pink wheel covers/hubcaps\n- **Two small pink training wheels** for balance support\n\n#### Handlebar Area\n- **Pink handlebars** with **pink hand grips**\n- A **front basket** in pink with a **cartoon bee decoration** on it\n- A **small bell or decoration** on the handlebar\n\n#### Seat Area\n- **Pink padded seat**\n- A **backrest** behind the seat with a **yellow smiley face** decoration\n- A **rear carrier/rack** in silver metal\n\n---\n\n### Text Visible\n- **\"BSA\"** – brand name, visible on the frame and rear carrier\n- **\"CHAMP\"** – model name on the frame\n- **\"BSA HONEY\"** – written on the lower frame area\n\n---\n\n### Decorative Elements\n- **Cartoon bee** graphics on the basket and frame\n- **Smiley face** on the seat backrest\n- Child-friendly, colorful overall aesthetic",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg"
+    }
+  }
+]

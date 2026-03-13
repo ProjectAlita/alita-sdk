@@ -1,0 +1,3 @@
+{"user": {"id": 1, "profile": {"name": "Alice", "email": "alice@example.com", "preferences": {"theme": "dark", "notifications": true}}}}
+{"user": {"id": 2, "profile": {"name": "Bob", "email": "bob@example.com", "preferences": {"theme": "light", "notifications": false}}}}
+{"user": {"id": 3, "profile": {"name": "Charlie", "email": "charlie@example.com", "preferences": {"theme": "auto", "notifications": true}}}}

@@ -1,0 +1,10 @@
+{
+  "tags": ["loader:markdown", "feature:code_blocks"],
+  "file_path": "../files/markdown_code_blocks.md",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 512},
+    {"max_tokens": 1024}
+  ]
+}

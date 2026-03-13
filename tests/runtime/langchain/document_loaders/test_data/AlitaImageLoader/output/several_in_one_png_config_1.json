@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "This image shows a dark-themed AI chat interface, likely LibreChat or a similar AI assistant platform. The main area displays a conversation about AI Agents, showing a list of topics in a table format, including Cooperation, Guardrails, and Memory. In the corners of the image there is a pink children's bicycle visible in the upper area and a wildlife painting in the lower area.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/several_in_one.png"
+    }
+  }
+]

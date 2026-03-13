@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "{\"subject\": \"Children's bicycle with basket\",\"color\": \"pink\", \"text_content\": [\"BSA\", \"CHAMP\", \"HONEY\"], \"estimated_age_group\": \"2-6 years\", \"brand_visible\": \"BSA\"}",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg"
+    }
+  }
+]
