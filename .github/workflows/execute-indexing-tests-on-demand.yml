@@ -247,6 +247,16 @@ jobs:
         # rather than only what is baked into the container image.
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
 
+      - name: Configure Deno for sandbox execution
+        # In CI the CWD when tests run is a subdirectory of $GITHUB_WORKSPACE,
+        # so Deno's --node-modules-dir=auto would try to create/read node_modules
+        # there — outside allow_read/allow_write in the sandbox. Writing
+        # deno.json with nodeModulesDir=none disables local node_modules entirely;
+        # Deno uses only the global DENO_DIR=/app/ cache (pre-installed in image),
+        # which IS within allow_read/allow_write — matching Docker behaviour.
+        shell: bash
+        run: echo '{"nodeModulesDir":"none"}' > "$GITHUB_WORKSPACE/deno.json"
+
       - name: Set ReportPortal launch name
         shell: bash
         run: |
