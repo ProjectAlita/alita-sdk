@@ -1906,7 +1906,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
         self,
         page_id: str,
         filepath: str,
-        filename: str,
+        filename: Optional[str] = None,
         alt_text: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
     ) -> str:
@@ -1951,7 +1951,7 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             page_url = self._build_page_url(page['_links']['webui'])
             file_type = "image" if mime_type.startswith('image/') else "video" if mime_type.startswith('video/') else "file"
             return (
-                f"File '{filename}' uploaded and added to page {page_id} as {file_type}. "
+                f"File '{uploaded_filename}' uploaded and added to page {page_id} as {file_type}. "
                 f"View at: {page_url}"
             )
             
