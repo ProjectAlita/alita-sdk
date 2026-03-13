@@ -107,6 +107,7 @@ nodes:
           2. no_errors: Output does NOT contain any error indicators
           3. has_data: Response contains 'data' field indicating successful query
           4. has_results: Response structure includes expected fields (getTests, results)
+          5. {'data': {'getTests': {'total': 0, 'results': []}}}"}} - total should be > 0 and results should not be empty array
 
           Return JSON test_results:
           {{
