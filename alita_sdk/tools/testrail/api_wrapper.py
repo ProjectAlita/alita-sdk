@@ -701,10 +701,10 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             if not file_bytes:
                 raise ToolException(f"Failed to download artifact {filepath}")
 
-            suffix = Path(filename).suffix
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_dir = tempfile.mkdtemp()
+            tmp_path = os.path.join(tmp_dir, filename)
+            with open(tmp_path, 'wb') as tmp:
                 tmp.write(file_bytes)
-                tmp_path = tmp.name
 
             try:
                 result = self._client.attachments.add_attachment_to_case(
@@ -718,6 +718,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
             finally:
                 try:
                     os.unlink(tmp_path)
+                    os.rmdir(tmp_dir)
                 except Exception as e:
                     logger.warning(f"Failed to delete temp file {tmp_path}: {e}")
 
