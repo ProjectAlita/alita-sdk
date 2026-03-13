@@ -232,7 +232,7 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
       env:
-        SANDBOX_BASE: /app/
+        SANDBOX_BASE: ${{ github.workspace }}
         DENO_DIR: /app/
         PYTHONPATH: /app
         PYTHONDONTWRITEBYTECODE: "1"
