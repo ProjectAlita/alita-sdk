@@ -1,0 +1,7 @@
+{
+    "tags": ["loader:text", "content:empty", "edge:empty-input"],
+    "file_path": "../files/text_empty.txt",
+    "configs": [
+        {}
+    ]
+}

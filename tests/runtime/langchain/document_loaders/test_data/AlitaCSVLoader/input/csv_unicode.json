@@ -1,0 +1,8 @@
+{
+    "tags": ["loader:csv", "content:unicode", "edge:encoding"],
+    "file_path": "../files/csv_unicode.csv",
+    "configs": [
+        {},
+        {"max_tokens": 1024}
+    ]
+}

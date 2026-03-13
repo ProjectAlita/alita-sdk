@@ -1,0 +1,9 @@
+{
+  "tags": ["loader:markdown", "content:large", "feature:chunking", "performance"],
+  "file_path": "../files/markdown_large.md",
+  "configs": [
+    {},
+    {"max_tokens": 256},
+    {"max_tokens": 1024}
+  ]
+}

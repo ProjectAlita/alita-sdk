@@ -37,6 +37,7 @@ tools = [ "dulwich==0.21.6", "paramiko==3.3.1", "pygithub==2.3.0", "python-gitla
 community = [ "retry-extended==0.2.3", "pyobjtojson==0.3", "elitea-analyse==0.1.2", "networkx>=3.0",]
 all = [ "alita-sdk[runtime]", "alita-sdk[tools]", "alita-sdk[community]",]
 dev = [ "pytest", "pytest-cov", "black", "flake8", "mypy",]
+reporting = [ "pytest-reportportal>=5.3", "pytest-dotenv",]
 cli = [ "click>=8.1.0", "rich>=13.0.0", "pyyaml>=6.0", "langchain-mcp-adapters",]
 
 [project.scripts]
@@ -45,6 +46,17 @@ alita = "alita_sdk.cli.cli:main"
 [project.urls]
 Homepage = "https://projectalita.ai"
 Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
+
+[tool.pytest.ini_options]
+addopts = "-v -s --junit-xml=tests/reports/test-results.xml"
+testpaths = ["tests"]
+env_files = [".env"]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning",
+    "ignore::cryptography.utils.CryptographyDeprecationWarning",
+]
 
 [tool.setuptools.package-data]
 alita_sdk = [ "*.md", "*.txt", "*.yml", "*.yaml", "prompts/*.md", "docs/*.md", "docs/code/*.md", "docs/faq/*.md", "docs/prompts/*.md",]

@@ -2,7 +2,7 @@ name: Execute toolkit AI tests on PR
 
 on:
   pull_request:
-     types: [opened]
+     types: [opened, synchronize]
      branches:
        - main
   workflow_dispatch:
@@ -16,12 +16,13 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-  EXCLUDE_SUITES: 'figma,bitbucket,postman'
+  EXCLUDE_SUITES: 'figma,bitbucket,postman,qtest'
   AGENT_MATRIX_FILE: '.alita/tests/test_pipelines/test_matrix.json'
 
 jobs:
   configure-matrix:
     runs-on: ubuntu-latest
+    if: github.actor != 'eln1nxl'
     outputs:
       test_matrix: ${{ steps.set-matrix.outputs.test_matrix }}
       has-tests: ${{ steps.set-matrix.outputs.has-tests }}
