@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -37,6 +38,10 @@ LOADER_SPECIAL_FIELDS = {
     },
     "AlitaJSONLinesLoader": {
         "source": "path_suffix",
+    },
+    "AlitaImageLoader": {
+        "source": "path_suffix",
+        "similarity_threshold": 0.6,  # Lower threshold for LLM-based outputs (non-deterministic)
     },
     "AlitaYamlLoader": {
         "source": "path_suffix",
@@ -184,8 +189,9 @@ class DocumentDiff:
     field: str
     actual: Any
     expected: Any
-    diff_type: str = "value"  # value | missing_key | extra_key | type_mismatch | similarity
+    diff_type: str = "value"  # value | missing_key | extra_key | type_mismatch | similarity | llm_validation
     similarity: Optional[float] = None  # For page_content similarity comparison
+    explanation: Optional[str] = None  # For LLM validation explanation
 
     def __str__(self) -> str:
         tag = {
@@ -193,6 +199,7 @@ class DocumentDiff:
             "extra_key":     "EXTRA KEY     ",
             "type_mismatch": "TYPE MISMATCH ",
             "similarity":    "",
+            "llm_validation": "LLM VALIDATION FAILED ",
             "value":         "",
         }.get(self.diff_type, "")
         
@@ -204,6 +211,25 @@ class DocumentDiff:
         if self.field in ("extra_documents", "missing_documents"):
             content = self.actual if self.actual else self.expected
             return f"  {content}"
+        
+        # Smart comparison for LLM validation failures
+        if self.field == "page_content" and self.diff_type == "llm_validation":
+            actual_len = len(self.actual) if isinstance(self.actual, str) else 0
+            expected_len = len(self.expected) if isinstance(self.expected, str) else 0
+            similarity_str = str(self.similarity) if self.similarity is not None else "N/A"
+            
+            lines = [
+                f"  [doc #{self.index}] {tag}{self.field}:",
+                f"    LLM determined content is not semantically equivalent",
+            ]
+            if self.explanation:
+                lines.append(f"    LLM explanation: {self.explanation}")
+            lines.extend([
+                f"    (similarity score: {similarity_str})",
+                f"    actual length  : {actual_len} chars",
+                f"    expected length: {expected_len} chars",
+            ])
+            return "\n".join(lines)
         
         # Smart comparison for page_content fields (always show similarity and lengths)
         if self.field == "page_content" and self.diff_type == "similarity":
@@ -328,24 +354,100 @@ def _compare_metadata(
     return diffs
 
 
+def _llm_validate_content(
+    actual_content: str,
+    expected_content: str,
+    llm,
+) -> tuple[bool, str]:
+    """Use LLM to semantically validate if actual and expected content are equivalent.
+    
+    Args:
+        actual_content: Actual page_content to validate
+        expected_content: Expected page_content (baseline)
+        llm: LangChain LLM instance for validation
+        
+    Returns:
+        Tuple of (is_valid: bool, explanation: str)
+    """
+    prompt = f"""You are a test validation assistant. Compare the following two text outputs and determine if they are semantically equivalent.
+
+The EXPECTED output is the baseline/reference output.
+The ACTUAL output is the current test output.
+
+Your task:
+1. Determine if ACTUAL and EXPECTED convey the same information and meaning
+2. Minor differences in wording, formatting, or style are acceptable
+3. Focus on semantic equivalence, not exact text matching
+4. Respond with ONLY 'VALID' or 'INVALID' on the first line
+5. On the second line, provide a brief explanation (max 100 words)
+
+EXPECTED OUTPUT:
+{expected_content}
+
+ACTUAL OUTPUT:
+{actual_content}
+
+Validation result:"""
+    
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        result_text = response.content.strip()
+        
+        # Parse response - first line should be VALID/INVALID
+        lines = result_text.split('\n', 1)
+        verdict = lines[0].strip().upper()
+        explanation = lines[1].strip() if len(lines) > 1 else "No explanation provided"
+        
+        is_valid = verdict == "VALID"
+        return is_valid, explanation
+    except Exception as e:
+        # If LLM validation fails, return False and error info
+        return False, f"LLM validation failed: {str(e)}"
+
+
 def _compare_page_content(
     actual_content: str,
     expected_content: str,
     doc_index: int,
     similarity_threshold: float = 0.95,
+    llm=None,
 ) -> Optional[DocumentDiff]:
-    """Compare page_content using similarity score.
+    """Compare page_content using LLM validation (if available) or similarity score.
     
     Args:
         actual_content: Actual page_content (normalized)
         expected_content: Expected page_content (normalized)
         doc_index: Document index for error reporting
         similarity_threshold: Minimum similarity to pass (1.0 = exact match required)
+        llm: Optional LLM instance for semantic validation
         
     Returns:
         DocumentDiff if content doesn't match threshold, None otherwise
     """
-    # Calculate similarity score
+    # Try LLM validation first if available
+    if llm is not None:
+        try:
+            is_valid, explanation = _llm_validate_content(actual_content, expected_content, llm)
+            if is_valid:
+                return None
+            
+            # LLM validation failed - return diff with explanation
+            similarity = calculate_text_similarity(actual_content, expected_content)
+            return DocumentDiff(
+                index=doc_index,
+                field="page_content",
+                actual=actual_content,
+                expected=expected_content,
+                diff_type="llm_validation",
+                similarity=similarity,
+                explanation=explanation,
+            )
+        except Exception as e:
+            # If LLM validation fails with exception, fallback to similarity
+            import logging
+            logging.warning(f"LLM validation failed with exception, falling back to similarity: {e}")
+    
+    # Fallback to similarity-based comparison
     similarity = calculate_text_similarity(actual_content, expected_content)
     
     # Check if similarity meets threshold
@@ -474,10 +576,11 @@ def compare_documents(
     ignore_metadata_fields=None,
     normalize: bool = True,
     loader_name: Optional[str] = None,
+    llm=None,
 ) -> ComparisonResult:
     """Deep-compare two Document lists following the flow:
     1. Compare document count
-    2. Compare page_content using similarity (threshold=1.0 for exact match)
+    2. Compare page_content using LLM validation (if available) or similarity
     3. Compare metadata structure and values
     
     Args:
@@ -486,6 +589,7 @@ def compare_documents(
         ignore_metadata_fields: Fields to exclude from comparison (deprecated, use loader-specific rules)
         normalize: Whether to normalize whitespace in page_content
         loader_name: Loader class name (e.g., "AlitaTextLoader") for loader-specific comparison rules
+        llm: Optional LLM instance for semantic content validation
     """
     ignore = set(ignore_metadata_fields) if ignore_metadata_fields is not None else DEFAULT_IGNORE_METADATA
     diffs: List[DocumentDiff] = []
@@ -507,12 +611,16 @@ def compare_documents(
         )
 
     # Step 2 & 3: Compare each document's page_content and metadata
+    # Get custom similarity threshold for this loader (default 0.95)
+    special_fields = LOADER_SPECIAL_FIELDS.get(loader_name, {}) if loader_name else {}
+    similarity_threshold = special_fields.get('similarity_threshold', 0.95)
+    
     for i, (a_doc, e_doc) in enumerate(zip(actual, expected)):
-        # Step 2: Compare page_content using similarity
+        # Step 2: Compare page_content using LLM validation (if available) or similarity
         a_content = normalize_text(a_doc.page_content) if normalize else a_doc.page_content
         e_content = normalize_text(e_doc.page_content) if normalize else e_doc.page_content
         
-        content_diff = _compare_page_content(a_content, e_content, i)
+        content_diff = _compare_page_content(a_content, e_content, i, similarity_threshold, llm=llm)
         if content_diff:
             diffs.append(content_diff)
 

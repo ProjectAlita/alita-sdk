@@ -1,0 +1,10 @@
+{
+  "file_path": "../files/image_simple.jpg",
+  "tags": ["loader_image", "feature_llm", "feature_multimodal"],
+  "configs": [
+    {
+      "use_llm": true,
+      "prompt_default": true
+    }
+  ]
+}

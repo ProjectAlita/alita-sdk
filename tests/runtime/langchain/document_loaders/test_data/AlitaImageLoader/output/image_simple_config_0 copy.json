@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "## Main Colors\n- **Pink/Magenta** – dominant color (frame, seat, basket, training wheels)\n- **Black** – tires/wheels\n- **Silver/Gray** – metal frame parts, handlebars\n- **Yellow** – bee decoration, smiley face on seat backrest\n\n---\n\n## Objects Identified\n- 🚲 **Children's bicycle** (BSA Champ/Honny brand)\n- 🛞 **Training wheels** (side stabilizer wheels)\n- 🧺 **Front basket** (pink, with bee decoration)\n- 💺 **Rear seat/backrest** with yellow smiley face\n- 🐝 **Bee decorations** on basket and frame\n- **Handlebar grips** (pink)\n- **Rear carrier/rack** (silver)\n- **Pedals** (silver)\n- **BSA logo/branding** on frame",
+    "metadata": {
+      "source": "/Users/Aliaksei_Breilian/PycharmProjects/alita-sdk/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_simple.jpg"
+    }
+  }
+]

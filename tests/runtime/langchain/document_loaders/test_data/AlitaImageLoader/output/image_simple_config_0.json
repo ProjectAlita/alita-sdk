@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "## Main Colors\n\n| Color | Description |\n|-------|-------------|\n| **Green** | Primary frame color |\n| **Gray** | Seat, basket, training wheels |\n| **Black** | Tires/wheels |\n| **Silver/Gray** | Metal frame parts, handlebars |\n| **Yellow** | Decorative bee/smiley face elements |\n\n---\n\n## Objects Identified\n\n- 🚲 **Children's bicycle** (BSA Champ/Honby brand)\n- 🪑 **Padded rear seat** (light pink, with backrest)\n- 🧺 **Front basket** (pink, with bee decoration)\n- 🐝 **Bee decorations** (on basket and frame)\n- 😊 **Smiley face** (yellow, on rear seat)\n- ⚙️ **Training/stabilizer wheels** (pink, on both sides)\n- 🛞 **Black rubber tires** (front and rear)\n- 🔧 **Rear carrier/rack** (silver metal)\n- 🎀 **Decorative elements** on handlebars\n- **BSA branding/logo** on frame",
+    "metadata": {
+      "source": "/Users/Aliaksei_Breilian/PycharmProjects/alita-sdk/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_simple.jpg"
+    }
+  }
+]
