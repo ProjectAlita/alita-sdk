@@ -80,11 +80,13 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                 if graph_items:
                     logging.info("%d items loaded via Graph API fallback.", len(graph_items))
                     return graph_items
-                return ToolException(
+                raise ToolException(
                     "List appears empty or inaccessible via both REST and Graph APIs.")
+            except ToolException:
+                raise
             except Exception as graph_e:
                 logging.error("Graph API fallback failed: %s", graph_e)
-                return ToolException(
+                raise ToolException(
                     f"Cannot read list '{list_title}'. "
                     f"Check list name and permissions: {base_e} | {graph_e}")
 
@@ -111,11 +113,13 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                 graph_lists = self._graph_helper().get_lists(self.site_url)
                 if graph_lists:
                     return graph_lists
-                return ToolException(
+                raise ToolException(
                     "No lists found or inaccessible via both REST and Graph APIs.")
+            except ToolException:
+                raise
             except Exception as graph_e:
                 logging.error("Graph API fallback failed: %s", graph_e)
-                return ToolException(
+                raise ToolException(
                     f"Cannot retrieve lists. Check permissions: {base_e} | {graph_e}")
 
     def get_list_columns(self, list_title: str):
@@ -270,11 +274,18 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                     else:
                         target_folder_url = f"{library_type}/{folder_name}"
 
-                files = (
-                    self._client.web
-                    .get_folder_by_server_relative_path(target_folder_url)
-                    .get_files(True).execute_query()
-                )
+                try:
+                    files = (
+                        self._client.web
+                        .get_folder_by_server_relative_path(target_folder_url)
+                        .get_files(True).execute_query()
+                    )
+                except Exception as lib_e:
+                    logging.warning(
+                        "Skipping library '%s' — REST access failed: %s",
+                        library_type, lib_e)
+                    continue
+
                 for file in files:
                     if f"{library_type}/Forms" in file.properties['ServerRelativeUrl']:
                         continue
@@ -293,9 +304,7 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                         'Link': file.properties['LinkingUrl'],
                         'id': file.properties['UniqueId'],
                     })
-            return result if result else ToolException(
-                "Can not get files or folder is empty. "
-                "Please, double check folder name and read permissions.")
+            return result
         except Exception as e:
             try:
                 files = self._graph_helper().get_files_list(
@@ -306,7 +315,7 @@ class SharepointRestWrapper(BaseSharepointWrapper):
             except Exception as graph_e:
                 logging.error("Failed to load files via REST: %s", e)
                 logging.error("Failed to load files via Graph API: %s", graph_e)
-                return ToolException(
+                raise ToolException(
                     f"Can not get files. Please, double check folder name and "
                     f"read permissions: {e} and {graph_e}")
 
@@ -330,7 +339,7 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                     "Failed to load file via REST (%s): %s. Check file name and path.", path, e)
                 logging.error(
                     "Failed to load file via Graph API (%s): %s.", path, graph_e)
-                return ToolException(
+                raise ToolException(
                     f"File not found. Please, check file name and path: {e} and {graph_e}")
 
         return parse_file_content(

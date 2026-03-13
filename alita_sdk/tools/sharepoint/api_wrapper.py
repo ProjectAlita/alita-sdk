@@ -908,6 +908,8 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                     kwargs.get('path'), limit_files,
                     include_extensions=include_extensions,
                     skip_extensions=skip_extensions)
+                if isinstance(all_files, ToolException):
+                    raise all_files
                 self._log_tool_event(
                     message="List of the files has been extracted", tool_name="loader")
             except Exception as e:
