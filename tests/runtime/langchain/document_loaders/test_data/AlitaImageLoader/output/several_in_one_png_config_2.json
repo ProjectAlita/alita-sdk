@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "1 part has readable text. It is the central chat interface showing an AI conversation about AI agents, design patterns, memory types, and a 5-level learning path. The other 2 parts have no readable text: top-left shows a pink children's bicycle with training wheels and a basket on a white background; bottom-right shows a colorful fantasy landscape painting with a deer near water and a vibrant sunset.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/several_in_one.png"
+    }
+  }
+]

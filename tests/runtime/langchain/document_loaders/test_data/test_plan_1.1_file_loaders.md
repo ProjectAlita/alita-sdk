@@ -437,7 +437,7 @@ tests/fixtures/chunkers_loaders/
 3. Optional: Add configs for GIF and WEBP files for extended format coverage
 
 **Coverage Notes:**
-- Uses real LLM (ChatAnthropic via DEPLOYMENT_URL/ALITA_API_KEY)
+- Uses real LLM (ChatAnthropic via DEPLOYMENT_URL/API_KEY)
 - Comparison logic correctly matches loader mode (LLM validation for use_llm:true, similarity for use_llm:false)
 - Comprehensive validation includes semantic equivalence testing with 0.8 threshold via DeepEval G-Eval
 - Human-like baseline outputs (simplified language, no markdown formatting)

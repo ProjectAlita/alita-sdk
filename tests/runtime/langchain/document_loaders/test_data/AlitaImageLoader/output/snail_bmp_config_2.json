@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "This is an illustration of a single snail as the main subject. The snail has a spiral shell with concentric circular bands and alternating yellow-gold and dark brown-black stripes. The shell is globular and tightly coiled, which is typical for land snails. The snail's body is elongated and extended forward, colored in warm amber, yellow-brown, and reddish-brown tones. The body appears textured and segmented. Two tentacles or eyestalks are clearly visible extending from the head. The snail is resting on a flat, pale surface that looks like it could be a leaf, stone, or wooden plank. This surface has a pale gray-white color with subtle linear texture. The background is mostly white and minimal, with very little environmental context beyond the immediate surface the snail is on. This is a vintage-style illustration or naturalist drawing, not a photograph. It has bold outlines with a hand-drawn aesthetic that resembles 19th-century natural history artwork. The illustration has high contrast and a decorative quality, isolating the subject against a clean white background.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/snail.bmp"
+    }
+  }
+]

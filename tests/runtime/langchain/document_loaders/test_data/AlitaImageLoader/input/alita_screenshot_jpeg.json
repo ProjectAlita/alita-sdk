@@ -12,6 +12,12 @@
       "use_llm": true,
       "prompt_default": true,
       "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_screenshot_analysis",
+      "use_llm": true,
+      "prompt": "Analyze this screenshot and describe: 1) Type of application or interface shown, 2) Main UI elements and layout, 3) All visible text and labels, 4) Key features or functionality visible, 5) Color scheme and design style.",
+      "max_tokens": 2048
     }
   ]
 }
