@@ -85,8 +85,8 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
       env:
-        SANDBOX_BASE: ${{ github.workspace }}
-        DENO_DIR: /app/
+        SANDBOX_BASE: ${{ github.workspace }}/.alita/tests/test_pipelines
+        DENO_DIR: ${{ github.workspace }}/.alita/tests/test_pipelines/node_modules
         PYTHONPATH: /app
         PYTHONDONTWRITEBYTECODE: "1"
         PYTHONUNBUFFERED: "1"
@@ -110,15 +110,17 @@ jobs:
         # Adding GITHUB_WORKSPACE to PYTHONPATH makes the module importable.
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
 
-      - name: Configure Deno for sandbox execution
-        # In CI the CWD when tests run is a subdirectory of $GITHUB_WORKSPACE,
-        # so Deno's --node-modules-dir=auto would try to create/read node_modules
-        # there — outside allow_read/allow_write in the sandbox. Writing
-        # deno.json with nodeModulesDir=none disables local node_modules entirely;
-        # Deno uses only the global DENO_DIR=/app/ cache (pre-installed in image),
-        # which IS within allow_read/allow_write — matching Docker behaviour.
+      - name: Prepare sandbox cache paths
+        # pyodide_sandbox starts Deno with --node-modules-dir=auto, so in this
+        # workflow it resolves under .alita/tests/test_pipelines/node_modules.
+        # Point SANDBOX_BASE and DENO_DIR there and create paths up front so
+        # sandbox allow_read/allow_write includes the exact runtime location.
         shell: bash
-        run: echo '{"nodeModulesDir":"none"}' > "$GITHUB_WORKSPACE/deno.json"
+        run: |
+          mkdir -p "$SANDBOX_BASE/tmp"
+          mkdir -p "$DENO_DIR"
+          echo "SANDBOX_BASE=$SANDBOX_BASE"
+          echo "DENO_DIR=$DENO_DIR"
 
       - name: Setup gh CLI
         uses: dev-hanz-ops/install-gh-cli-action@v0.1.0
