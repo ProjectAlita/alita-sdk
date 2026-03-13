@@ -454,9 +454,15 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                        include_extensions: Optional[List[str]] = None,
                        skip_extensions: Optional[List[str]] = None):
         """
-        Lists all files including files from subfolders.
-        If folder name is specified, lists files under that folder; otherwise lists
-        from the root catalog (Shared Documents).
+        Lists all files including files from subfolders across **all document
+        libraries** on the site.
+
+        When ``folder_name`` is supplied the method resolves the correct drive
+        automatically (e.g. ``private_docs/some/sub``) and lists only within
+        that subtree.  When no ``folder_name`` is given, every document-library
+        drive on the site is enumerated so that files from libraries other than
+        ``Shared Documents`` (e.g. ``private_docs``) are included.
+
         Number of files is limited by limit_files (default is 100).
 
         If form_name is specified, only files from specified form will be returned.
@@ -469,7 +475,6 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         """
         from .base_wrapper import _normalize_extensions, _matches_extension
         try:
-            drive_id = self._resolve_drive_id()
             norm_include = _normalize_extensions(include_extensions)
             norm_skip = _normalize_extensions(skip_extensions)
 
@@ -481,15 +486,44 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
 
             result: list = []
 
-            # BFS queue: each entry is the /children URL for a folder to process
+            # Build the initial BFS queue as (drive_id, url) tuples so that
+            # sub-folder expansions always stay within the correct drive.
+            #
+            # • folder_name supplied → use _resolve_drive_and_folder to pick the
+            #   right drive (handles non-default libraries like "private_docs").
+            # • no folder_name → seed from EVERY drive on the site so files
+            #   outside "Shared Documents" are found too.
+            typed_queue: List[Tuple[str, str]] = []
             if folder_name:
-                encoded = quote(folder_name.strip('/'), safe='/')
-                queue = [f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"]
+                drive_id, relative = self._resolve_drive_and_folder(folder_name)
+                if relative:
+                    encoded = quote(relative.strip('/'), safe='/')
+                    typed_queue.append(
+                        (drive_id,
+                         f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"))
+                else:
+                    typed_queue.append(
+                        (drive_id, f"{_GRAPH_BASE}/drives/{drive_id}/root/children"))
             else:
-                queue = [f"{_GRAPH_BASE}/drives/{drive_id}/root/children"]
+                for drive in self._list_drives():
+                    did = drive.get('id', '')
+                    if not did:
+                        continue
+                    # When form_name is given, skip drives whose name doesn't
+                    # match upfront — mirrors the REST wrapper's per-library
+                    # skipping and avoids crawling irrelevant drives entirely.
+                    if form_name:
+                        drive_web_url = drive.get('webUrl', '')
+                        drive_lib = drive_web_url.rstrip('/').split('/')[-1]
+                        from urllib.parse import unquote as _unquote
+                        drive_lib = _unquote(drive_lib)
+                        if form_name.lower() != drive_lib.lower():
+                            continue
+                    typed_queue.append(
+                        (did, f"{_GRAPH_BASE}/drives/{did}/root/children"))
 
-            while queue and len(result) < limit_files:
-                url = queue.pop(0)
+            while typed_queue and len(result) < limit_files:
+                drive_id, url = typed_queue.pop(0)
                 next_link: Optional[str] = url
                 while next_link and len(result) < limit_files:
                     data = self._get(
@@ -497,19 +531,15 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                         params=params if next_link == url else None)
                     for item in data.get('value', []):
                         if 'folder' in item:
-                            # Enqueue subfolder for processing
+                            # Enqueue subfolder for processing (same drive)
                             item_id = item.get('id', '')
                             if item_id:
-                                queue.append(
-                                    f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/children")
+                                typed_queue.append(
+                                    (drive_id,
+                                     f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/children"))
                             continue
                         if 'file' not in item:
                             continue
-                        if form_name:
-                            parent_path = (item.get('parentReference', {})
-                                           .get('path', ''))
-                            if form_name.lower() not in parent_path.lower():
-                                continue
                         file_name = item.get('name', '')
                         if norm_skip and _matches_extension(file_name, norm_skip):
                             continue
