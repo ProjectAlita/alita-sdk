@@ -87,6 +87,7 @@ jobs:
       env:
         SANDBOX_BASE: ${{ github.workspace }}/.alita/tests/test_pipelines
         DENO_DIR: ${{ github.workspace }}/.alita/tests/test_pipelines/node_modules
+        PYODIDE_SANDBOX_PKG: /app/data/sandbox/main.ts
         PYTHONPATH: /app
         PYTHONDONTWRITEBYTECODE: "1"
         PYTHONUNBUFFERED: "1"
@@ -111,14 +112,26 @@ jobs:
         run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
 
       - name: Prepare sandbox cache paths
-        # pyodide_sandbox starts Deno with --node-modules-dir=auto, so in this
-        # workflow it resolves under .alita/tests/test_pipelines/node_modules.
-        # Point SANDBOX_BASE and DENO_DIR there and create paths up front so
-        # sandbox allow_read/allow_write includes the exact runtime location.
+        # Resolve to canonical paths. In GitHub Actions containers, $GITHUB_WORKSPACE
+        # is commonly a symlink (/__w -> /home/runner/work). Deno permission checks
+        # use resolved paths; if sandbox allow_read uses unresolved /__w paths,
+        # reads can fail with NotCapable despite looking in-scope.
         shell: bash
         run: |
+          REAL_WORKSPACE="$(realpath "$GITHUB_WORKSPACE")"
+          SANDBOX_BASE_REAL="${REAL_WORKSPACE}/.alita/tests/test_pipelines"
+          DENO_DIR_REAL="${SANDBOX_BASE_REAL}/node_modules"
+
+          echo "SANDBOX_BASE=$SANDBOX_BASE_REAL" >> "$GITHUB_ENV"
+          echo "DENO_DIR=$DENO_DIR_REAL" >> "$GITHUB_ENV"
+
+          export SANDBOX_BASE="$SANDBOX_BASE_REAL"
+          export DENO_DIR="$DENO_DIR_REAL"
+
           mkdir -p "$SANDBOX_BASE/tmp"
           mkdir -p "$DENO_DIR"
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          echo "REAL_WORKSPACE=$REAL_WORKSPACE"
           echo "SANDBOX_BASE=$SANDBOX_BASE"
           echo "DENO_DIR=$DENO_DIR"
 

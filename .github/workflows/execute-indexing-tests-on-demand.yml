@@ -257,6 +257,27 @@ jobs:
         shell: bash
         run: echo '{"nodeModulesDir":"none"}' > "$GITHUB_WORKSPACE/deno.json"
 
+      - name: Resolve sandbox paths to canonical locations
+        # /__w in GitHub Actions is often a symlink to /home/runner/work.
+        # Deno permission checks use resolved paths, so export canonical paths
+        # for sandbox permissions to avoid NotCapable read mismatches.
+        shell: bash
+        run: |
+          REAL_WORKSPACE="$(realpath "$GITHUB_WORKSPACE")"
+          SANDBOX_BASE_REAL="$REAL_WORKSPACE"
+          DENO_DIR_REAL="/app"
+
+          echo "SANDBOX_BASE=$SANDBOX_BASE_REAL" >> "$GITHUB_ENV"
+          echo "DENO_DIR=$DENO_DIR_REAL" >> "$GITHUB_ENV"
+
+          mkdir -p "$SANDBOX_BASE_REAL/.alita/tests/test_pipelines/node_modules"
+          mkdir -p "$DENO_DIR_REAL"
+
+          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+          echo "REAL_WORKSPACE=$REAL_WORKSPACE"
+          echo "SANDBOX_BASE=$SANDBOX_BASE_REAL"
+          echo "DENO_DIR=$DENO_DIR_REAL"
+
       - name: Set ReportPortal launch name
         shell: bash
         run: |
