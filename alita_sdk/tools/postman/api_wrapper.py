@@ -280,7 +280,12 @@ PostmanGetRequestScript = create_model(
 PostmanExecuteRequest = create_model(
     "PostmanExecuteRequest",
     request_path=(str, Field(description="The path to the request in the collection (e.g., 'API/Users/Get User')")),
-    override_variables=(Optional[Dict[str, Any]], Field(description="Optional variables to override environment/collection variables", default=None))
+    override_variables=(str, Field(
+        description="JSON string of key-value pairs to override environment/collection variables. "
+                    "Example: '{\"base_url\": \"https://api.example.com\", \"api_key\": \"123\"}'. "
+                    "Pass '{}' if no overrides needed.",
+        default="{}"
+    ))
 )
 
 
@@ -721,22 +726,19 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             logger.error(f"Exception when getting collections: {stacktrace}")
             raise ToolException(f"Unable to get collections: {str(e)}")
 
-    def execute_request(self, request_path: str, override_variables: Dict = None, **kwargs) -> str:
-        """Execute a Postman request with environment variables and custom configuration.
-        
-        This method uses the environment_config to make actual HTTP requests 
-        using the requests library with structured authentication.
-        
-        Args:
-            request_path: The path to the request in the collection
-            override_variables: Optional variables to override environment/collection variables
-        
-        Returns:
-            JSON string with comprehensive response data
-        """
+    def execute_request(self, request_path: str, override_variables: str = "{}", **kwargs) -> str:
+        """Execute a Postman request with environment variables and custom configuration."""
         try:
             import time
             from urllib.parse import urlencode, parse_qs, urlparse
+
+            parsed_overrides = {}
+            if override_variables and override_variables.strip() != "{}":
+                try:
+                    parsed_overrides = json.loads(override_variables)
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning(f"Failed to parse override_variables: {override_variables}")
+                    parsed_overrides = {}
             
             # Get the request from the collection
             request_item, _, collection_data = self._get_request_item_and_id(request_path)
@@ -755,8 +757,8 @@ class PostmanApiWrapper(BaseToolApiWrapper):
                     all_variables[var['key']] = var.get('value', '')
             
             # 3. Add override variables (highest priority)
-            if override_variables:
-                all_variables.update(override_variables)
+            if parsed_overrides:
+                all_variables.update(parsed_overrides)
             
             # Helper function to resolve variables in strings
             def resolve_variables(text):
