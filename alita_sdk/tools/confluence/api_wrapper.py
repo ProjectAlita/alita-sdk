@@ -170,7 +170,7 @@ AddFileToPage = create_model(
     page_id=(str, Field(description="Confluence page ID to add file to")),
     filepath=(str, Field(description="File path in format /{bucket}/{filename} from artifact storage")),
     filename=(Optional[str], Field(description="Filename to use for the upload. If not provided, uses the original filename from artifact.", default=None)),
-    alt_text=(Optional[str], Field(description="Alternative text for images (optional)", default=None)),
+    caption=(Optional[str], Field(description="Visible caption displayed below image attachments. Not applicable for other file types.", default=None)),
     position=(Optional[str], Field(description="Position to add file reference: 'append' or 'prepend'", default="append")),
 )
 
@@ -1893,24 +1893,24 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
 
         return normalized_base_url + webui_path
 
-    def _get_confluence_image_markup(self, filename: str) -> str:
-        """Generate Confluence storage format for inline image."""
-        return f'<ac:image><ri:attachment ri:filename="{filename}"/></ac:image>'
+    def _get_confluence_image_markup(self, filename: str, caption: Optional[str] = None) -> str:
+        """Generate Confluence storage format for inline image with optional visible caption."""
+        caption_markup = f'<ac:caption><p>{caption}</p></ac:caption>' if caption else ''
+        return f'<ac:image><ri:attachment ri:filename="{filename}"/>{caption_markup}</ac:image>'
 
-    def _get_confluence_file_link(self, filename: str, alt_text: Optional[str] = None) -> str:
+    def _get_confluence_file_link(self, filename: str) -> str:
         """Generate Confluence storage format for file attachment link."""
-        display = alt_text or filename
-        return f'<ac:link><ri:attachment ri:filename="{filename}"/><ac:plain-text-link-body><![CDATA[{display}]]></ac:plain-text-link-body></ac:link>'
+        return f'<ac:link><ri:attachment ri:filename="{filename}"/></ac:link>'
 
     def add_file_to_page(
         self,
         page_id: str,
         filepath: str,
         filename: Optional[str] = None,
-        alt_text: Optional[str] = None,
+        caption: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
     ) -> str:
-        """Upload file from artifact and add to Confluence page content. Images display inline, other files as links."""
+        """Upload file from artifact and add to Confluence page content. Images display inline with optional visible caption, other files as attachment links."""
         try:
             # Upload file to Confluence
             upload_info = self._upload_file_from_artifact(page_id, filepath, filename)
@@ -1920,13 +1920,12 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             # Get current page content
             page = self.client.get_page_by_id(page_id, expand='body.storage,version')
             current_body = page.get('body', {}).get('storage', {}).get('value', '')
-            current_version = page.get('version', {}).get('number', 1)
             
             # Create appropriate markup based on file type
             if mime_type.startswith('image/') or mime_type.startswith('video/'):
-                file_markup = self._get_confluence_image_markup(uploaded_filename)
+                file_markup = self._get_confluence_image_markup(uploaded_filename, caption)
             else:
-                file_markup = self._get_confluence_file_link(uploaded_filename, alt_text)
+                file_markup = self._get_confluence_file_link(uploaded_filename)
             
             # Add the file markup to page content
             if position == "prepend":
