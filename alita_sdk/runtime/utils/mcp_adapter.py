@@ -136,6 +136,13 @@ class UnifiedMcpClient:
                         "Authorization credentials are invalid. "
                         "Please check the credentials in the toolkit settings."
                     ) from inner
+                # Some servers (e.g. GitHub Copilot) return 400 for an invalid/malformed token.
+                if self.configured_auth and '400' in inner_str and 'bad request' in inner_str:
+                    raise ValueError(
+                        "The MCP server rejected the request (400 Bad Request). "
+                        "Your API token may be invalid or malformed. "
+                        "Please check the credentials in the toolkit settings."
+                    ) from inner
                 raise inner from e
             raise
 
@@ -264,7 +271,20 @@ class UnifiedMcpClient:
                         except Exception as handle_ex:
                             logger.error(f"[Unified MCP] _handle_401_response raised: {type(handle_ex).__name__}: {handle_ex}")
                             raise
-                    # Not a 401, auth check passed (or server will handle auth differently)
+                    elif response.status == 400 and self.configured_auth:
+                        # Some MCP servers (e.g. GitHub Copilot) return 400 for an invalid/malformed
+                        # token instead of 401. When the user configured a static auth token and we
+                        # get 400, treat it as a credential problem so the user gets a clear message.
+                        logger.warning(
+                            f"[Unified MCP] Server returned 400 with configured auth token - "
+                            f"likely invalid or malformed token"
+                        )
+                        raise ValueError(
+                            "The MCP server rejected the request (400 Bad Request). "
+                            "Your API token may be invalid or malformed. "
+                            "Please check the credentials in the toolkit settings."
+                        )
+                    # Not a 401/400 auth error, auth check passed (or server will handle auth differently)
 
         except (McpAuthorizationRequired, ValueError):
             # Re-raise auth-related exceptions so callers can handle them properly:

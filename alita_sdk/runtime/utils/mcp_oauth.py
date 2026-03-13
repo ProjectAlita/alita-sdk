@@ -467,7 +467,7 @@ def extract_user_friendly_mcp_error(exception: Exception, headers: Optional[Dict
         return "Invalid MCP server URL. Please check the URL format (should start with http:// or https://)."
 
     if "malformed" in error_lower:
-        return "Malformed request or URL. Please check the MCP server configuration."
+        return "Malformed request or URL. Please check the mcp configuration."
 
     # Priority 7: HTTP status errors
     if "404" in error_msg:
@@ -477,6 +477,11 @@ def extract_user_friendly_mcp_error(exception: Exception, headers: Optional[Dict
         return "Method not allowed (405). The MCP server may not support the requested operation."
 
     if "400" in error_msg or "bad request" in error_lower:
+        if has_auth:
+            return (
+                "Bad request (400). Your API token may be invalid or malformed. "
+                "Please check the credentials in the toolkit settings."
+            )
         return "Bad request (400). The request to the MCP server was malformed."
 
     if "500" in error_msg or "internal server error" in error_lower:
