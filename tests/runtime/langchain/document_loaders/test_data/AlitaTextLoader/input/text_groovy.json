@@ -1,0 +1,9 @@
+{
+    "file_path": "../files/text_groovy.groovy",
+    "configs": [
+        {},
+        {"max_tokens": 256},
+        {"max_tokens": 512},
+        {"max_tokens": 1024}
+    ]
+}

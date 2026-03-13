@@ -90,7 +90,7 @@
     }
   },
   {
-    "page_content": " concerns requiring sustainable solutions.  \nConclusion  \nArtificial intelligence continues evolving at a remarkable pace, transforming industries and reshaping society. Success requires balancing innovation with responsibility, ensuring these powerful technologies benefit humanity while minimizing potential harms. The coming decades will determine whether AI fulfills its promise of augmenting human capabilities and solving pressing global challenges.",
+    "page_content": " concerns requiring sustainable solutions.  \nConclusion  \nArtificial intelligence continues evolving at a remarkable pace, transforming industries and reshaping society. Success requires balancing innovation with responsibility, ensuring these powerful technologies benefit humanity while minimizing potential harms. The coming decades will determine whether AI fulfills its promise of augmenting human capabilities and solving pressing global challenges.\n",
     "metadata": {
       "source": "tests/runtime/langchain/document_loaders/test_data/AlitaTextLoader/files/text_large.txt",
       "headers": "",
