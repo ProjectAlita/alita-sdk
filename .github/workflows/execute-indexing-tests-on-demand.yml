@@ -381,7 +381,7 @@ jobs:
 
       - name: PUBLISH TEST RESULTS
         uses: EnricoMi/publish-unit-test-result-action@v2
-        if: inputs.is_pr == true
+        if: always() && inputs.is_pr == true
         with:
           files: |
             tests/reports/**/*.xml
