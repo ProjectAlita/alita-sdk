@@ -1,6 +1,6 @@
 [
   {
-    "page_content": "This is a simple test file for AlitaTextLoader.\nIt contains multiple lines of plain text.  \nThe loader should handle this content correctly and preserve all text.\nEach line tests basic functionality without special characters.  \nThis file is intentionally small to fit in a single chunk with default max_tokens.\nTesting basic text loading and metadata generation.",
+    "page_content": "This is a simple test file for AlitaTextLoader.\nIt contains multiple lines of plain text.  \nThe loader should handle this content correctly and preserve all text.\nEach line tests basic functionality without special characters.  \nThis file is intentionally small to fit in a single chunk with default max_tokens.\nTesting basic text loading and metadata generation.\n",
     "metadata": {
       "source": "tests/runtime/langchain/document_loaders/test_data/AlitaTextLoader/files/text_simple.txt",
       "headers": "",

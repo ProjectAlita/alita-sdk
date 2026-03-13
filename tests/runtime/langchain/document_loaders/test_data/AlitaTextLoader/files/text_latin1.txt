@@ -1,0 +1,25 @@
+Testing Latin-1 (ISO-8859-1) encoding auto-detection.
+This file contains characters specific to Latin-1 encoding.
+
+Extended ASCII characters (128-255):
+Currency: ¢ £ ¤ ¥ §
+Accented letters: À Á Â Ã Ä Å Æ Ç È É Ê Ë
+Lowercase: à á â ã ä å æ ç è é ê ë
+German: Ä Ö Ü ä ö ü ß
+French: É è ê ë à â î ô û ù ç
+Spanish: ñ Ñ á é í ó ú ü
+Portuguese: ã õ ç
+Nordic: Å å Ø ø Æ æ
+
+Special symbols: ª º ¹ ² ³ ¼ ½ ¾ ±
+Copyright and trademark: © ® ª º
+Math and logic: ¬ ± × ÷
+Punctuation: « » ¡ ¿
+
+Mixed text with accents:
+Café résumé naïve façade élève
+ÀÁÂÃÄÅÆÇÈÉÊË
+àáâãäåæçèéêë
+
+This file should be loaded without UnicodeDecodeError.
+The loader should auto-detect Latin-1 encoding.
