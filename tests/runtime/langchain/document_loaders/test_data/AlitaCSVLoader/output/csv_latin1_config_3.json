@@ -1,0 +1,18 @@
+[
+  {
+    "page_content": "name,description,location,price\nCafé Münchën,Traditional café with Österreich pastries,München,€12.50\nRésumé Service,Professional résumé writing with naïve review,Paris,£45.00\nCopenhagën Øl,Danish beer from Sønderjylland region,Copenhågën,¥850\nÑoño's Tacos,Authentic tacos with jalapeño and piña,México,₱250\nSão Paulo Açaí,Fresh açaí bowls with guaraná,São Paulo,$18.75\nZürich Würst,Swiss sausages with rösti,Zürich,CHF 24.90\nMalmö Smörgås,Swedish sandwiches with smör,Malmö,kr 95.00\nNiño Products,Children's toys manufactured in España,Dénia,€8.50\nQuébec Pâté,Traditional meat pâté from Québec,Montréal,$12.25\nKöln Cathedral,Tour guide service with häuser visits,Köln,€35.00\nAçores Wine,Portuguese wine from São Miguel,Açores,£28",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_latin1.csv:1",
+      "chunk_id": 1,
+      "table_source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_latin1.csv"
+    }
+  },
+  {
+    "page_content": " wine from São Miguel,Açores,£28.50\nBjörk Music,Icelandic music CDs by Björk,Reykjavík,kr 1850\nFrançois Café,French café with crème brûlée,Provençe,€7.80\nSeñor José,Spanish guitar lessons by José,Sevilla,€45.00\nBrügge Chocolates,Belgian chocolates from Brügge,België,€22.00\n",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_latin1.csv:2",
+      "chunk_id": 2,
+      "table_source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_latin1.csv"
+    }
+  }
+]

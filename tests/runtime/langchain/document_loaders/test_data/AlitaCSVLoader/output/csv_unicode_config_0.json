@@ -1,8 +1,9 @@
 [
   {
-    "page_content": "name,emoji,language\nAlice,😀,English\nBob,🎉,Español\nCharlie,🌟,中文\nمريم,🌙,العربية",
+    "page_content": "name,emoji,language\nAlice,😀,English\nBob,🎉,Español\nCharlie,🌟,中文\nمريم,🌙,العربية\n",
     "metadata": {
-      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_unicode.csv",
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_unicode.csv:1",
+      "chunk_id": 1,
       "table_source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_unicode.csv"
     }
   }
