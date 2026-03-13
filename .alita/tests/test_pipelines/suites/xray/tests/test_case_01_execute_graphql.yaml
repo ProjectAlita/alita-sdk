@@ -17,7 +17,7 @@ toolkits:
 state:
   project_key:
     type: str
-    value: ${XRAY_PROJECT_KEY:EL}
+    value:
   graphql_query:
     type: str
   graphql_result:
