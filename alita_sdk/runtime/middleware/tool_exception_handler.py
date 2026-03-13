@@ -38,6 +38,7 @@ from typing import List, Optional, Dict, Any, Callable
 from alita_sdk.runtime.utils.mcp_oauth import McpAuthorizationRequired
 from langchain_core.tools import BaseTool, StructuredTool, ToolException
 from langchain_core.language_models import BaseChatModel
+from langgraph.errors import GraphBubbleUp
 
 from .base import Middleware
 from .strategies import (
@@ -255,6 +256,11 @@ When a tool fails with an error:
             except McpAuthorizationRequired:
                 # MCP authorization required - re-raise to be handled by agent
                 # This is a cross-cutting auth concern, not delegated to strategies
+                raise
+
+            except GraphBubbleUp:
+                # GraphInterrupt (from interrupt()) and other graph-level
+                # signals must propagate — never handle as tool errors.
                 raise
 
             except Exception as e:
