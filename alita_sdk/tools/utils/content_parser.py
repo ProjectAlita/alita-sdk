@@ -292,26 +292,24 @@ def process_document_by_type(content, extension_source: str, document: Document 
     """Process the content of a file based on its type using a configured loader cosidering the origin document."""
     try:
         chunks = process_content_by_type(content, extension_source, llm, chunking_config)
+        chunks_counter = 0
+        for chunk in chunks:
+            chunks_counter += 1
+            metadata = {**document.metadata, **chunk.metadata}
+            #
+            # ensure each chunk has a unique chunk_id
+            metadata['chunk_id'] = chunks_counter
+            #
+            yield Document(
+                page_content=sanitize_for_postgres(chunk.page_content),
+                metadata=metadata
+            )
     except Exception as e:
         msg = f"Error during content parsing for file {extension_source}:\n{e}"
         logger.warning(msg)
         yield Document(
             page_content=msg,
             metadata={**document.metadata, 'chunk_id': 1}
-        )
-        return
-    #
-    chunks_counter = 0
-    for chunk in chunks:
-        chunks_counter += 1
-        metadata = {**document.metadata, **chunk.metadata}
-        #
-        # ensure each chunk has a unique chunk_id
-        metadata['chunk_id'] = chunks_counter
-        #
-        yield Document(
-            page_content=sanitize_for_postgres(chunk.page_content),
-            metadata=metadata
         )
 
 
