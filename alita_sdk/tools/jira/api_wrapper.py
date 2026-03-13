@@ -899,7 +899,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         self,
         issue_key: str,
         filepath: str,
-        filename: str,
+        filename: Optional[str] = None,
         alt_text: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
     ) -> str:
@@ -978,7 +978,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             issue_url = f"{self._client.url.rstrip('/')}/browse/{issue_key}"
             file_type = "image" if mime_type.startswith('image/') else "video" if mime_type.startswith('video/') else "file"
             return (
-                f"File '{filename}' uploaded and added to {issue_key} description as {file_type}. "
+                f"File '{uploaded_filename}' uploaded and added to {issue_key} description as {file_type}. "
                 f"View at: {issue_url}"
             )
             
@@ -994,7 +994,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         issue_key: str,
         comment_id: str,
         filepath: str,
-        filename: str,
+        filename: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
     ) -> str:
         """Upload file and add to existing comment. Images/videos inline, others as links."""
@@ -1003,7 +1003,6 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             upload_info = self._upload_file_from_artifact(issue_key, filepath, filename)
             uploaded_filename = upload_info['filename']
             mime_type = upload_info['mime_type']
-            attachment_id = upload_info.get('attachment_id')
             content_url = upload_info.get('content_url', '')
             
             # Get existing comment
@@ -1068,7 +1067,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             issue_url = f"{self._client.url}browse/{issue_key}"
             file_type = "image" if mime_type.startswith('image/') else "video" if mime_type.startswith('video/') else "file"
             return (
-                f"File '{filename}' uploaded and added to {issue_key} comment {comment_id} as {file_type}. "
+                f"File '{uploaded_filename}' uploaded and added to {issue_key} comment {comment_id} as {file_type}. "
                 f"View at: {issue_url}"
             )
             
