@@ -51,7 +51,7 @@ _RP_ENV_MAP = {
   "rp_endpoint": "RP_ENDPOINT",
   "rp_project": "RP_PROJECT",
   "rp_launch": "RP_LAUNCH",
-  "rp_uuid": "RP_API_KEY",
+  "rp_api_key": "RP_API_KEY",
 }
 
 

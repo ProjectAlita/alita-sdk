@@ -110,16 +110,33 @@ def _load_documents_with_production_config(file_path: Path, config: Dict[str, An
 
 def _load_expected_documents_for_test(baseline_path: Path) -> List:
     with rp_step(f"Load expected baseline from {baseline_path}"):
-        from loader_test_utils import load_expected_documents
+        from loader_test_utils import load_expected_documents, serialize_documents
         docs = load_expected_documents(baseline_path)
         _rp_log(f"Loaded {len(docs)} expected document(s) from {baseline_path}")
+        _rp_log(
+            f"Expected documents ({len(docs)})",
+            attachment={
+                "name": "expected_docs.json",
+                "data": serialize_documents(docs).encode("utf-8"),
+                "mime": "application/json",
+            },
+        )
         return docs
 
 
 def _load_actual_documents_for_test(file_path: Path, config: Dict[str, Any]) -> List:
     with rp_step(f"Load actual documents from source {file_path}"):
+        from loader_test_utils import serialize_documents
         docs = _load_documents_with_production_config(file_path, config)
         _rp_log(f"Loaded {len(docs)} actual document(s) with config: {config or {}}")
+        _rp_log(
+            f"Actual documents ({len(docs)})",
+            attachment={
+                "name": "actual_docs.json",
+                "data": serialize_documents(docs).encode("utf-8"),
+                "mime": "application/json",
+            },
+        )
         return docs
 
 
@@ -140,14 +157,16 @@ def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_n
         if cmp.diffs:
             diffs_text = "\n".join(str(d) for d in cmp.diffs)
             _rp_log("Diffs:\n" + diffs_text)
-            _rp_log(
-                "Diff details attachment",
-                attachment={
-                    "name": f"{loader_name}_diffs.txt",
-                    "data": diffs_text.encode("utf-8"),
-                    "mime": "text/plain",
-                },
-            )
+        else:
+            diffs_text = f"No diffs — {cmp.actual_count} doc(s) matched baseline exactly."
+        _rp_log(
+            "Comparison result",
+            attachment={
+                "name": f"{loader_name}_comparison.txt",
+                "data": diffs_text.encode("utf-8"),
+                "mime": "text/plain",
+            },
+        )
         return cmp
 
 # ---------------------------------------------------------------------------

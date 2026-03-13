@@ -256,9 +256,10 @@ jobs:
       - name: Ensure pytest dependencies are available
         shell: bash
         run: |
-          python -m pip install -q pytest pytest-dotenv
           if [[ "${{ inputs.reportportal }}" == "true" ]]; then
-            python -m pip install -q pytest-reportportal reportportal-client
+            python -m pip install -q ".[reporting]"
+          else
+            python -m pip install -q pytest
           fi
           python -m pytest --version
 
