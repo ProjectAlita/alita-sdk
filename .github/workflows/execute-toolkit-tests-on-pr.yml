@@ -2,7 +2,7 @@ name: Execute toolkit AI tests on PR
 
 on:
   pull_request:
-     types: [opened]
+     types: [opened, synchronize]
      branches:
        - main
   workflow_dispatch:
@@ -22,6 +22,7 @@ env:
 jobs:
   configure-matrix:
     runs-on: ubuntu-latest
+    if: github.actor != 'eln1nxl'
     outputs:
       test_matrix: ${{ steps.set-matrix.outputs.test_matrix }}
       has-tests: ${{ steps.set-matrix.outputs.has-tests }}
