@@ -88,9 +88,9 @@ def run_loader_assert(
     from loader_test_runner import run_single_config_test  # on sys.path via conftest
 
     # Save actual output to persistent location in project
-    # loader_helpers.py is at: test_data/scripts/loader_helpers.py
-    # Go up: scripts -> test_data -> document_loaders -> langchain -> runtime -> tests -> project_root
-    project_root = Path(__file__).parent.parent.parent.parent.parent.parent.parent
+    # loader_helpers.py is at: tests/loader_helpers.py
+    # Go up: tests -> project_root
+    project_root = Path(__file__).parent.parent
     results_dir = project_root / "tests" / "runtime" / "langchain" / "document_loaders" / "test_results" / loader_name
     results_dir.mkdir(parents=True, exist_ok=True)
     actual_output_path = results_dir / f"{input_name}_config_{config_index}.json"

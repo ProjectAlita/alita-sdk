@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import JsonOutputParser
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -358,8 +359,10 @@ def _llm_validate_content(
     actual_content: str,
     expected_content: str,
     llm,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, float, dict]:
     """Use LLM to semantically validate if actual and expected content are equivalent.
+    
+    Uses structured JSON output for reliable parsing and detailed results.
     
     Args:
         actual_content: Actual page_content to validate
@@ -367,42 +370,55 @@ def _llm_validate_content(
         llm: LangChain LLM instance for validation
         
     Returns:
-        Tuple of (is_valid: bool, explanation: str)
+        Tuple of (is_valid: bool, explanation: str, confidence: float, full_result: dict)
     """
-    prompt = f"""You are a test validation assistant. Compare the following two text outputs and determine if they are semantically equivalent.
+    prompt = ChatPromptTemplate.from_template("""Compare these outputs for semantic equivalence:
 
-The EXPECTED output is the baseline/reference output.
-The ACTUAL output is the current test output.
+EXPECTED (baseline/reference):
+{expected}
+
+ACTUAL (current test output):
+{actual}
 
 Your task:
 1. Determine if ACTUAL and EXPECTED convey the same information and meaning
 2. Minor differences in wording, formatting, or style are acceptable
 3. Focus on semantic equivalence, not exact text matching
-4. Respond with ONLY 'VALID' or 'INVALID' on the first line
-5. On the second line, provide a brief explanation (max 100 words)
+4. Rate similarity from 0.0 (completely different) to 1.0 (identical meaning)
 
-EXPECTED OUTPUT:
-{expected_content}
-
-ACTUAL OUTPUT:
-{actual_content}
-
-Validation result:"""
+Respond with JSON:
+{{
+    "equivalent": true or false,
+    "confidence": 0.0-1.0,
+    "reason": "brief explanation of your judgment",
+    "key_differences": ["list", "of", "notable", "differences"] or []
+}}
+""")
     
     try:
-        response = llm.invoke([HumanMessage(content=prompt)])
-        result_text = response.content.strip()
+        parser = JsonOutputParser()
+        chain = prompt | llm | parser
         
-        # Parse response - first line should be VALID/INVALID
-        lines = result_text.split('\n', 1)
-        verdict = lines[0].strip().upper()
-        explanation = lines[1].strip() if len(lines) > 1 else "No explanation provided"
+        result = chain.invoke({"actual": actual_content, "expected": expected_content})
         
-        is_valid = verdict == "VALID"
-        return is_valid, explanation
+        # Extract fields with defaults
+        equivalent = result.get("equivalent", False)
+        confidence = result.get("confidence", 0.0)
+        reason = result.get("reason", "No explanation provided")
+        
+        # Determine if valid: must be equivalent AND high confidence
+        is_valid = equivalent and confidence >= 0.7
+        
+        # Add computed fields to result
+        result["passed"] = is_valid
+        result["score"] = confidence
+        
+        return is_valid, reason, confidence, result
+        
     except Exception as e:
-        # If LLM validation fails, return False and error info
-        return False, f"LLM validation failed: {str(e)}"
+        # If LLM validation fails, return error info
+        error_msg = f"LLM validation failed: {str(e)}"
+        return False, error_msg, 0.0, {"error": str(e), "passed": False, "score": 0.0}
 
 
 def _compare_page_content(
@@ -427,20 +443,30 @@ def _compare_page_content(
     # Try LLM validation first if available
     if llm is not None:
         try:
-            is_valid, explanation = _llm_validate_content(actual_content, expected_content, llm)
+            is_valid, explanation, confidence, full_result = _llm_validate_content(
+                actual_content, expected_content, llm
+            )
+            
             if is_valid:
                 return None
             
-            # LLM validation failed - return diff with explanation
-            similarity = calculate_text_similarity(actual_content, expected_content)
+            # LLM validation failed - return diff with explanation and confidence
+            # Also calculate traditional similarity for reference
+            text_similarity = calculate_text_similarity(actual_content, expected_content)
+            
+            # Enrich explanation with key differences if available
+            key_diffs = full_result.get("key_differences", [])
+            if key_diffs:
+                explanation += f" | Key differences: {', '.join(key_diffs[:3])}"
+            
             return DocumentDiff(
                 index=doc_index,
                 field="page_content",
                 actual=actual_content,
                 expected=expected_content,
                 diff_type="llm_validation",
-                similarity=similarity,
-                explanation=explanation,
+                similarity=text_similarity,
+                explanation=f"{explanation} (LLM confidence: {confidence:.2f})",
             )
         except Exception as e:
             # If LLM validation fails with exception, fallback to similarity
