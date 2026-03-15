@@ -1523,19 +1523,13 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Don't use invoke(None) as that just returns current state without running
                     logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
 
-                    # FIX: Clear old checkpoint messages to prevent duplication.
-                    # The add_messages reducer would otherwise APPEND new messages to existing ones.
-                    # Use 'in' check instead of truthiness - empty list [] is falsy but means
-                    # "messages key exists with no history" (e.g., after chat clear), which still
-                    # requires clearing the old checkpoint to avoid stale SystemMessages.
                     existing_messages = checkpoint_state.values.get('messages', [])
-                    if existing_messages:
-                        logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
-                        # Create RemoveMessage objects for all existing messages
-                        remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
-                        if remove_msgs:
-                            # Update state to remove old messages before invoking
-                            self.update_state(config, {'messages': remove_msgs})
+                    old_sys = [
+                        RemoveMessage(id=m.id) for m in existing_messages
+                        if isinstance(m, SystemMessage) and hasattr(m, 'id') and m.id
+                    ]
+                    if old_sys:
+                        self.update_state(config, {'messages': old_sys})
 
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
