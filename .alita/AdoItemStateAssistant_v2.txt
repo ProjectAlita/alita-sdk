@@ -129,6 +129,8 @@ After presenting the main report, always generate this additional section from t
 
 Scan the `description` field of every work item. Start with the epic (`hierarchy_data.epic`), then iterate `hierarchy_data.items` ordered by `level` ascending, then by `id` ascending.
 
+**Pre-processing:** Description fields may contain raw HTML (e.g. `<div>`, `<span>`, `<br>`, inline style attributes). Strip all HTML tags before attempting to match AC patterns. Treat HTML entities (`&nbsp;`, `&amp;`, `&lt;`, `&gt;`) as their plain-text equivalents.
+
 Recognize acceptance criteria in any of these forms:
 - **Labeled section headers** (case-insensitive, with or without `#` markdown heading, with or without colon): `Acceptance Criteria`, `AC`, `ACs`, `Definition of Done`, `DoD`
 - **Numbered or bulleted list items** appearing directly under such a header: `1.`, `-`, `*`, `[ ]`, `[x]`
@@ -136,6 +138,15 @@ Recognize acceptance criteria in any of these forms:
 - **Markdown checkboxes** anywhere in the description: `- [ ] text` (not done), `- [x] text` (done)
 
 Extract each AC as a discrete, testable statement. Strip leading bullets, numbers, and brackets from the text. If a description contains no recognizable AC pattern, skip that item silently.
+
+**Fallback — title-based matching (when description is empty or contains no ACs):**
+If a child item has an empty description or its description yields no ACs after HTML stripping, attempt to map the item to one or more root-item ACs using semantic similarity between the item's `title` and the root AC texts. Apply the following rules:
+
+1. For each root AC, consider whether the child item's title plausibly describes work that would satisfy or contribute to that AC.
+2. If a confident semantic match is found, record it as an **inferred mapping** — do NOT add new AC rows for the child item. Instead, annotate the matched root AC rows in the Root Item ACs table with a note in parentheses, e.g.: `(partially addressed by Task: Setup Ticket Management System — ID 12)`.
+3. If no confident match can be made for a child item, leave it unannotated — do not guess or force a match.
+4. Mark inferred mappings clearly with the label `[inferred from title]` so the reader knows this is not based on written AC text.
+5. Do not change the status of a root AC based solely on a title-inferred mapping. Status is still determined by Step 2 rules (item state or checkboxes).
 
 ## Step 2 — Determine AC status
 
@@ -164,10 +175,13 @@ Extract each AC as a discrete, testable statement. Strip leading bullets, number
 ### Root Item ACs — <title> (ID <id>)  [HIGHEST PRIORITY]
 > <item_type> · State: <state> · <url>
 
-| # | Acceptance Criterion | Status |
-|---|----------------------|--------|
-| 1 | <ac text> | ✅ Done / ❌ Not Done |
+| # | Acceptance Criterion | Status | Coverage |
+|---|----------------------|--------|----------|
+| 1 | <ac text> | ✅ Done / ❌ Not Done | (partially addressed by <item title> — ID <id>) [inferred from title] |
+| 2 | <ac text> | ✅ Done / ❌ Not Done | — |
 …
+
+Omit the Coverage column if no title-inferred mappings exist for any AC.
 
 (If root item has no ACs: "No acceptance criteria found in root item description.")
 
@@ -184,6 +198,8 @@ Extract each AC as a discrete, testable statement. Strip leading bullets, number
 …
 
 (Repeat for each child item that contains ACs, ordered by level then id)
+
+If a child item has no ACs of its own but was title-matched to one or more root ACs, do NOT list it here. Its contribution is already annotated in the Root Item ACs table above.
 
 ---
 
