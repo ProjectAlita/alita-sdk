@@ -36,9 +36,9 @@ class SharepointConfiguration(BaseModel):
         }
     )
     # Client credentials (shared by both app_auth and delegated flows)
-    client_id: Optional[str] = Field(default=None, description="SharePoint Client ID")
-    client_secret: Optional[SecretStr] = Field(default=None, description="SharePoint Client Secret")
-    site_url: Optional[str] = Field(default=None, description="SharePoint Site URL")
+    client_id: str = Field(description="SharePoint Client ID")
+    client_secret: SecretStr = Field(description="SharePoint Client Secret")
+    site_url: str = Field(description="SharePoint Site URL")
 
     # Additional fields for delegated/OAuth flows
     oauth_discovery_endpoint: Optional[str] = Field(default=None, description="OAuth Discovery Endpoint. Usually in format: https://login.microsoftonline.com/{tenant_id}")
