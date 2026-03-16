@@ -489,7 +489,21 @@ class SharepointRestWrapper(BaseSharepointWrapper):
             return result
         except ToolException:
             raise
-        except Exception as e:
-            logging.error("Failed to add attachment via REST: %s", e)
-            raise ToolException(f"Attachment failed: {e}")
+        except Exception as base_e:
+            logging.warning(
+                "REST API failed for add_attachment_to_list_item: %s. "
+                "Trying Graph API fallback.", base_e)
+            try:
+                result = self._graph_helper().add_attachment_to_list_item(
+                    self.site_url, list_title, item_id,
+                    actual_filename, file_bytes, replace)
+                logging.info(
+                    "Attachment '%s' added to list '%s' item %d via Graph API fallback",
+                    actual_filename, list_title, item_id)
+                return result
+            except Exception as graph_e:
+                logging.error("Graph API fallback also failed: %s", graph_e)
+                raise ToolException(
+                    f"Attachment failed via both REST and Graph API. "
+                    f"REST error: {base_e} | Graph error: {graph_e}")
 
