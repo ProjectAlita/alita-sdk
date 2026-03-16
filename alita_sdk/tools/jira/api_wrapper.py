@@ -168,7 +168,6 @@ AddFileToIssueDescription = create_model(
     issue_key=(str, Field(description="Jira issue key where file will be added, e.g. 'PROJ-123'. The file will be uploaded as attachment and referenced in the description.")),
     filepath=(str, Field(description="File path in format /{bucket}/{filename} containing the file to attach. Artifact can be any file type (image, PDF, video, document, etc.). Get this from the file/image generation tool's response.")),
     filename=(Optional[str], Field(description="Filename for the attachment, e.g. 'diagram.png', 'report.pdf'. If not provided, uses the original filename from artifact. Should include file extension.", default=None)),
-    alt_text=(Optional[str], Field(default=None, description="Alternative text for the file (optional). Used for accessibility and as caption.")),
     position=(Optional[Literal["append", "prepend"]], Field(default="append", description="Where to place the file reference in description: 'append' (end) or 'prepend' (beginning)."))
 )
 
@@ -834,20 +833,14 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                 paragraphs.append(''.join(texts))
         return '\n\n'.join(paragraphs)
 
-    def _get_file_markup(self, filename: str, mime_type: str, alt_text: Optional[str] = None) -> str:
+    def _get_file_markup(self, filename: str, mime_type: str) -> str:
         """Generate Jira markup for file based on MIME type."""
         # Images and videos display inline with ! markup
         if mime_type.startswith('image/') or mime_type.startswith('video/'):
-            if alt_text:
-                return f"!{filename}|alt={alt_text}!"
-            else:
-                return f"!{filename}!"
+            return f"!{filename}!"
         # Other files use attachment link markup
         else:
-            if alt_text:
-                return f"[^{filename}] ({alt_text})"
-            else:
-                return f"[^{filename}]"
+            return f"[^{filename}]"
 
     def _upload_file_from_artifact(self, issue_key: str, filepath: str, filename: str = None) -> Dict[str, Any]:
         """Upload file from artifact storage to Jira issue."""
@@ -900,7 +893,6 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         issue_key: str,
         filepath: str,
         filename: Optional[str] = None,
-        alt_text: Optional[str] = None,
         position: Literal["append", "prepend"] = "append"
     ) -> str:
         """Upload file from artifact and add to issue description. Images/videos inline, others as links."""
@@ -959,7 +951,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
                     current_description = current_description_raw or ''
                 
                 # Create wiki markup for the attachment
-                file_markup = self._get_file_markup(uploaded_filename, mime_type, alt_text)
+                file_markup = self._get_file_markup(uploaded_filename, mime_type)
                 
                 # Add the file markup
                 if position == "prepend":
