@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alita_sdk"
-version = "0.4.23"
+version = "0.4.24"
 description = "SDK for building langchain agents using resources from Alita"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -49,14 +49,9 @@ Issues = "https://github.com/ProjectAlita/alita-sdk/issues"
 
 [tool.pytest.ini_options]
 addopts = "-v -s --junit-xml=tests/reports/test-results.xml"
-testpaths = ["tests"]
-env_files = [".env"]
-filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::PendingDeprecationWarning",
-    "ignore::UserWarning",
-    "ignore::cryptography.utils.CryptographyDeprecationWarning",
-]
+testpaths = [ "tests",]
+env_files = [ ".env",]
+filterwarnings = [ "ignore::DeprecationWarning", "ignore::PendingDeprecationWarning", "ignore::UserWarning", "ignore::cryptography.utils.CryptographyDeprecationWarning",]
 
 [tool.setuptools.package-data]
 alita_sdk = [ "*.md", "*.txt", "*.yml", "*.yaml", "prompts/*.md", "docs/*.md", "docs/code/*.md", "docs/faq/*.md", "docs/prompts/*.md",]
