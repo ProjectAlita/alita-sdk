@@ -1844,8 +1844,13 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
                     content_type=mime_type,
                     page_id=page_id
                 )
+            except (HTTPError, ApiError) as e:
+                error_details = self._extract_http_error_details(e)
+                raise ToolException(
+                    f"Failed to upload attachment '{filename}' to page {page_id}: {error_details}"
+                )
             except Exception as e:
-                raise ToolException(f"Failed to upload attachment to page {page_id}: {str(e)}")
+                raise ToolException(f"Failed to upload attachment '{filename}' to page {page_id}: {str(e)}")
             
             # Extract attachment info from response
             # The attach_content response contains all necessary attachment metadata
@@ -1865,6 +1870,28 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             stacktrace = format_exc()
             logger.error(f"Error uploading file from artifact: {stacktrace}")
             raise ToolException(f"Failed to upload file from artifact: {str(e)}")
+
+    def _extract_http_error_details(self, error: Exception) -> str:
+        """Extract detailed error info from HTTP/API exceptions."""
+        parts = [str(error)]
+        response = getattr(error, 'response', None)
+        if response is None:
+            # ApiError stores the original exception in .reason
+            reason = getattr(error, 'reason', None)
+            if reason is not None:
+                response = getattr(reason, 'response', None)
+        if response is not None:
+            status = getattr(response, 'status_code', None)
+            reason_text = getattr(response, 'reason', '')
+            if status:
+                parts.append(f"HTTP {status} {reason_text}".strip())
+            try:
+                body = response.text
+                if body:
+                    parts.append(f"Response: {body[:1000]}")
+            except Exception:
+                pass
+        return " | ".join(parts)
 
     def _build_page_url(self, webui_path: str) -> str:
         """Build correct page URL for both cloud and self-hosted Confluence instances.
@@ -1956,10 +1983,13 @@ class ConfluenceAPIWrapper(NonCodeIndexerToolkit):
             
         except ToolException:
             raise
+        except (HTTPError, ApiError) as e:
+            error_details = self._extract_http_error_details(e)
+            logger.error(f"Error adding file to page: {format_exc()}")
+            raise ToolException(f"Failed to add file to page {page_id}: {error_details}")
         except Exception as e:
-            stacktrace = format_exc()
-            logger.error(f"Error adding file to page: {stacktrace}")
-            raise ToolException(f"Failed to add file to page: {str(e)}")
+            logger.error(f"Error adding file to page: {format_exc()}")
+            raise ToolException(f"Failed to add file to page {page_id}: {str(e)}")
 
     def _index_tool_params(self):
         """Return the parameters for indexing data."""
