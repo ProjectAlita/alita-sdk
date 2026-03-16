@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "{\n  \"subject\": \"Children's bicycle with training wheels (BSA brand)\",\n  \"colors\": [\"pink/magenta (dominant)\", \"black (tires)\", \"silver/gray (metal components)\", \"yellow (decorative accents)\"],\n  \"text_content\": \"BSA brand logo/name visible on frame\",\n  \"estimated_age_group\": \"Toddlers/Preschool (ages 2-5 years)\",\n  \"brand_visible\": true\n}",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "processing_method": "llm"
+    }
+  }
+]

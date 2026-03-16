@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "1) Main subject: A children's bicycle (BSA Champ/Honny brand) designed for toddlers, featuring training wheels, front basket, and rear seat with decorative elements. The bicycle is photographed from the side against a white background in a product photography style.\n\n2) Colors used: Pink/magenta is the dominant color covering the frame, seat, basket, and training wheels. Black is used for the tires. Silver/gray metallic tones appear on frame components, handlebars, rear rack, and pedals. Yellow accents are present in the bee decorations and smiley face on the seat backrest.\n\n3) Text visible: BSA branding/logo is visible on the bicycle frame, identifying the manufacturer.\n\n4) Purpose/context: This is a product photograph of a children's learning bicycle intended for retail/e-commerce display. The bicycle is designed for young children (toddlers/preschool age) who are learning to ride, as evidenced by the training wheels. The playful bee theme decorations and bright colors are designed to appeal to young children and make the learning experience more enjoyable.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "processing_method": "llm"
+    }
+  }
+]

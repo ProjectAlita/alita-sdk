@@ -1,0 +1,35 @@
+{
+  "file_path": "../files/image_simple.jpg",
+  "tags": ["loader_image", "feature_llm", "edge_tokens"],
+  "configs": [
+    {
+      "_name": "ocr_vs_llm_baseline",
+      "use_llm": false,
+      "max_tokens": 512
+    },
+    {
+      "_name": "llm_same_tokens_as_ocr",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 512
+    },
+    {
+      "_name": "llm_token_stress_very_low",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 64
+    },
+    {
+      "_name": "llm_token_stress_very_high",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 4000
+    },
+    {
+      "_name": "llm_unlimited_tokens",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": -1
+    }
+  ]
+}

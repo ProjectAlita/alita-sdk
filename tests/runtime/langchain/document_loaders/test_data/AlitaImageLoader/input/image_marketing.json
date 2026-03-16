@@ -1,0 +1,30 @@
+{
+  "file_path": "../files/image_simple.jpg",
+  "tags": ["loader_image", "feature_llm", "content_analysis"],
+  "configs": [
+    {
+      "_name": "llm_target_audience",
+      "use_llm": true,
+      "prompt": "Based on the visual design, colors, and subject matter, identify the likely target audience for this product (age range, gender, interests).",
+      "max_tokens": 400
+    },
+    {
+      "_name": "llm_product_positioning",
+      "use_llm": true,
+      "prompt": "Analyze this product image for: 1) Product category, 2) Price point indicators, 3) Key selling points visible, 4) Brand positioning",
+      "max_tokens": 600
+    },
+    {
+      "_name": "llm_accessibility_features",
+      "use_llm": true,
+      "prompt": "Identify any safety or accessibility features visible in this image.",
+      "max_tokens": 300
+    },
+    {
+      "_name": "llm_use_case",
+      "use_llm": true,
+      "prompt": "Describe the intended use case and appropriate context for this product.",
+      "max_tokens": 250
+    }
+  ]
+}

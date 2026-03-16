@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "This image shows a children's bicycle in bright pink/magenta color photographed against a white background. The bicycle is a BSA Champ or BSA Honny model designed for toddlers and young children. Visible objects include: a children's bicycle frame in pink, two training wheels (stabilizer wheels) attached to the rear axle in matching pink, a front basket mounted on the handlebars decorated with bee motifs, a rear seat or backrest featuring a yellow smiley face design, handlebar grips in pink, a silver/gray metal rear carrier rack, black tires on both wheels, silver/gray pedals, and various bee decorations placed on the basket and frame. The dominant colors are pink/magenta (used for the frame, seat, basket, and training wheels), black (tires and wheels), silver/gray (metal components, handlebars, rack, pedals), and yellow (bee decorations and smiley face on the seat backrest). Visible text includes BSA branding/logo on the bicycle frame. The overall design is playful and child-friendly with bee theme decorations adding whimsical elements to encourage young riders.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "processing_method": "llm"
+    }
+  }
+]

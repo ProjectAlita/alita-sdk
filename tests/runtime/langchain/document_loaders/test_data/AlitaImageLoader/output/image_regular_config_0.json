@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "There is no readable content in this image.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "processing_method": "ocr"
+    }
+  }
+]

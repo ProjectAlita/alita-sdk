@@ -161,7 +161,7 @@ def _save_actual_documents_for_test(actual_docs: List, actual_output_path: Path)
         _rp_log(f"Saved {len(actual_docs)} document(s) to {actual_output_path}")
 
 
-def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_name: str, llm=None):
+def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_name: str, llm=None, debug_log_path: str = None):
     with rp_step(f"Compare actual output with baseline for {loader_name}"):
         from loader_test_utils import compare_documents
         
@@ -169,7 +169,7 @@ def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_n
         validation_method = "LLM-based semantic validation" if llm is not None else "Similarity-based comparison"
         _rp_log(f"Using {validation_method} for content comparison")
         
-        cmp = compare_documents(actual_docs, expected_docs, loader_name=loader_name, llm=llm)
+        cmp = compare_documents(actual_docs, expected_docs, loader_name=loader_name, llm=llm, debug_log_path=debug_log_path)
         status = "PASSED" if cmp.passed else "FAILED"
         _rp_log(f"Result: {status} | actual={cmp.actual_count} docs, expected={cmp.expected_count} docs")
         if cmp.diffs:
@@ -285,7 +285,13 @@ def run_single_config_test(
     except Exception as exc:
         logger.warning(f"Could not save actual output to {actual_output_path}: {exc}")
 
-    cmp = _compare_documents_for_test(actual_docs, expected_docs, loader_name=loader_name, llm=llm)
+    # Construct debug log path for LLM validation comparison
+    debug_log_path = None
+    if llm is not None:
+        # Place debug log in same directory as actual output
+        debug_log_path = str(actual_output_path.parent / f"llm_validation_debug_{input_name}_config_{config_index}.jsonl")
+
+    cmp = _compare_documents_for_test(actual_docs, expected_docs, loader_name=loader_name, llm=llm, debug_log_path=debug_log_path)
     result.passed = cmp.passed
     result.diffs_summary = cmp.summary() if not cmp.passed else None
     return result

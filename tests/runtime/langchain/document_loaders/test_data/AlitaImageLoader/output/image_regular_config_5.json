@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "This image shows a bright pink children's bicycle with training wheels, designed for toddlers learning to ride. The BSA brand bike features a front basket with bee decorations and a rear seat with a yellow smiley face.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "processing_method": "llm"
+    }
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "page_content": "Pink children's bicycle with training wheels and bee decorations.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "chunk_id": 1,
+      "processing_method": "llm"
+    }
+  },
+  {
+    "page_content": "Features include front basket, rear seat, and BSA branding.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "chunk_id": 2,
+      "processing_method": "llm"
+    }
+  },
+  {
+    "page_content": "Yellow smiley face visible on seat backrest.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "chunk_id": 3,
+      "processing_method": "llm"
+    }
+  }
+]

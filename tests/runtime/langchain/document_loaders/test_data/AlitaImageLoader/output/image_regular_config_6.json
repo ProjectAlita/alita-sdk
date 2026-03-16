@@ -1,0 +1,9 @@
+[
+  {
+    "page_content": "Visible text in this image:\n\nBSA - Brand name/logo visible on the bicycle frame, identifying the manufacturer as BSA (likely BSA Champ or BSA Honny model)\n\nNo other text, labels, or written content is clearly visible in the image.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/image_regular.jpg",
+      "processing_method": "llm"
+    }
+  }
+]

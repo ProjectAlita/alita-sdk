@@ -1,0 +1,23 @@
+{
+  "file_path": "../files/image_simple.jpg",
+  "tags": ["loader_image", "feature_llm", "content_text_heavy"],
+  "configs": [
+    {
+      "_name": "ocr_extract_all_text",
+      "use_llm": false,
+      "max_tokens": -1
+    },
+    {
+      "_name": "llm_extract_and_structure_text",
+      "use_llm": true,
+      "prompt": "Extract all visible text from this image and organize it by location (top, middle, bottom, sides).",
+      "max_tokens": 1000
+    },
+    {
+      "_name": "llm_identify_brand_and_text",
+      "use_llm": true,
+      "prompt": "Identify: 1) Brand name(s), 2) Product name(s), 3) Any slogans or taglines, 4) Decorative text",
+      "max_tokens": 512
+    }
+  ]
+}

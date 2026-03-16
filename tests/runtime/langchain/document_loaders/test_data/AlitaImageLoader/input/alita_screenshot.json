@@ -1,10 +1,10 @@
 {
-  "file_path": "../files/image_simple.jpg",
+  "file_path": "../files/alita_screenshot.png",
   "tags": ["loader_image", "feature_llm", "feature_multimodal"],
   "configs": [
     {
-      "use_llm": true,
-      "prompt_default": true
+      "use_llm": false,
+      "max_tokens": 512
     }
   ]
 }

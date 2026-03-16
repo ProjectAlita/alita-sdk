@@ -1,0 +1,24 @@
+{
+  "file_path": "../files/image_simple.jpg",
+  "tags": ["loader_image", "feature_llm", "feature_analysis"],
+  "configs": [
+    {
+      "_name": "llm_color_palette",
+      "use_llm": true,
+      "prompt": "Identify the main color palette used in this image and describe which parts use each color.",
+      "max_tokens": 400
+    },
+    {
+      "_name": "llm_dominant_colors",
+      "use_llm": true,
+      "prompt": "List the 3-5 dominant colors in this image in order of prominence.",
+      "max_tokens": 200
+    },
+    {
+      "_name": "llm_color_context",
+      "use_llm": true,
+      "prompt": "Describe how the color choices relate to the subject's purpose or target audience.",
+      "max_tokens": 300
+    }
+  ]
+}

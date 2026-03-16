@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.messages import HumanMessage
 
 try:
     from sklearn.feature_extraction.text import TfidfVectorizer
@@ -355,19 +356,133 @@ def _compare_metadata(
     return diffs
 
 
-def _llm_validate_content(
+def _llm_validate_content_old_method(
     actual_content: str,
     expected_content: str,
     llm,
-) -> tuple[bool, str, float, dict]:
-    """Use LLM to semantically validate if actual and expected content are equivalent.
+) -> tuple[bool, str]:
+    """Old validation method using direct LLM text response parsing.
     
-    Uses structured JSON output for reliable parsing and detailed results.
+    This is kept for comparison purposes during the transition period.
     
     Args:
         actual_content: Actual page_content to validate
         expected_content: Expected page_content (baseline)
         llm: LangChain LLM instance for validation
+        
+    Returns:
+        Tuple of (is_valid: bool, explanation: str)
+    """
+    prompt = f"""You are a test validation assistant. Compare the following two text outputs and determine if they are semantically equivalent.
+
+The EXPECTED output is the baseline/reference output.
+The ACTUAL output is the current test output.
+
+Your task:
+1. Determine if ACTUAL and EXPECTED convey the same information and meaning
+2. Minor differences in wording, formatting, or style are acceptable
+3. Focus on semantic equivalence, not exact text matching
+4. Respond with ONLY 'VALID' or 'INVALID' on the first line
+5. On the second line, provide a brief explanation (max 100 words)
+
+EXPECTED OUTPUT:
+{expected_content}
+
+ACTUAL OUTPUT:
+{actual_content}
+
+Validation result:"""
+    
+    try:
+        response = llm.invoke([HumanMessage(content=prompt)])
+        result_text = response.content.strip()
+        
+        # Parse response - first line should be VALID/INVALID
+        lines = result_text.split('\n', 1)
+        verdict = lines[0].strip().upper()
+        explanation = lines[1].strip() if len(lines) > 1 else "No explanation provided"
+        
+        is_valid = verdict == "VALID"
+        return is_valid, explanation
+    except Exception as e:
+        # If LLM validation fails, return False and error info
+        return False, f"LLM validation failed: {str(e)}"
+
+
+def _log_llm_validation_comparison(
+    actual_content: str,
+    expected_content: str,
+    old_result: tuple[bool, str],
+    new_result: tuple[bool, str, float, dict],
+    text_similarity: float,
+    log_file_path: str,
+):
+    """Log both validation methods' results to a debug file for comparison.
+    
+    Args:
+        actual_content: Actual content being validated
+        expected_content: Expected content
+        old_result: Result from old text-based validation (is_valid, explanation)
+        new_result: Result from new JSON-based validation (is_valid, explanation, confidence, full_dict)
+        text_similarity: Traditional TF-IDF similarity score
+        log_file_path: Path to debug log file
+    """
+    import json
+    from datetime import datetime
+    from pathlib import Path
+    
+    # Ensure log directory exists
+    Path(log_file_path).parent.mkdir(parents=True, exist_ok=True)
+    
+    old_valid, old_explanation = old_result
+    new_valid, new_explanation, new_confidence, new_full_result = new_result
+    
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "validation_comparison": {
+            "old_method": {
+                "type": "text_based_parsing",
+                "is_valid": old_valid,
+                "explanation": old_explanation,
+            },
+            "new_method": {
+                "type": "json_structured_output",
+                "result": new_full_result,  # Contains: equivalent, confidence, reason, key_differences, passed, score
+            },
+            "text_similarity": {
+                "tfidf_cosine": text_similarity,
+            },
+            "agreement": old_valid == new_valid,
+        },
+        "content": {
+            "actual_length": len(actual_content),
+            "expected_length": len(expected_content),
+            "actual_preview": actual_content[:200] + "..." if len(actual_content) > 200 else actual_content,
+            "expected_preview": expected_content[:200] + "..." if len(expected_content) > 200 else expected_content,
+        }
+    }
+    
+    # Append to log file (JSON Lines format with formatting)
+    with open(log_file_path, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(log_entry, ensure_ascii=False, indent=2) + '\n')
+
+
+def _llm_validate_content(
+    actual_content: str,
+    expected_content: str,
+    llm,
+    debug_log_path: str = None,
+) -> tuple[bool, str, float, dict]:
+    """Use LLM to semantically validate if actual and expected content are equivalent.
+    
+    Uses structured JSON output for reliable parsing and detailed results.
+    Also runs old validation method and logs comparison for review.
+    
+    Args:
+        actual_content: Actual page_content to validate
+        expected_content: Expected page_content (baseline)
+        llm: LangChain LLM instance for validation
+        debug_log_path: Optional path to debug log file for comparison logging
         
     Returns:
         Tuple of (is_valid: bool, explanation: str, confidence: float, full_result: dict)
@@ -396,6 +511,7 @@ Respond with JSON:
 """)
     
     try:
+        # Run NEW method (JSON structured output)
         parser = JsonOutputParser()
         chain = prompt | llm | parser
         
@@ -413,7 +529,29 @@ Respond with JSON:
         result["passed"] = is_valid
         result["score"] = confidence
         
-        return is_valid, reason, confidence, result
+        new_result = (is_valid, reason, confidence, result)
+        
+        # Run OLD method for comparison (if debug logging enabled)
+        if debug_log_path:
+            try:
+                old_result = _llm_validate_content_old_method(actual_content, expected_content, llm)
+                text_similarity = calculate_text_similarity(actual_content, expected_content)
+                
+                # Log comparison
+                _log_llm_validation_comparison(
+                    actual_content,
+                    expected_content,
+                    old_result,
+                    new_result,
+                    text_similarity,
+                    debug_log_path
+                )
+            except Exception as e:
+                # Don't fail the test if comparison logging fails
+                import logging
+                logging.warning(f"Failed to log validation comparison: {e}")
+        
+        return new_result
         
     except Exception as e:
         # If LLM validation fails, return error info
@@ -427,6 +565,7 @@ def _compare_page_content(
     doc_index: int,
     similarity_threshold: float = 0.95,
     llm=None,
+    debug_log_path: str = None,
 ) -> Optional[DocumentDiff]:
     """Compare page_content using LLM validation (if available) or similarity score.
     
@@ -436,6 +575,7 @@ def _compare_page_content(
         doc_index: Document index for error reporting
         similarity_threshold: Minimum similarity to pass (1.0 = exact match required)
         llm: Optional LLM instance for semantic validation
+        debug_log_path: Optional path to debug log file for validation comparison
         
     Returns:
         DocumentDiff if content doesn't match threshold, None otherwise
@@ -444,7 +584,7 @@ def _compare_page_content(
     if llm is not None:
         try:
             is_valid, explanation, confidence, full_result = _llm_validate_content(
-                actual_content, expected_content, llm
+                actual_content, expected_content, llm, debug_log_path
             )
             
             if is_valid:
@@ -603,6 +743,7 @@ def compare_documents(
     normalize: bool = True,
     loader_name: Optional[str] = None,
     llm=None,
+    debug_log_path: str = None,
 ) -> ComparisonResult:
     """Deep-compare two Document lists following the flow:
     1. Compare document count
@@ -616,6 +757,7 @@ def compare_documents(
         normalize: Whether to normalize whitespace in page_content
         loader_name: Loader class name (e.g., "AlitaTextLoader") for loader-specific comparison rules
         llm: Optional LLM instance for semantic content validation
+        debug_log_path: Optional path to debug log file for validation method comparison
     """
     ignore = set(ignore_metadata_fields) if ignore_metadata_fields is not None else DEFAULT_IGNORE_METADATA
     diffs: List[DocumentDiff] = []
@@ -646,7 +788,7 @@ def compare_documents(
         a_content = normalize_text(a_doc.page_content) if normalize else a_doc.page_content
         e_content = normalize_text(e_doc.page_content) if normalize else e_doc.page_content
         
-        content_diff = _compare_page_content(a_content, e_content, i, similarity_threshold, llm=llm)
+        content_diff = _compare_page_content(a_content, e_content, i, similarity_threshold, llm=llm, debug_log_path=debug_log_path)
         if content_diff:
             diffs.append(content_diff)
 

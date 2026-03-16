@@ -1,0 +1,30 @@
+{
+  "file_path": "../files/image_simple.jpg",
+  "tags": ["loader_image", "feature_llm", "feature_object_detection"],
+  "configs": [
+    {
+      "_name": "llm_list_all_objects",
+      "use_llm": true,
+      "prompt": "Create a comprehensive list of all visible objects in this image.",
+      "max_tokens": 600
+    },
+    {
+      "_name": "llm_categorize_objects",
+      "use_llm": true,
+      "prompt": "Identify and categorize all visible objects by type (e.g., structural components, decorative elements, functional parts).",
+      "max_tokens": 800
+    },
+    {
+      "_name": "llm_object_count",
+      "use_llm": true,
+      "prompt": "Count and list the quantity of each type of object visible in this image.",
+      "max_tokens": 400
+    },
+    {
+      "_name": "llm_main_subject",
+      "use_llm": true,
+      "prompt": "Identify the main subject of this image and describe its key features.",
+      "max_tokens": 300
+    }
+  ]
+}
