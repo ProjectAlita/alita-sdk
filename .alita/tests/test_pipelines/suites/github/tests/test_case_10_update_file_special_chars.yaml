@@ -134,7 +134,7 @@ nodes:
 
         file_query = file_path + nl
         file_query += "OLD <<<<" + nl
-        file_query += old_content + nl
+        file_query += old_content
         file_query += ">>>> OLD" + nl
         file_query += "NEW <<<<" + nl
         file_query += new_content + nl
@@ -182,7 +182,7 @@ nodes:
     output:
       - verified_content
     structured_output: true
-    transition: validate_result
+    transition: cleanup_branch
 
   - id: validate_result
     type: llm
@@ -227,7 +227,7 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: "dict"
-    transition: cleanup_branch
+    transition: END
 
   - id: cleanup_branch
     type: toolkit
@@ -246,4 +246,4 @@ nodes:
       - create_result
     structured_output: true
     continue_on_error: true
-    transition: END
+    transition: validate_result

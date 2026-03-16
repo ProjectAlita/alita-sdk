@@ -1488,6 +1488,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             )
         
         logger.info(f"Input: {thread_id} - {input}")
+        hitl_resume_ctx = None
         try:
             checkpoint_tuple = self.checkpointer.get_tuple(config) if self.checkpointer else None
             if checkpoint_tuple:
@@ -1509,6 +1510,43 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Resuming from an HITL dynamic interrupt - use Command(resume=...)
                     hitl_resume_value = self._extract_hitl_resume(input)
                     logger.info(f"[HITL] Resuming HITL interrupt with: {hitl_resume_value}")
+
+                    # For sensitive_tool guardrail interrupts, inject context into
+                    # config so the LLMNode can skip the non-deterministic LLM call
+                    # and instead create a synthetic AIMessage with the approved
+                    # (or rejected) tool call.  This avoids the fundamental issue
+                    # where re-executing the LLM produces a different response.
+                    guardrail_type = hitl_interrupt.get('guardrail_type')
+                    if guardrail_type == 'sensitive_tool':
+                        tool_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args', {})
+                        resume_ctx = {
+                            'tool_name': hitl_interrupt.get('tool_name', ''),
+                            'tool_args': tool_args if isinstance(tool_args, dict) else {},
+                            'tool_call_id': f"call_{uuid4().hex[:24]}",
+                            'action': hitl_resume_value.get('action', 'approve'),
+                            'value': hitl_resume_value.get('value', ''),
+                        }
+                        hitl_resume_ctx = resume_ctx
+                        config['configurable']['_hitl_resume_context'] = resume_ctx
+
+                        # Persist decision to state so blocked tools stay
+                        # excluded across HITL resumes and an audit trail is
+                        # available in the checkpoint.  The reducer appends.
+                        decision = {
+                            'tool_name': hitl_interrupt.get('tool_name', ''),
+                            'toolkit_name': hitl_interrupt.get('toolkit_name', ''),
+                            'toolkit_type': hitl_interrupt.get('toolkit_type', ''),
+                            'action': hitl_resume_value.get('action', 'approve'),
+                            'action_label': hitl_interrupt.get('action_label', ''),
+                            'user_feedback': hitl_resume_value.get('value', ''),
+                        }
+                        self.update_state(config, {'hitl_decisions': [decision]})
+                        logger.info(
+                            "[HITL] Persisted sensitive-tool decision to state: %s %s",
+                            decision.get('action'),
+                            decision.get('tool_name'),
+                        )
+
                     result = super().invoke(
                         Command(resume=hitl_resume_value),
                         config=config,
@@ -1523,6 +1561,9 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Don't use invoke(None) as that just returns current state without running
                     logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
                     self._rebuild_checkpoint_messages(config, checkpoint_state, input)
+                    # Clear HITL decisions from previous execution batch
+                    if checkpoint_state.values.get('hitl_decisions'):
+                        self.update_state(config, {'hitl_decisions': None})
 
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
@@ -1539,20 +1580,40 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 thread_id=thread_id,
                 current_recursion_limit=current_recursion_limit,
             )
+        finally:
+            configurable = config.get('configurable', {}) if isinstance(config, dict) else {}
+            if isinstance(configurable, dict):
+                configurable.pop('_hitl_resume_context', None)
 
         try:
             # Check if we're in a HITL interrupt state after execution
             config_state = self.get_state(config)
+            is_execution_finished = not config_state.next
             hitl_interrupt = self._get_hitl_interrupt(config_state)
-            if hitl_interrupt:
+            is_stale_sensitive_interrupt = self._is_stale_sensitive_tool_interrupt(
+                hitl_interrupt=hitl_interrupt,
+                hitl_resume_ctx=hitl_resume_ctx,
+                is_execution_finished=is_execution_finished,
+            )
+            if is_stale_sensitive_interrupt:
+                logger.info(
+                    "[HITL] Ignoring stale post-resume sensitive-tool interrupt for '%s'",
+                    hitl_interrupt.get('tool_name', ''),
+                )
+            if hitl_interrupt and not is_stale_sensitive_interrupt:
                 # Graph paused at HITL node. Return the same result shape as the normal
                 # execution path, but override the output and attach HITL metadata.
-                logger.info(f"[HITL] Execution paused at HITL node: {hitl_interrupt}")
+
+                # Strip internal-only fields (e.g. unmasked tool args) before logging
+                # or returning results that will be emitted to UI clients.
+                hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k != 'tool_args_raw'}
+                logger.info(f"[HITL] Execution paused at HITL node: {hitl_for_ui}")
+
                 result_with_state = {
                     "output": hitl_interrupt.get("message", "Awaiting human review..."),
                     "thread_id": thread_id,
                     "execution_finished": False,
-                    "hitl_interrupt": hitl_interrupt,
+                    "hitl_interrupt": hitl_for_ui,
                 }
 
                 if hasattr(config_state, 'values') and config_state.values:
@@ -1690,6 +1751,34 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         if intr.value.get('type') == 'hitl':
                             return intr.value
         return None
+
+    @staticmethod
+    def _is_stale_sensitive_tool_interrupt(
+        hitl_interrupt: Optional[dict],
+        hitl_resume_ctx: Optional[dict],
+        is_execution_finished: bool,
+    ) -> bool:
+        """Ignore only the previously resumed sensitive-tool interrupt.
+
+        After a sensitive-tool resume completes, LangGraph can still expose the
+        old interrupt payload in the finished checkpoint state. We should ignore
+        that stale interrupt, but we must not suppress a new sensitive-tool
+        interrupt raised later in the same resumed turn.
+        """
+        if not (hitl_interrupt and hitl_resume_ctx and is_execution_finished):
+            return False
+
+        if hitl_interrupt.get('guardrail_type') != 'sensitive_tool':
+            return False
+
+        interrupt_tool_name = str(hitl_interrupt.get('tool_name') or '').strip()
+        resumed_tool_name = str(hitl_resume_ctx.get('tool_name') or '').strip()
+        if not interrupt_tool_name or interrupt_tool_name != resumed_tool_name:
+            return False
+
+        interrupt_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args') or {}
+        resumed_args = hitl_resume_ctx.get('tool_args') or {}
+        return interrupt_args == resumed_args
 
     @staticmethod
     def _is_hitl_resume(input_data: dict) -> bool:

@@ -12,6 +12,17 @@ from ...runtime.langchain.constants import ELITEA_RS, PRINTER_NODE_RS
 logger = logging.getLogger(__name__)
 
 
+def _hitl_decisions_reducer(current: list | None, update: list | None) -> list:
+    """Reducer for the ``hitl_decisions`` state field.
+
+    * Sending a ``list`` **appends** to the existing decisions.
+    * Sending ``None`` **clears** all decisions (fresh turn).
+    """
+    if update is None:
+        return []
+    return (current or []) + update
+
+
 def extract_text_from_completion(completion) -> str:
     """Extract text content from LLM completion, handling both string and list formats.
 
@@ -202,6 +213,10 @@ def create_state(data: Optional[dict] = None):
     types_dict["state_types"] = dict
     # Add context_info for context management tracking (unified format with summarization)
     state_dict["context_info"] = Optional[dict]
+    # Persist HITL (sensitive-tool) approve/reject decisions across checkpoint
+    # resumes so that blocked tools stay excluded and an audit trail is kept.
+    # Uses a custom reducer: list → append, None → clear.
+    state_dict["hitl_decisions"] = Annotated[list, _hitl_decisions_reducer]
     logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 
