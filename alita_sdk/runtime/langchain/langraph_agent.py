@@ -1560,20 +1560,10 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Previous run completed - start fresh run with new input
                     # Don't use invoke(None) as that just returns current state without running
                     logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
-
-                    existing_messages = checkpoint_state.values.get('messages', [])
-                    state_updates = {}
-                    old_sys = [
-                        RemoveMessage(id=m.id) for m in existing_messages
-                        if isinstance(m, SystemMessage) and hasattr(m, 'id') and m.id
-                    ]
-                    if old_sys:
-                        state_updates['messages'] = old_sys
+                    self._rebuild_checkpoint_messages(config, checkpoint_state, input)
                     # Clear HITL decisions from previous execution batch
                     if checkpoint_state.values.get('hitl_decisions'):
-                        state_updates['hitl_decisions'] = None
-                    if state_updates:
-                        self.update_state(config, state_updates)
+                        self.update_state(config, {'hitl_decisions': None})
 
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
@@ -1678,6 +1668,68 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     result_with_state[key] = value
 
         return result_with_state
+
+    # =========================================================================
+    # Checkpoint message management
+    # =========================================================================
+
+    def _rebuild_checkpoint_messages(self, config, checkpoint_state, input):
+        """Rebuild checkpoint messages so the SystemMessage stays at position 0.
+
+        Prevents "multiple non-consecutive system messages" errors from
+        Anthropic by replacing the entire checkpoint message list with:
+
+            [SystemMessage from input (if any), old non-system history]
+
+        The indexer always produces at most one SystemMessage in
+        ``input['messages']``: VISION_SYSTEM_MESSAGE and
+        ATTACHMENT_SYSTEM_MESSAGE_TEMPLATE are merged into a single
+        SystemMessage by ``prepend_vision_system_message`` /
+        ``prepend_attachment_system_message`` before the invoke call.
+
+        Old conversation history (Human, AI, summarization summaries) is
+        preserved from the checkpoint so summarization context survives
+        across turns.
+
+        Uses two ``update_state`` calls to guarantee ordering: first remove
+        all existing messages, then restore the rebuilt list. Combining both
+        in a single call can cause the ``add_messages`` reducer to process
+        appends before removes, leaving the checkpoint in a corrupt state.
+        """
+        existing_messages = checkpoint_state.values.get('messages', [])
+        if not existing_messages:
+            return
+
+        input_sys_msgs = [
+            m for m in input.get('messages', [])
+            if isinstance(m, SystemMessage)
+        ]
+        old_non_sys = [
+            m for m in existing_messages
+            if not isinstance(m, SystemMessage)
+        ]
+
+        # Strip SystemMessages from input so that super().invoke(input) doesn't
+        # re-append them via the add_messages reducer after we rebuilt the
+        # checkpoint.  Without this, the original message objects (not yet
+        # assigned a LangGraph id) would be appended as new entries, creating
+        # non-consecutive system messages that Anthropic rejects.
+        if input.get('messages') and input_sys_msgs:
+            input['messages'] = [m for m in input['messages'] if not isinstance(m, SystemMessage)]
+
+        remove_msgs = [
+            RemoveMessage(id=m.id) for m in existing_messages
+            if hasattr(m, 'id') and m.id
+        ]
+        restored = input_sys_msgs + old_non_sys
+
+        logger.info(
+            f"[CHECKPOINT] Rebuilt state: {len(input_sys_msgs)} system + "
+            f"{len(old_non_sys)} non-system messages"
+        )
+        # Two separate calls: remove first, then restore with correct ordering.
+        self.update_state(config, {'messages': remove_msgs})
+        self.update_state(config, {'messages': restored})
 
     # =========================================================================
     # HITL (Human-in-the-Loop) helpers
