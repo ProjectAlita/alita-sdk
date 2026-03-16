@@ -1,5 +1,8 @@
 """Sensitive tool authorization guard middleware."""
 
+import contextvars
+import json
+import logging
 import types
 from typing import Any, Callable, Dict, List, Optional
 
@@ -7,8 +10,38 @@ from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
 
 from .base import Middleware
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Context-variable gate for auto-approving previously-authorized tools.
+# Set by the LLM node *after* the first tool-execution iteration so that
+# replay interrupts still consume their checkpoint resume values, while
+# subsequent iterations skip the interrupt for tools the user already
+# approved.
+# ---------------------------------------------------------------------------
+_HITL_APPROVED_TOOLS: contextvars.ContextVar[frozenset] = contextvars.ContextVar(
+    '_hitl_approved_tools', default=frozenset(),
+)
+
+
+def set_hitl_approved_tools(tool_names: set) -> contextvars.Token:
+    """Activate auto-approve for *tool_names* in the current context."""
+    return _HITL_APPROVED_TOOLS.set(frozenset(tool_names))
+
+
+def reset_hitl_approved_tools(token: contextvars.Token) -> None:
+    """Deactivate auto-approve, restoring the previous context."""
+    _HITL_APPROVED_TOOLS.reset(token)
+
+
 from ..tools.application import Application
-from ..toolkits.security import get_sensitive_tool_policy, has_sensitive_tools_config, find_sensitive_tool_match
+from ..toolkits.security import (
+    find_sensitive_tool_match,
+    get_sensitive_tool_policy,
+    has_sensitive_tools_config,
+    normalize_tool_name,
+)
 
 
 def normalize_tool_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
@@ -25,6 +58,12 @@ def normalize_tool_input(args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
 class SensitiveToolGuardMiddleware(Middleware):
     """Pause execution before running configured sensitive tools."""
 
+    BLOCKED_TOOL_RESULT_TYPE = 'sensitive_tool_blocked'
+
+    BLOCKED_TOOL_MESSAGE = (
+        "User blocked the sensitive action '{action_label}'. This tool call was skipped and not executed."
+    )
+
     def __init__(
         self,
         conversation_id: Optional[str] = None,
@@ -38,7 +77,60 @@ class SensitiveToolGuardMiddleware(Middleware):
         return []
 
     def get_system_prompt(self) -> str:
-        return ""
+        return ''
+
+    @classmethod
+    def _build_blocked_tool_message(cls, action_label: str) -> str:
+        return cls.BLOCKED_TOOL_MESSAGE.format(action_label=action_label)
+
+    @classmethod
+    def _build_blocked_tool_result_payload(
+        cls,
+        *,
+        action_label: str,
+        tool_name: str,
+        toolkit_name: Optional[str] = None,
+        toolkit_type: Optional[str] = None,
+        user_feedback: str = '',
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            'type': cls.BLOCKED_TOOL_RESULT_TYPE,
+            'status': 'blocked',
+            'blocked_tool_name': tool_name,
+            'action_label': action_label,
+            'message': cls._build_blocked_tool_message(action_label),
+            'retry_allowed': False,
+            'equivalent_action_via_other_tool_allowed': True,
+        }
+        if toolkit_name:
+            payload['blocked_toolkit_name'] = toolkit_name
+        if toolkit_type:
+            payload['blocked_toolkit_type'] = toolkit_type
+        if user_feedback:
+            payload['user_feedback'] = user_feedback
+        return payload
+
+    @classmethod
+    def _build_blocked_tool_result(
+        cls,
+        *,
+        action_label: str,
+        tool_name: str,
+        toolkit_name: Optional[str] = None,
+        toolkit_type: Optional[str] = None,
+        user_feedback: str = '',
+    ) -> str:
+        return json.dumps(
+            cls._build_blocked_tool_result_payload(
+                action_label=action_label,
+                tool_name=tool_name,
+                toolkit_name=toolkit_name,
+                toolkit_type=toolkit_type,
+                user_feedback=user_feedback,
+            ),
+            ensure_ascii=True,
+            separators=(',', ':'),
+        )
 
     @staticmethod
     def _get_tool_metadata_value(tool: BaseTool, *keys: str) -> Optional[str]:
@@ -105,12 +197,14 @@ class SensitiveToolGuardMiddleware(Middleware):
     def _build_sensitive_tool_context(self, tool_to_execute: BaseTool, tool_input: Any) -> Optional[dict[str, Any]]:
         toolkit_name = self._get_tool_metadata_value(tool_to_execute, 'toolkit_name')
         toolkit_type = self._get_tool_metadata_value(tool_to_execute, 'toolkit_type', 'type')
-        resolved_tool_name = self._get_tool_metadata_value(tool_to_execute, 'tool_name') or tool_to_execute.name
+        resolved_tool_name = normalize_tool_name(
+            self._get_tool_metadata_value(tool_to_execute, 'tool_name') or tool_to_execute.name
+        )
         display_args: Any = tool_input
 
         if tool_to_execute.name == 'invoke_tool' and isinstance(tool_input, dict):
             toolkit_name = str(tool_input.get('toolkit') or '') or toolkit_name
-            resolved_tool_name = str(tool_input.get('tool') or '') or resolved_tool_name
+            resolved_tool_name = normalize_tool_name(str(tool_input.get('tool') or '') or resolved_tool_name)
             display_args = tool_input.get('arguments', {}) or {}
             registry = getattr(tool_to_execute, 'registry', None)
             if registry and toolkit_name:
@@ -140,6 +234,19 @@ class SensitiveToolGuardMiddleware(Middleware):
 
     @staticmethod
     def _review_sensitive_tool_call(sensitive_tool_context: dict[str, Any]) -> dict[str, str]:
+        # Auto-approve tools that the user already authorized in this
+        # execution batch.  The context variable is activated by the
+        # LLM node *after* the first iteration so replay interrupts
+        # consume their checkpoint values correctly.
+        tool_name = sensitive_tool_context['tool_name']
+        approved = _HITL_APPROVED_TOOLS.get(frozenset())
+        if tool_name in approved:
+            logger.info(
+                "[HITL] Auto-approving '%s' (already authorized in this batch)",
+                tool_name,
+            )
+            return {'action': 'approve', 'value': ''}
+
         interrupt_payload = {
             'type': 'hitl',
             'guardrail_type': 'sensitive_tool',
@@ -171,7 +278,7 @@ class SensitiveToolGuardMiddleware(Middleware):
 
     def _could_be_sensitive(self, tool: BaseTool) -> bool:
         """Quick check whether a tool could match any sensitive tools config entry."""
-        tool_name = self._get_tool_metadata_value(tool, 'tool_name') or tool.name
+        tool_name = normalize_tool_name(self._get_tool_metadata_value(tool, 'tool_name') or tool.name)
         toolkit_name = self._get_tool_metadata_value(tool, 'toolkit_name')
         toolkit_type = self._get_tool_metadata_value(tool, 'toolkit_type', 'type')
         identifiers = [i for i in [toolkit_type, toolkit_name] if i]
@@ -228,8 +335,12 @@ class SensitiveToolGuardMiddleware(Middleware):
                 if ctx:
                     review = guard._review_sensitive_tool_call(ctx)
                     if review['action'] == 'reject':
-                        return review['value'] or (
-                            f"User blocked the sensitive action '{ctx['action_label']}'."
+                        return guard._build_blocked_tool_result(
+                            action_label=ctx['action_label'],
+                            tool_name=ctx['tool_name'],
+                            toolkit_name=ctx['toolkit_name'],
+                            toolkit_type=ctx['toolkit_type'],
+                            user_feedback=review['value'],
                         )
                 return original_func(*args, **kwargs)
 
@@ -242,8 +353,12 @@ class SensitiveToolGuardMiddleware(Middleware):
                     if ctx:
                         review = guard._review_sensitive_tool_call(ctx)
                         if review['action'] == 'reject':
-                            return review['value'] or (
-                                f"User blocked the sensitive action '{ctx['action_label']}'."
+                            return guard._build_blocked_tool_result(
+                                action_label=ctx['action_label'],
+                                tool_name=ctx['tool_name'],
+                                toolkit_name=ctx['toolkit_name'],
+                                toolkit_type=ctx['toolkit_type'],
+                                user_feedback=review['value'],
                             )
                     return await original_coroutine(*args, **kwargs)
 
@@ -263,8 +378,12 @@ class SensitiveToolGuardMiddleware(Middleware):
                 if ctx:
                     review = guard._review_sensitive_tool_call(ctx)
                     if review['action'] == 'reject':
-                        return review['value'] or (
-                            f"User blocked the sensitive action '{ctx['action_label']}'."
+                        return guard._build_blocked_tool_result(
+                            action_label=ctx['action_label'],
+                            tool_name=ctx['tool_name'],
+                            toolkit_name=ctx['toolkit_name'],
+                            toolkit_type=ctx['toolkit_type'],
+                            user_feedback=review['value'],
                         )
                 return original_invoke(input, config=config, **kwargs)
 
@@ -273,8 +392,12 @@ class SensitiveToolGuardMiddleware(Middleware):
                 if ctx:
                     review = guard._review_sensitive_tool_call(ctx)
                     if review['action'] == 'reject':
-                        return review['value'] or (
-                            f"User blocked the sensitive action '{ctx['action_label']}'."
+                        return guard._build_blocked_tool_result(
+                            action_label=ctx['action_label'],
+                            tool_name=ctx['tool_name'],
+                            toolkit_name=ctx['toolkit_name'],
+                            toolkit_type=ctx['toolkit_type'],
+                            user_feedback=review['value'],
                         )
                 return await original_ainvoke(input, config=config, **kwargs)
 
@@ -295,8 +418,12 @@ class SensitiveToolGuardMiddleware(Middleware):
             if ctx:
                 review = guard._review_sensitive_tool_call(ctx)
                 if review['action'] == 'reject':
-                    return review['value'] or (
-                        f"User blocked the sensitive action '{ctx['action_label']}'."
+                    return guard._build_blocked_tool_result(
+                        action_label=ctx['action_label'],
+                        tool_name=ctx['tool_name'],
+                        toolkit_name=ctx['toolkit_name'],
+                        toolkit_type=ctx['toolkit_type'],
+                        user_feedback=review['value'],
                     )
             return original_run(*args, run_manager=run_manager, **kwargs)
 
@@ -310,8 +437,12 @@ class SensitiveToolGuardMiddleware(Middleware):
                 if ctx:
                     review = guard._review_sensitive_tool_call(ctx)
                     if review['action'] == 'reject':
-                        return review['value'] or (
-                            f"User blocked the sensitive action '{ctx['action_label']}'."
+                        return guard._build_blocked_tool_result(
+                            action_label=ctx['action_label'],
+                            tool_name=ctx['tool_name'],
+                            toolkit_name=ctx['toolkit_name'],
+                            toolkit_type=ctx['toolkit_type'],
+                            user_feedback=review['value'],
                         )
                 return await original_async_func(*args, run_manager=run_manager, **kwargs)
 

@@ -23,6 +23,43 @@ _sensitive_action_message_template: str = DEFAULT_SENSITIVE_ACTION_MESSAGE_TEMPL
 _sensitive_tools_initialized: bool = False
 
 
+def get_tool_name_aliases(tool_name: Optional[str]) -> List[str]:
+    """Return canonical aliases for a tool name.
+
+    Runtime tool names can appear in multiple forms depending on how a tool is
+    routed: plain base name (`list_branches_in_repo`), legacy prefixed name
+    (`github___list_branches_in_repo`), or UI/runtime-prefixed name
+    (`elitea_core:list_branches_in_repo`). Sensitive-tool matching and blocked
+    follow-up exclusion must treat these as the same action.
+    """
+    normalized = str(tool_name or '').strip().lower()
+    if not normalized:
+        return []
+
+    aliases: List[str] = []
+    current = normalized
+    while current and current not in aliases:
+        aliases.append(current)
+
+        reduced = current
+        if '___' in reduced:
+            reduced = reduced.split('___', 1)[1].strip()
+        if ':' in reduced:
+            reduced = reduced.split(':', 1)[1].strip()
+
+        if not reduced or reduced == current:
+            break
+        current = reduced
+
+    return aliases
+
+
+def normalize_tool_name(tool_name: Optional[str]) -> str:
+    """Return the canonical base tool name used by security checks."""
+    aliases = get_tool_name_aliases(tool_name)
+    return aliases[-1] if aliases else ''
+
+
 def _normalize_tools_mapping(tool_map: Optional[Dict[str, List[str]]]) -> Dict[str, List[str]]:
     return {
         str(key).strip().lower(): [str(item).strip().lower() for item in (values or []) if str(item).strip()]
@@ -161,9 +198,11 @@ def is_tool_blocked(toolkit_type: str, tool_name: str) -> bool:
     # Check specific tool
     toolkit_lower = toolkit_type.lower()
     if toolkit_lower in _blocked_tools:
-        if tool_name.lower() in _blocked_tools[toolkit_lower]:
-            logger.warning(f"[SECURITY] Blocked tool '{tool_name}' in toolkit '{toolkit_type}'")
-            return True
+        blocked_tool_names = set(_blocked_tools[toolkit_lower])
+        for candidate_name in get_tool_name_aliases(tool_name):
+            if candidate_name in blocked_tool_names:
+                logger.warning(f"[SECURITY] Blocked tool '{tool_name}' in toolkit '{toolkit_type}'")
+                return True
 
     return False
 
@@ -202,8 +241,8 @@ def find_sensitive_tool_match(
 ) -> Optional[str]:
     _load_sensitive_tools_from_env()
 
-    normalized_tool_name = str(tool_name or '').strip().lower()
-    if not normalized_tool_name:
+    tool_name_aliases = get_tool_name_aliases(tool_name)
+    if not tool_name_aliases:
         return None
 
     normalized_identifiers = []
@@ -213,11 +252,15 @@ def find_sensitive_tool_match(
             normalized_identifiers.append(normalized)
 
     for identifier in normalized_identifiers:
-        if normalized_tool_name in _sensitive_tools.get(identifier, []):
-            return identifier
+        sensitive_tool_names = set(_sensitive_tools.get(identifier, []))
+        for candidate_name in tool_name_aliases:
+            if candidate_name in sensitive_tool_names:
+                return identifier
 
-    if normalized_tool_name in _sensitive_tools.get('*', []):
-        return '*'
+    wildcard_sensitive_tool_names = set(_sensitive_tools.get('*', []))
+    for candidate_name in tool_name_aliases:
+        if candidate_name in wildcard_sensitive_tool_names:
+            return '*'
 
     return None
 

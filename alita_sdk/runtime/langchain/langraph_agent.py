@@ -1488,6 +1488,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             )
         
         logger.info(f"Input: {thread_id} - {input}")
+        hitl_resume_ctx = None
         try:
             checkpoint_tuple = self.checkpointer.get_tuple(config) if self.checkpointer else None
             if checkpoint_tuple:
@@ -1525,7 +1526,27 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                             'action': hitl_resume_value.get('action', 'approve'),
                             'value': hitl_resume_value.get('value', ''),
                         }
+                        hitl_resume_ctx = resume_ctx
                         config['configurable']['_hitl_resume_context'] = resume_ctx
+
+                        # Persist decision to state so blocked tools stay
+                        # excluded across HITL resumes and an audit trail is
+                        # available in the checkpoint.  The reducer appends.
+                        decision = {
+                            'tool_name': hitl_interrupt.get('tool_name', ''),
+                            'toolkit_name': hitl_interrupt.get('toolkit_name', ''),
+                            'toolkit_type': hitl_interrupt.get('toolkit_type', ''),
+                            'action': hitl_resume_value.get('action', 'approve'),
+                            'action_label': hitl_interrupt.get('action_label', ''),
+                            'user_feedback': hitl_resume_value.get('value', ''),
+                        }
+                        self.update_state(config, {'hitl_decisions': [decision]})
+                        logger.info(
+                            "[HITL] Persisted sensitive-tool decision to state: %s %s",
+                            decision.get('action'),
+                            decision.get('tool_name'),
+                        )
+
                     result = super().invoke(
                         Command(resume=hitl_resume_value),
                         config=config,
@@ -1546,13 +1567,18 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # "messages key exists with no history" (e.g., after chat clear), which still
                     # requires clearing the old checkpoint to avoid stale SystemMessages.
                     existing_messages = checkpoint_state.values.get('messages', [])
+                    state_updates = {}
                     if existing_messages:
                         logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
                         # Create RemoveMessage objects for all existing messages
                         remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if hasattr(msg, 'id') and msg.id]
                         if remove_msgs:
-                            # Update state to remove old messages before invoking
-                            self.update_state(config, {'messages': remove_msgs})
+                            state_updates['messages'] = remove_msgs
+                    # Clear HITL decisions from previous execution batch
+                    if checkpoint_state.values.get('hitl_decisions'):
+                        state_updates['hitl_decisions'] = None
+                    if state_updates:
+                        self.update_state(config, state_updates)
 
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
@@ -1569,12 +1595,27 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 thread_id=thread_id,
                 current_recursion_limit=current_recursion_limit,
             )
+        finally:
+            configurable = config.get('configurable', {}) if isinstance(config, dict) else {}
+            if isinstance(configurable, dict):
+                configurable.pop('_hitl_resume_context', None)
 
         try:
             # Check if we're in a HITL interrupt state after execution
             config_state = self.get_state(config)
+            is_execution_finished = not config_state.next
             hitl_interrupt = self._get_hitl_interrupt(config_state)
-            if hitl_interrupt:
+            is_stale_sensitive_interrupt = self._is_stale_sensitive_tool_interrupt(
+                hitl_interrupt=hitl_interrupt,
+                hitl_resume_ctx=hitl_resume_ctx,
+                is_execution_finished=is_execution_finished,
+            )
+            if is_stale_sensitive_interrupt:
+                logger.info(
+                    "[HITL] Ignoring stale post-resume sensitive-tool interrupt for '%s'",
+                    hitl_interrupt.get('tool_name', ''),
+                )
+            if hitl_interrupt and not is_stale_sensitive_interrupt:
                 # Graph paused at HITL node. Return the same result shape as the normal
                 # execution path, but override the output and attach HITL metadata.
                 logger.info(f"[HITL] Execution paused at HITL node: {hitl_interrupt}")
@@ -1663,6 +1704,34 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         if intr.value.get('type') == 'hitl':
                             return intr.value
         return None
+
+    @staticmethod
+    def _is_stale_sensitive_tool_interrupt(
+        hitl_interrupt: Optional[dict],
+        hitl_resume_ctx: Optional[dict],
+        is_execution_finished: bool,
+    ) -> bool:
+        """Ignore only the previously resumed sensitive-tool interrupt.
+
+        After a sensitive-tool resume completes, LangGraph can still expose the
+        old interrupt payload in the finished checkpoint state. We should ignore
+        that stale interrupt, but we must not suppress a new sensitive-tool
+        interrupt raised later in the same resumed turn.
+        """
+        if not (hitl_interrupt and hitl_resume_ctx and is_execution_finished):
+            return False
+
+        if hitl_interrupt.get('guardrail_type') != 'sensitive_tool':
+            return False
+
+        interrupt_tool_name = str(hitl_interrupt.get('tool_name') or '').strip()
+        resumed_tool_name = str(hitl_resume_ctx.get('tool_name') or '').strip()
+        if not interrupt_tool_name or interrupt_tool_name != resumed_tool_name:
+            return False
+
+        interrupt_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args') or {}
+        resumed_args = hitl_resume_ctx.get('tool_args') or {}
+        return interrupt_args == resumed_args
 
     @staticmethod
     def _is_hitl_resume(input_data: dict) -> bool:
