@@ -113,7 +113,7 @@ class SharepointAuthorizationHelper:
             raise RuntimeError(f"Error while obtaining access_token and site_id: {e}")
 
     def get_files_list(self, site_url: str, folder_name: str = None, limit_files: int = 100,
-                       include_extensions=None, skip_extensions=None):
+                       include_extensions=None, skip_extensions=None, form_name: str = None):
         if not site_url or not site_url.startswith("https://"):
             raise ValueError(f"Invalid site_url format: {site_url}")
         if limit_files is not None and (not isinstance(limit_files, int) or limit_files <= 0):
@@ -195,17 +195,29 @@ class SharepointAuthorizationHelper:
                 drive_path = unquote(urlparse(drive.get("webUrl")).path) if drive.get("webUrl") else ""
                 if not drive_id:
                     continue  # skip drives without id
-                #
+
+                # When form_name is given, skip drives whose last URL segment
+                # doesn't match — avoids crawling irrelevant libraries entirely.
+                if form_name:
+                    drive_lib = unquote(drive.get("webUrl", "").rstrip('/').split('/')[-1])
+                    if form_name.lower() != drive_lib.lower():
+                        continue
+
                 sub_folder = folder_name
                 if folder_name:
-                    folder_path = folder_name.strip('/')
-                    expected_prefix = drive_path.strip('/')#f'{full_path_prefix}/{library_type}'
-                    if folder_path.startswith(full_path_prefix):
-                        if folder_path.startswith(expected_prefix):
-                            sub_folder = folder_path.removeprefix(f'{expected_prefix}').strip('/')#target_folder_url = folder_path.removeprefix(f'{full_path_prefix}/')
-                        else:
-                            # ignore full path folder which is not targeted to current drive
-                            continue
+                    if form_name:
+                        # form_name already pins the library; treat folder_name as
+                        # a subfolder path relative to that library's root.
+                        sub_folder = folder_name.strip('/')
+                    else:
+                        folder_path = folder_name.strip('/')
+                        expected_prefix = drive_path.strip('/')
+                        if folder_path.startswith(full_path_prefix):
+                            if folder_path.startswith(expected_prefix):
+                                sub_folder = folder_path.removeprefix(f'{expected_prefix}').strip('/')
+                            else:
+                                # ignore full path folder which is not targeted to current drive
+                                continue
                 #
                 files = _recurse_drive(drive_id, drive_path, sub_folder, limit_files)
                 result.extend(files)
