@@ -457,15 +457,21 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         Lists all files including files from subfolders across **all document
         libraries** on the site.
 
-        When ``folder_name`` is supplied the method resolves the correct drive
-        automatically (e.g. ``private_docs/some/sub``) and lists only within
-        that subtree.  When no ``folder_name`` is given, every document-library
-        drive on the site is enumerated so that files from libraries other than
-        ``Shared Documents`` (e.g. ``private_docs``) are included.
+        When ``folder_name`` is supplied alone the method resolves the correct
+        drive automatically (e.g. ``private_docs/some/sub``) and lists only
+        within that subtree.  When no ``folder_name`` is given, every
+        document-library drive on the site is enumerated so that files from
+        libraries other than ``Shared Documents`` (e.g. ``private_docs``) are
+        included.
+
+        When **both** ``form_name`` and ``folder_name`` are supplied,
+        ``form_name`` pins the document library and ``folder_name`` is treated
+        as a subfolder path *relative to that library's root* (not as a library
+        resolver).
 
         Number of files is limited by limit_files (default is 100).
 
-        If form_name is specified, only files from specified form will be returned.
+        If form_name is specified alone, only files from the specified form will be returned.
         If include_extensions is specified, only files with matching extensions are returned.
         If skip_extensions is specified, files with matching extensions are excluded.
         Extensions accept both 'pdf' and '.pdf' forms and are matched case-insensitively.
@@ -474,6 +480,7 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             * Example of folders syntax: `{form_name} / Hello / inner-folder` - 1st folder is commonly form_name
         """
         from .base_wrapper import _normalize_extensions, _matches_extension
+        from urllib.parse import unquote as _unquote
         try:
             norm_include = _normalize_extensions(include_extensions)
             norm_skip = _normalize_extensions(skip_extensions)
@@ -489,12 +496,31 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             # Build the initial BFS queue as (drive_id, url) tuples so that
             # sub-folder expansions always stay within the correct drive.
             #
-            # • folder_name supplied → use _resolve_drive_and_folder to pick the
+            # • form_name + folder_name → pin the drive by form_name, then
+            #   navigate into folder_name as a subfolder within that library.
+            # • folder_name only → use _resolve_drive_and_folder to pick the
             #   right drive (handles non-default libraries like "private_docs").
             # • no folder_name → seed from EVERY drive on the site so files
             #   outside "Shared Documents" are found too.
             typed_queue: List[Tuple[str, str]] = []
-            if folder_name:
+            if folder_name and form_name:
+                # Pin the drive by form_name, treat folder_name as a relative subfolder
+                matched_drive = next(
+                    (d for d in self._list_drives()
+                     if _unquote(d.get('webUrl', '').rstrip('/').split('/')[-1]).lower()
+                     == form_name.lower()),
+                    None
+                )
+                if not matched_drive:
+                    return ToolException(
+                        f"Document library '{form_name}' not found. "
+                        "Please check the form name and read permissions.")
+                drive_id = matched_drive['id']
+                encoded = quote(folder_name.strip('/'), safe='/')
+                typed_queue.append(
+                    (drive_id,
+                     f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"))
+            elif folder_name:
                 drive_id, relative = self._resolve_drive_and_folder(folder_name)
                 if relative:
                     encoded = quote(relative.strip('/'), safe='/')
@@ -514,9 +540,7 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                     # skipping and avoids crawling irrelevant drives entirely.
                     if form_name:
                         drive_web_url = drive.get('webUrl', '')
-                        drive_lib = drive_web_url.rstrip('/').split('/')[-1]
-                        from urllib.parse import unquote as _unquote
-                        drive_lib = _unquote(drive_lib)
+                        drive_lib = _unquote(drive_web_url.rstrip('/').split('/')[-1])
                         if form_name.lower() != drive_lib.lower():
                             continue
                     typed_queue.append(
