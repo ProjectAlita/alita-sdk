@@ -589,12 +589,20 @@ class LLMNode(BaseTool):
                 ]
                 if not valid_tool_calls:
                     if message.content:
-                        cleaned_messages.append(AIMessage(content=message.content))
+                        try:
+                            cleaned_messages.append(message.model_copy(update={"tool_calls": []}))
+                        except Exception:
+                            cleaned_messages.append(AIMessage(content=message.content))
                     continue
                 if len(valid_tool_calls) != len(message.tool_calls):
-                    cleaned_messages.append(
-                        AIMessage(content=message.content, tool_calls=valid_tool_calls)
-                    )
+                    try:
+                        cleaned_messages.append(
+                            message.model_copy(update={"tool_calls": valid_tool_calls})
+                        )
+                    except Exception:
+                        cleaned_messages.append(
+                            AIMessage(content=message.content, tool_calls=valid_tool_calls)
+                        )
                     continue
             cleaned_messages.append(message)
 
@@ -1608,6 +1616,9 @@ class LLMNode(BaseTool):
                     except GraphBubbleUp:
                         # GraphInterrupt (from interrupt()) and other graph-level
                         # signals must propagate to the graph executor.
+                        # Reset auto-approve context before propagating.
+                        if _approved_token is not None:
+                            reset_hitl_approved_tools(_approved_token)
                         raise
                     except Exception as e:
                         import traceback
@@ -1741,6 +1752,9 @@ class LLMNode(BaseTool):
             except GraphBubbleUp:
                 # Preserve GraphInterrupt and related graph-level signals raised
                 # anywhere in the tool iteration, including async-to-sync fallback.
+                # Reset auto-approve context before propagating.
+                if _approved_token is not None:
+                    reset_hitl_approved_tools(_approved_token)
                 raise
             except Exception as e:
                 error_str = str(e).lower()
@@ -1953,9 +1967,8 @@ class LLMNode(BaseTool):
                     new_messages.append(AIMessage(content=error_msg))
                     break
 
-        # Reset auto-approve context.  If GraphBubbleUp interrupted
-        # the loop the token is stale but harmless: the node
-        # re-executes from scratch on resume and sets a new one.
+        # Reset auto-approve context on normal loop exit.
+        # GraphBubbleUp paths handle their own cleanup above.
         if _approved_token is not None:
             reset_hitl_approved_tools(_approved_token)
 

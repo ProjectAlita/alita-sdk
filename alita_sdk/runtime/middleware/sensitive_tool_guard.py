@@ -1,6 +1,7 @@
 """Sensitive tool authorization guard middleware."""
 
 import contextvars
+import inspect
 import json
 import logging
 import types
@@ -411,6 +412,7 @@ class SensitiveToolGuardMiddleware(Middleware):
         self._rebind_invoke_after_copy(copied)
         original_run = tool._run
         original_async_func = self._get_async_tool_function(tool)
+        run_accepts_run_manager = "run_manager" in inspect.signature(original_run).parameters
 
         def guarded_run(*args: Any, run_manager: Any = None, **kwargs: Any) -> Any:
             tool_input = normalize_tool_input(args, kwargs)
@@ -425,12 +427,16 @@ class SensitiveToolGuardMiddleware(Middleware):
                         toolkit_type=ctx['toolkit_type'],
                         user_feedback=review['value'],
                     )
-            return original_run(*args, run_manager=run_manager, **kwargs)
+            if run_accepts_run_manager:
+                return original_run(*args, run_manager=run_manager, **kwargs)
+            return original_run(*args, **kwargs)
 
         # Set as instance attribute to shadow the class method
         copied._run = guarded_run
 
         if original_async_func is not None:
+            arun_accepts_run_manager = "run_manager" in inspect.signature(original_async_func).parameters
+
             async def guarded_arun(*args: Any, run_manager: Any = None, **kwargs: Any) -> Any:
                 tool_input = normalize_tool_input(args, kwargs)
                 ctx = guard._build_sensitive_tool_context(original_tool, tool_input)
@@ -444,7 +450,9 @@ class SensitiveToolGuardMiddleware(Middleware):
                             toolkit_type=ctx['toolkit_type'],
                             user_feedback=review['value'],
                         )
-                return await original_async_func(*args, run_manager=run_manager, **kwargs)
+                if arun_accepts_run_manager:
+                    return await original_async_func(*args, run_manager=run_manager, **kwargs)
+                return await original_async_func(*args, **kwargs)
 
             copied._arun = guarded_arun
 

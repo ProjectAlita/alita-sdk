@@ -1613,11 +1613,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             if hitl_interrupt and not is_stale_sensitive_interrupt:
                 # Graph paused at HITL node. Return the same result shape as the normal
                 # execution path, but override the output and attach HITL metadata.
-                logger.info(f"[HITL] Execution paused at HITL node: {hitl_interrupt}")
 
-                # Strip internal-only fields (e.g. unmasked tool args) before
-                # returning results that will be emitted to UI clients.
+                # Strip internal-only fields (e.g. unmasked tool args) before logging
+                # or returning results that will be emitted to UI clients.
                 hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k != 'tool_args_raw'}
+                logger.info(f"[HITL] Execution paused at HITL node: {hitl_for_ui}")
 
                 result_with_state = {
                     "output": hitl_interrupt.get("message", "Awaiting human review..."),
