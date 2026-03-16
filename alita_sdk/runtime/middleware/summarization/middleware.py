@@ -72,6 +72,7 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
         self.conversation_id = conversation_id
         self.callbacks = callbacks or {}
         self.last_context_info = None
+        self._last_fitting_count = 0
 
         logger.info(
             f"SummarizationMiddleware initialized "
@@ -139,6 +140,40 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
             if self._is_summary_message(messages[i]):
                 return i
         return -1
+
+    def _determine_cutoff_index(self, messages: list) -> int:
+        if self.keep[0] != "messages":
+            return super()._determine_cutoff_index(messages)
+
+        preserved_count = self.keep[1]
+        if len(messages) <= preserved_count:
+            return 0
+
+        preserved_msgs = messages[-preserved_count:]
+        pre_preserved = messages[:-preserved_count]
+
+        preserved_tokens = self.token_counter(preserved_msgs)
+
+        trigger_limit = self.trigger[1] if self.trigger and self.trigger[0] == "tokens" else None
+        if trigger_limit is None:
+            self._last_fitting_count = 0
+            return super()._determine_cutoff_index(messages)
+
+        remaining_budget = max(0, trigger_limit - preserved_tokens)
+
+        fitting_count = 0
+        tokens_so_far = 0
+        for msg in reversed(pre_preserved):
+            msg_tokens = self.token_counter([msg])
+            if tokens_so_far + msg_tokens <= remaining_budget:
+                fitting_count += 1
+                tokens_so_far += msg_tokens
+            else:
+                break
+
+        self._last_fitting_count = fitting_count
+        cutoff_index = len(pre_preserved) - fitting_count
+        return cutoff_index
 
     def before_model(self, state: dict, config: dict) -> Optional[dict]:
         """
@@ -246,6 +281,7 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
             'summarized': True,
             'summarized_count': len(messages_to_summarize),
             'preserved_count': len(preserved_messages),
+            'fitting_count': self._last_fitting_count,
             'summary_content': summary,  # Include summary text for backend storage
         }
 
@@ -277,10 +313,12 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
             }
             return None
 
-        # Filter out system messages and RemoveMessage operations
+        # Filter out system messages, RemoveMessage operations, and summary messages
         countable_messages = [
             m for m in messages
-            if not isinstance(m, SystemMessage) and not isinstance(m, RemoveMessage)
+            if not isinstance(m, SystemMessage)
+            and not isinstance(m, RemoveMessage)
+            and not self._is_summary_message(m)
         ]
 
         if not countable_messages:
