@@ -119,8 +119,8 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         self.__drives_cache = data.get('value', [])
         return self.__drives_cache
 
-    def _resolve_drive_and_folder(self, folder_path: str) -> Tuple[str, str]:
-        """Resolve a server-relative *folder_path* to a ``(drive_id, drive_relative_folder)`` pair.
+    def _resolve_drive_and_folder(self, folder_path: str) -> List[Tuple[str, str]]:
+        """Resolve a server-relative *folder_path* to a list of ``(drive_id, drive_relative_folder)`` pairs.
 
         The method enumerates all document-library drives on the site and
         matches the first path segment (after the site prefix) against each
@@ -129,19 +129,27 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         * Default ``Shared Documents`` library::
 
             '/sites/MySite/Shared Documents/upload'
-            → (default_drive_id, 'upload')
+            → [(default_drive_id, 'upload')]
 
         * Non-default document libraries::
 
             '/sites/MySite/Alita_test/subfolder'
-            → (alita_test_drive_id, 'subfolder')
+            → [(alita_test_drive_id, 'subfolder')]
 
             '/sites/MySite/Alita_test'
-            → (alita_test_drive_id, '')
+            → [(alita_test_drive_id, '')]
+
+        * Bare subfolder name not matching any library (e.g. ``"test"``)::
+
+            All drives are probed; every drive that contains the folder is
+            returned so that results from multiple libraries are included.
+
+            'test'  (exists in both Alita_test and Elitea_test)
+            → [(alita_test_drive_id, 'test'), (elitea_test_drive_id, 'test')]
 
         Falls back to the default drive (keeping the full cleaned path) when
-        no drive matches, so existing callers that already pass a drive-relative
-        path continue to work.
+        no drive matches and no probe succeeds, so existing callers that already
+        pass a drive-relative path continue to work.
         """
         # Derive the site-relative path portion of the site URL
         # e.g. "https://tenant.sharepoint.com/sites/MyTeam" → "sites/MyTeam"
@@ -155,20 +163,14 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         if folder_clean.lower().startswith(site_path.lower()):
             folder_clean = folder_clean[len(site_path):].lstrip('/')
 
-        # Walk all drives and find the best (longest) prefix match
-        best_drive_id: Optional[str] = None
-        best_relative: str = folder_clean
-        best_lib_len: int = -1
+        # Walk all drives and find every drive whose library name is a prefix match
+        matched: List[Tuple[str, str]] = []
 
         for drive in self._list_drives():
             drive_weburl = unquote(drive.get('webUrl', ''))
-            # Extract the drive's path relative to the host
-            # e.g. "https://tenant.sharepoint.com/sites/MyTeam/Shared%20Documents"
-            # → "sites/MyTeam/Shared Documents"
             drive_full_path = re.sub(r'^https?://[^/]+', '', drive_weburl).strip('/')
 
             # Strip site prefix to get the library name segment
-            # e.g. "Shared Documents" or "Alita_test"
             if not drive_full_path.lower().startswith(site_path.lower()):
                 continue
             drive_lib = drive_full_path[len(site_path):].lstrip('/')
@@ -180,26 +182,53 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             lib_lower = drive_lib.lower()
             if folder_lower == lib_lower or folder_lower.startswith(lib_lower + '/'):
                 remainder = folder_clean[len(drive_lib):].lstrip('/')
-                # Prefer the most-specific (longest) library match
-                if len(drive_lib) > best_lib_len:
-                    best_drive_id = drive.get('id', '')
-                    best_relative = remainder
-                    best_lib_len = len(drive_lib)
+                did = drive.get('id', '')
+                if did:
+                    matched.append((did, remainder))
 
-        if best_drive_id:
+        if matched:
             logging.debug(
-                "_resolve_drive_and_folder: folder_path=%r → drive_id=%s, relative=%r",
-                folder_path, best_drive_id, best_relative,
+                "_resolve_drive_and_folder: folder_path=%r → %d drive(s) matched",
+                folder_path, len(matched),
             )
-            return best_drive_id, best_relative
+            return matched
 
-        # Fallback: use the default drive and pass folder_clean as-is
+        # Fallback: no drive's library name matched the first path segment.
+        # This happens when folder_clean is a bare subfolder name (e.g. "test")
+        # that exists inside one or more non-default libraries.
+        # Probe ALL drives to find every one that contains the folder.
+        encoded = quote(folder_clean, safe='/')
+        probed: List[Tuple[str, str]] = []
+        for drive in self._list_drives():
+            did = drive.get('id', '')
+            if not did:
+                continue
+            probe_url = f"{_GRAPH_BASE}/drives/{did}/root:/{encoded}"
+            resp = requests.get(
+                probe_url,
+                headers=self._auth_headers(),
+                params={"$select": "id,folder"},
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                item = resp.json()
+                if 'folder' in item or 'id' in item:
+                    logging.debug(
+                        "_resolve_drive_and_folder: folder_path=%r found in drive_id=%s (probe)",
+                        folder_path, did,
+                    )
+                    probed.append((did, folder_clean))
+
+        if probed:
+            return probed
+
+        # Last resort: default drive, pass the path as-is (preserves old behaviour)
         logging.warning(
             "_resolve_drive_and_folder: no drive matched folder_path=%r; "
             "falling back to default drive with relative path=%r",
             folder_path, folder_clean,
         )
-        return self._resolve_drive_id(), folder_clean
+        return [(self._resolve_drive_id(), folder_clean)]
 
     def _resolve_list_id(self, list_title: str) -> str:
         """Resolve list display-name → Graph list id (case-insensitive)."""
@@ -454,12 +483,24 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                        include_extensions: Optional[List[str]] = None,
                        skip_extensions: Optional[List[str]] = None):
         """
-        Lists all files including files from subfolders.
-        If folder name is specified, lists files under that folder; otherwise lists
-        from the root catalog (Shared Documents).
+        Lists all files including files from subfolders across **all document
+        libraries** on the site.
+
+        When ``folder_name`` is supplied alone the method resolves the correct
+        drive automatically (e.g. ``private_docs/some/sub``) and lists only
+        within that subtree.  When no ``folder_name`` is given, every
+        document-library drive on the site is enumerated so that files from
+        libraries other than ``Shared Documents`` (e.g. ``private_docs``) are
+        included.
+
+        When **both** ``form_name`` and ``folder_name`` are supplied,
+        ``form_name`` pins the document library and ``folder_name`` is treated
+        as a subfolder path *relative to that library's root* (not as a library
+        resolver).
+
         Number of files is limited by limit_files (default is 100).
 
-        If form_name is specified, only files from specified form will be returned.
+        If form_name is specified alone, only files from the specified form will be returned.
         If include_extensions is specified, only files with matching extensions are returned.
         If skip_extensions is specified, files with matching extensions are excluded.
         Extensions accept both 'pdf' and '.pdf' forms and are matched case-insensitively.
@@ -468,8 +509,8 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             * Example of folders syntax: `{form_name} / Hello / inner-folder` - 1st folder is commonly form_name
         """
         from .base_wrapper import _normalize_extensions, _matches_extension
+        from urllib.parse import unquote as _unquote
         try:
-            drive_id = self._resolve_drive_id()
             norm_include = _normalize_extensions(include_extensions)
             norm_skip = _normalize_extensions(skip_extensions)
 
@@ -481,15 +522,61 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
 
             result: list = []
 
-            # BFS queue: each entry is the /children URL for a folder to process
-            if folder_name:
+            # Build the initial BFS queue as (drive_id, url) tuples so that
+            # sub-folder expansions always stay within the correct drive.
+            #
+            # • form_name + folder_name → pin the drive by form_name, then
+            #   navigate into folder_name as a subfolder within that library.
+            # • folder_name only → use _resolve_drive_and_folder to pick the
+            #   right drive (handles non-default libraries like "private_docs").
+            # • no folder_name → seed from EVERY drive on the site so files
+            #   outside "Shared Documents" are found too.
+            typed_queue: List[Tuple[str, str]] = []
+            if folder_name and form_name:
+                # Pin the drive by form_name, treat folder_name as a relative subfolder
+                matched_drive = next(
+                    (d for d in self._list_drives()
+                     if _unquote(d.get('webUrl', '').rstrip('/').split('/')[-1]).lower()
+                     == form_name.lower()),
+                    None
+                )
+                if not matched_drive:
+                    return ToolException(
+                        f"Document library '{form_name}' not found. "
+                        "Please check the form name and read permissions.")
+                drive_id = matched_drive['id']
                 encoded = quote(folder_name.strip('/'), safe='/')
-                queue = [f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"]
+                typed_queue.append(
+                    (drive_id,
+                     f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"))
+            elif folder_name:
+                for drive_id, relative in self._resolve_drive_and_folder(folder_name):
+                    if relative:
+                        encoded = quote(relative.strip('/'), safe='/')
+                        typed_queue.append(
+                            (drive_id,
+                             f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/children"))
+                    else:
+                        typed_queue.append(
+                            (drive_id, f"{_GRAPH_BASE}/drives/{drive_id}/root/children"))
             else:
-                queue = [f"{_GRAPH_BASE}/drives/{drive_id}/root/children"]
+                for drive in self._list_drives():
+                    did = drive.get('id', '')
+                    if not did:
+                        continue
+                    # When form_name is given, skip drives whose name doesn't
+                    # match upfront — mirrors the REST wrapper's per-library
+                    # skipping and avoids crawling irrelevant drives entirely.
+                    if form_name:
+                        drive_web_url = drive.get('webUrl', '')
+                        drive_lib = _unquote(drive_web_url.rstrip('/').split('/')[-1])
+                        if form_name.lower() != drive_lib.lower():
+                            continue
+                    typed_queue.append(
+                        (did, f"{_GRAPH_BASE}/drives/{did}/root/children"))
 
-            while queue and len(result) < limit_files:
-                url = queue.pop(0)
+            while typed_queue and len(result) < limit_files:
+                drive_id, url = typed_queue.pop(0)
                 next_link: Optional[str] = url
                 while next_link and len(result) < limit_files:
                     data = self._get(
@@ -497,19 +584,15 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                         params=params if next_link == url else None)
                     for item in data.get('value', []):
                         if 'folder' in item:
-                            # Enqueue subfolder for processing
+                            # Enqueue subfolder for processing (same drive)
                             item_id = item.get('id', '')
                             if item_id:
-                                queue.append(
-                                    f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/children")
+                                typed_queue.append(
+                                    (drive_id,
+                                     f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/children"))
                             continue
                         if 'file' not in item:
                             continue
-                        if form_name:
-                            parent_path = (item.get('parentReference', {})
-                                           .get('path', ''))
-                            if form_name.lower() not in parent_path.lower():
-                                continue
                         file_name = item.get('name', '')
                         if norm_skip and _matches_extension(file_name, norm_skip):
                             continue
@@ -638,7 +721,8 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
         #      drive instead of being stripped (→ nested Shared Documents folder).
         #   2. Non-default libraries (e.g. "Alita_test") were silently routed to
         #      the default drive instead of their own drive.
-        drive_id, rel_folder = self._resolve_drive_and_folder(folder_path)
+        # _resolve_drive_and_folder returns a list; for upload we always use the first match.
+        drive_id, rel_folder = self._resolve_drive_and_folder(folder_path)[0]
         item_path = f"{rel_folder}/{actual_filename}".strip('/')
         safe_item_path = quote(item_path, safe='/')
         conflict = "replace" if replace else "fail"

@@ -80,11 +80,13 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                 if graph_items:
                     logging.info("%d items loaded via Graph API fallback.", len(graph_items))
                     return graph_items
-                return ToolException(
+                raise ToolException(
                     "List appears empty or inaccessible via both REST and Graph APIs.")
+            except ToolException:
+                raise
             except Exception as graph_e:
                 logging.error("Graph API fallback failed: %s", graph_e)
-                return ToolException(
+                raise ToolException(
                     f"Cannot read list '{list_title}'. "
                     f"Check list name and permissions: {base_e} | {graph_e}")
 
@@ -111,11 +113,13 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                 graph_lists = self._graph_helper().get_lists(self.site_url)
                 if graph_lists:
                     return graph_lists
-                return ToolException(
+                raise ToolException(
                     "No lists found or inaccessible via both REST and Graph APIs.")
+            except ToolException:
+                raise
             except Exception as graph_e:
                 logging.error("Graph API fallback failed: %s", graph_e)
-                return ToolException(
+                raise ToolException(
                     f"Cannot retrieve lists. Check permissions: {base_e} | {graph_e}")
 
     def get_list_columns(self, list_title: str):
@@ -228,7 +232,9 @@ class SharepointRestWrapper(BaseSharepointWrapper):
         from the root catalog (Shared Documents).
         Number of files is limited by limit_files (default is 100).
 
-        If form_name is specified, only files from specified form will be returned.
+        If form_name is specified alone, only files from the specified form will be returned.
+        If both form_name and folder_name are specified, form_name pins the document library
+        and folder_name is treated as a subfolder path relative to that library's root.
         If include_extensions is specified, only files with matching extensions are returned.
         If skip_extensions is specified, files with matching extensions are excluded.
         Extensions accept both 'pdf' and '.pdf' forms and are matched case-insensitively.
@@ -254,27 +260,43 @@ class SharepointRestWrapper(BaseSharepointWrapper):
 
             for lib in all_libraries:
                 library_type = decode_sharepoint_string(lib.properties["EntityTypeName"])
-                if form_name and form_name.lower() != library_type.lower():
+                library_title = lib.properties.get("Title", "")
+                if form_name and (
+                    form_name.lower() != library_type.lower()
+                    and form_name.lower() != library_title.lower()
+                ):
                     continue
 
                 target_folder_url = library_type
                 if folder_name:
-                    folder_path = folder_name.strip('/')
-                    expected_prefix = f'{full_path_prefix}/{library_type}'
-                    if folder_path.startswith(full_path_prefix):
-                        if folder_path.startswith(expected_prefix):
-                            target_folder_url = folder_path.removeprefix(
-                                f'{full_path_prefix}/')
-                        else:
-                            continue
+                    if form_name:
+                        # form_name already pins the library; treat folder_name as a
+                        # subfolder path relative to that library's root.
+                        target_folder_url = f"{library_type}/{folder_name.strip('/')}"
                     else:
-                        target_folder_url = f"{library_type}/{folder_name}"
+                        folder_path = folder_name.strip('/')
+                        expected_prefix = f'{full_path_prefix}/{library_type}'
+                        if folder_path.startswith(full_path_prefix):
+                            if folder_path.startswith(expected_prefix):
+                                target_folder_url = folder_path.removeprefix(
+                                    f'{full_path_prefix}/')
+                            else:
+                                continue
+                        else:
+                            target_folder_url = f"{library_type}/{folder_name}"
 
-                files = (
-                    self._client.web
-                    .get_folder_by_server_relative_path(target_folder_url)
-                    .get_files(True).execute_query()
-                )
+                try:
+                    files = (
+                        self._client.web
+                        .get_folder_by_server_relative_path(target_folder_url)
+                        .get_files(True).execute_query()
+                    )
+                except Exception as lib_e:
+                    logging.warning(
+                        "Skipping library '%s' — REST access failed: %s",
+                        library_type, lib_e)
+                    continue
+
                 for file in files:
                     if f"{library_type}/Forms" in file.properties['ServerRelativeUrl']:
                         continue
@@ -293,20 +315,19 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                         'Link': file.properties['LinkingUrl'],
                         'id': file.properties['UniqueId'],
                     })
-            return result if result else ToolException(
-                "Can not get files or folder is empty. "
-                "Please, double check folder name and read permissions.")
+            return result
         except Exception as e:
             try:
                 files = self._graph_helper().get_files_list(
                     self.site_url, folder_name, limit_files,
                     include_extensions=include_extensions,
-                    skip_extensions=skip_extensions)
+                    skip_extensions=skip_extensions,
+                    form_name=form_name)
                 return files
             except Exception as graph_e:
                 logging.error("Failed to load files via REST: %s", e)
                 logging.error("Failed to load files via Graph API: %s", graph_e)
-                return ToolException(
+                raise ToolException(
                     f"Can not get files. Please, double check folder name and "
                     f"read permissions: {e} and {graph_e}")
 
@@ -330,7 +351,7 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                     "Failed to load file via REST (%s): %s. Check file name and path.", path, e)
                 logging.error(
                     "Failed to load file via Graph API (%s): %s.", path, graph_e)
-                return ToolException(
+                raise ToolException(
                     f"File not found. Please, check file name and path: {e} and {graph_e}")
 
         return parse_file_content(
@@ -468,7 +489,21 @@ class SharepointRestWrapper(BaseSharepointWrapper):
             return result
         except ToolException:
             raise
-        except Exception as e:
-            logging.error("Failed to add attachment via REST: %s", e)
-            raise ToolException(f"Attachment failed: {e}")
+        except Exception as base_e:
+            logging.warning(
+                "REST API failed for add_attachment_to_list_item: %s. "
+                "Trying Graph API fallback.", base_e)
+            try:
+                result = self._graph_helper().add_attachment_to_list_item(
+                    self.site_url, list_title, item_id,
+                    actual_filename, file_bytes, replace)
+                logging.info(
+                    "Attachment '%s' added to list '%s' item %d via Graph API fallback",
+                    actual_filename, list_title, item_id)
+                return result
+            except Exception as graph_e:
+                logging.error("Graph API fallback also failed: %s", graph_e)
+                raise ToolException(
+                    f"Attachment failed via both REST and Graph API. "
+                    f"REST error: {base_e} | Graph error: {graph_e}")
 

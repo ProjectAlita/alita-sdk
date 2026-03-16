@@ -1,0 +1,8 @@
+{
+    "tags": ["loader:csv", "content:special-characters", "edge:special-chars"],
+    "file_path": "../files/csv_special.csv",
+    "configs": [
+        {},
+        {"max_tokens": 256}
+    ]
+}

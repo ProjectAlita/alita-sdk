@@ -1,0 +1,10 @@
+{
+    "tags": ["loader:csv", "content:large", "feature:chunking", "performance"],
+    "file_path": "../files/csv_large.csv",
+    "configs": [
+        {},
+        {"max_tokens": 50},
+        {"max_tokens": 256},
+        {"max_tokens": 1024}
+    ]
+}

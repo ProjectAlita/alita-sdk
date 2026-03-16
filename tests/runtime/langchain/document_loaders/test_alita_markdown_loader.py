@@ -1,0 +1,22 @@
+from pathlib import Path
+from typing import Any, Dict
+
+import pytest
+from loader_helpers import collect_loader_test_params, run_loader_assert
+
+_LOADER_NAME = "AlitaMarkdownLoader"
+
+
+@pytest.mark.parametrize(
+    "input_name, config_index, config, file_path, baseline_path",
+    collect_loader_test_params(_LOADER_NAME),
+)
+def test_loader(
+    tmp_path: Path,
+    input_name: str,
+    config_index: int,
+    config: Dict[str, Any],
+    file_path: Path,
+    baseline_path: Path,
+) -> None:
+    run_loader_assert(_LOADER_NAME, tmp_path, input_name, config_index, config, file_path, baseline_path)

@@ -1,0 +1,8 @@
+{
+    "tags": ["loader:text", "content:simple", "feature:chunking"],
+    "file_path": "../files/text_simple.txt",
+    "configs": [
+        {},
+        {"max_tokens": 1024}
+    ]
+}

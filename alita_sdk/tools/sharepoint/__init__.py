@@ -70,8 +70,21 @@ class SharepointToolkit(BaseToolkit):
         # handle OAuth flow: specific for Sharepoint (dependent on oauth_discovery_endpoint), can be extended to other tools in the future if needed
         if kwargs.get('tokens') and kwargs['sharepoint_configuration'].get('oauth_discovery_endpoint'):
             logger.debug(f"Sharepoint configuration includes OAuth discovery endpoint and tokens are provided. Attempting to retrieve access token.")
-            token = kwargs['tokens'].get(kwargs['sharepoint_configuration']['oauth_discovery_endpoint'])
-            wrapper_payload['token'] = token.get('access_token')
+            oauth_endpoint = kwargs['sharepoint_configuration']['oauth_discovery_endpoint']
+            config_uuid = kwargs['sharepoint_configuration'].get('configuration_uuid')
+            # Try credential-specific key first ("<configuration_uuid>:<oauth_discovery_endpoint>").
+            # The frontend stores tokens under this composite key so that two SharePoint
+            # credentials sharing the same oauth_discovery_endpoint (same Azure AD tenant)
+            # keep their OAuth sessions isolated.
+            token = None
+            if config_uuid:
+                token = kwargs['tokens'].get(f"{config_uuid}:{oauth_endpoint}")
+            # Fallback to plain oauth_discovery_endpoint for backwards compatibility
+            # (legacy sessions or toolkit-level flows that don't use credential UUIDs).
+            if token is None:
+                token = kwargs['tokens'].get(oauth_endpoint)
+            if token is not None:
+                wrapper_payload['token'] = token.get('access_token') if isinstance(token, dict) else token
 
         sharepoint_api_wrapper = SharepointApiWrapper(**wrapper_payload)
         available_tools = sharepoint_api_wrapper.get_available_tools()

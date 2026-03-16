@@ -1,0 +1,22 @@
+[
+  {
+    "page_content": "# Configuration file for testing YAML content loading\n# AlitaTextLoader should load this as raw text, preserving YAML structure  \napplication:\nname: TestApp\nversion: 1.0.0\nenvironment: development  \ndatabase:\nhost: localhost\nport: 5432\nname: testdb\ncredentials:\nusername: admin\npassword: ${DB_PASSWORD}  \nfeatures:\n- feature_flags\n- logging\n- monitoring\n- authentication  \nsettings:\nmax_connections: 100\ntimeout: 30\nretry_attempts: 3\ncache:\nenabled: true\nttl: 3600\nsize: 1024  \nlogging:\nlevel: INFO\nformat: \"%(asctime)s - %(name)s - %(levelname)s - %(message)s\"\nhandlers:\n- type: console\nlevel: DEBUG\n- type: file\nlevel: INFO\nfilename: app.log\nmax_bytes: 10485760\nbackup_count: 5  \n# Nested structure test\nservices:\nweb:\nimage: nginx:latest\nports:\n- \"80:80\"\n- \"443:443\"\nenvironment:\n- ENV=production\n- DEBUG=false  \napi:\nimage: python:3.9\ncommand: [\"python\", \"app.py\"]\nvolumes:\n- ./code",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaTextLoader/files/text_yaml.yaml",
+      "chunk_id": 1,
+      "chunk_type": "document",
+      "headers": "",
+      "method_name": "markdown"
+    }
+  },
+  {
+    "page_content": " \"app.py\"]\nvolumes:\n- ./code:/app\n- ./logs:/logs\ndepends_on:\n- database\n- cache  \n# Unicode and special characters in YAML\nmetadata:\ndescription: \"Test file with émojis 🚀 and spëcial çharacters\"\ntags: [testing, yaml, unicode, 数据, テスト]\nnotes: |\nMulti-line string with various content:\n- Line 1: Normal text\n- Line 2: Special chars: © ® ™ € £\n- Line 3: Math symbols: ∀ ∃ ∈ ≈ ≠\n",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaTextLoader/files/text_yaml.yaml",
+      "chunk_id": 2,
+      "chunk_type": "document",
+      "headers": "",
+      "method_name": "markdown"
+    }
+  }
+]

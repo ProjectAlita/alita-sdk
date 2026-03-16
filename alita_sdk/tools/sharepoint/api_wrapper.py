@@ -40,7 +40,11 @@ ReadList = create_model(
 GetFiles = create_model(
     "GetFiles",
     folder_name=(Optional[str], Field(
-        description="Folder name to get list of the files.", default=None)),
+        description="Subfolder path to get list of files. When used alone, the document "
+                    "library is resolved from the first path segment. When used together "
+                    "with form_name, this is treated as a subfolder path relative to the "
+                    "library identified by form_name (i.e. form_name pins the library, "
+                    "folder_name navigates within it).", default=None)),
     form_name=(Optional[str], Field(
         description="Form (Document Library) name to filter files. "
                     "If specified, only files from this form will be returned. "
@@ -850,7 +854,16 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                             "(e.g., '/sites/SiteName/...') or a relative path. "
                             "If a relative path is provided, the search will be "
                             "performed recursively under 'Shared Documents' and "
-                            "other private libraries.",
+                            "other private libraries. "
+                            "When used together with form_name, this is treated as a "
+                            "subfolder path relative to the library identified by form_name.",
+                default=None)),
+            'form_name': (Optional[str], Field(
+                description="Document Library name to scope indexing to. "
+                            "If specified, only files from this library will be indexed. "
+                            "When used together with path, form_name pins the library and "
+                            "path is treated as a subfolder within it. "
+                            "Example: 'private_docs' or 'Shared Documents'.",
                 default=None)),
             'include_onenote': (Optional[bool], Field(
                 description="If True, also index OneNote pages from this SharePoint site "
@@ -899,6 +912,7 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         limit_files = kwargs.get('limit_files', 10000)
         include_extensions = kwargs.get('include_extensions') or None
         skip_extensions = kwargs.get('skip_extensions') or None
+        form_name = kwargs.get('form_name') or None
 
         if limit_files > 0:
             self._log_tool_event(
@@ -906,8 +920,11 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
             try:
                 all_files = self.get_files_list(
                     kwargs.get('path'), limit_files,
+                    form_name=form_name,
                     include_extensions=include_extensions,
                     skip_extensions=skip_extensions)
+                if isinstance(all_files, ToolException):
+                    raise all_files
                 self._log_tool_event(
                     message="List of the files has been extracted", tool_name="loader")
             except Exception as e:
