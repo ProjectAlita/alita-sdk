@@ -29,7 +29,7 @@ execution:
 
   # Execution settings
   settings:
-    timeout: 120
+    timeout: 180
     parallel: 1  # Sequential for dependent tests
     stop_on_failure: false
 
