@@ -647,25 +647,32 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                 f"File not found. Please, check file name and path: {e}")
 
     def load_file_content_in_bytes(self, path: str) -> bytes:
-        drive_id = self._resolve_drive_id()
-        # Strip server-relative prefix so we get a drive-relative path
-        # e.g. "/sites/MySite/Shared Documents/folder/file.txt" → "folder/file.txt"
-        # We resolve the drive root path to strip it
-        drive_data = self._get(f"{_GRAPH_BASE}/drives/{drive_id}/root")
-        drive_root = drive_data.get('parentReference', {}).get('path', '')
-        drive_name = drive_data.get('name', '')
-        # Build drive-root prefix to strip (e.g. "/drives/<id>/root:/Shared Documents")
-        relative = path.strip('/')
-        # Try to match the drive path prefix from the site segments
-        site_path = re.sub(r'^https?://[^/]+', '', self.site_url).strip('/')
-        prefix_candidates = [
-            f"{site_path}/{drive_name}",
-            drive_name,
-        ]
-        for prefix in prefix_candidates:
-            if relative.startswith(prefix):
-                relative = relative[len(prefix):].lstrip('/')
-                break
+        # Try to extract drive_id directly from the path when it is in
+        # Graph API format: "/drives/{drive_id}/root:/{relative_path}"
+        # This is the format returned by parentReference.path in get_files_list.
+        drive_match = re.match(r'/?drives/([^/]+)/root:/(.*)', path)
+        if drive_match:
+            drive_id = drive_match.group(1)
+            relative = drive_match.group(2).strip('/')
+        else:
+            drive_id = self._resolve_drive_id()
+            # Strip server-relative prefix so we get a drive-relative path
+            # e.g. "/sites/MySite/Shared Documents/folder/file.txt" → "folder/file.txt"
+            # We resolve the drive root path to strip it
+            drive_data = self._get(f"{_GRAPH_BASE}/drives/{drive_id}/root")
+            drive_name = drive_data.get('name', '')
+            # Build drive-root prefix to strip (e.g. "/drives/<id>/root:/Shared Documents")
+            relative = path.strip('/')
+            # Try to match the drive path prefix from the site segments
+            site_path = re.sub(r'^https?://[^/]+', '', self.site_url).strip('/')
+            prefix_candidates = [
+                f"{site_path}/{drive_name}",
+                drive_name,
+            ]
+            for prefix in prefix_candidates:
+                if relative.startswith(prefix):
+                    relative = relative[len(prefix):].lstrip('/')
+                    break
 
         encoded = quote(relative, safe='/')
         url = f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded}:/content"
