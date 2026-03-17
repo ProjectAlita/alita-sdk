@@ -55,31 +55,33 @@ JiraSearch = create_model(
 JiraCreateIssue = create_model(
     "JiraCreateIssueModel",
     issue_json=(str, Field(
-        description=("JSON of body to create an issue for JIRA. "
-                     "You must follow the atlassian-python-api's Jira "
-                     "`issue_create` function's input format. For example,"
-                     " to create a low priority task called 'test issue' "
-                     "with description 'test description', you would pass "
-                     "in the following STRING dictionary: "
-                     "{'fields': {'project': {'key': 'project_key'}, "
-                     "'summary': 'test issue', 'description': 'test description', "
-                     "'issuetype': {'name': 'Task'}, 'priority': {'name': 'Major'}}}\n"
-                     "*IMPORTANT*: Make sure fields are double-quoted."))))
+        description=("JSON string to create a Jira issue. Must contain a 'fields' object with at minimum: "
+                     "'project' (key), 'summary', 'issuetype' (name), and optionally 'description', 'priority', etc.\n"
+                     "For 'description' field: use Atlassian Document Format (ADF) as the preferred format, "
+                     "e.g. {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", "
+                     "\"content\": [{\"type\": \"text\", \"text\": \"your text\"}]}]}. "
+                     "If ADF is not accepted, fall back to a plain text string.\n"
+                     "Example: {\"fields\": {\"project\": {\"key\": \"PROJ\"}, \"summary\": \"Issue title\", "
+                     "\"description\": {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", "
+                     "\"content\": [{\"type\": \"text\", \"text\": \"Description text\"}]}]}, "
+                     "\"issuetype\": {\"name\": \"Task\"}, \"priority\": {\"name\": \"Major\"}}}\n"
+                     "*IMPORTANT*: All JSON keys must be double-quoted."))))
 
 
 JiraUpdateIssue = create_model(
     "JiraUpdateIssueModel",
     issue_json=(str, Field(
-        description=("JSON of body to update an issue for JIRA. "
-                     "You must follow the atlassian-python-api's Jira "
-                     "`update_issue` function's input format. For example,"
-                     " to update a task with "
-                     "key XXX-123 with new summary, description and custom field, "
-                     "you would pass in the following STRING dictionary: "
-                     "{'key': 'issue key', 'fields': {'summary': 'updated issue', "
-                     "'description': 'updated description', 'customfield_xxx': 'updated custom field'}, "
-                     "'update': {'labels': [ { 'add': 'test' } ]}}\n"
-                     "*IMPORTANT*: Make sure fields are double-quoted.")
+        description=("JSON string to update a Jira issue. Must contain 'key' (issue key) and at least one of "
+                     "'fields' or 'update' objects.\n"
+                     "For 'description' and other rich-text fields: use Atlassian Document Format (ADF) as the "
+                     "preferred format, e.g. {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", "
+                     "\"content\": [{\"type\": \"text\", \"text\": \"your text\"}]}]}. "
+                     "If ADF is not accepted, fall back to a plain text string.\n"
+                     "Example: {\"key\": \"PROJ-123\", \"fields\": {\"summary\": \"Updated title\", "
+                     "\"description\": {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", "
+                     "\"content\": [{\"type\": \"text\", \"text\": \"Updated description\"}]}]}}, "
+                     "\"update\": {\"labels\": [{\"add\": \"new-label\"}]}}\n"
+                     "*IMPORTANT*: All JSON keys must be double-quoted.")
     )))
 
 AddCommentInput = create_model(
