@@ -23,10 +23,8 @@ state:
   created_case_id:
     type: str
   case_properties:
-    type: dict
-    value:
-      title: "Updated Test Case Title"
-      priority_id: 4
+    type: str
+    value: '{"title": "Updated Test Case Title", "priority_id": 4}'
   tool_result:
     type: dict
   test_results:
@@ -52,10 +50,7 @@ nodes:
         value: "[Auto] Test Case for TR11 - Update Case Test"
       case_properties:
         type: fixed
-        value:
-          template_id: 1
-          type_id: 1
-          priority_id: 2
+        value: '{"template_id": 1, "type_id": 1, "priority_id": 2}'
     output:
       - tool_result
     structured_output: true
