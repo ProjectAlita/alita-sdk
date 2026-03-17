@@ -22,17 +22,8 @@ state:
     type: str
     value: "Automated Test Case - TR08 - ${TIMESTAMP}"
   case_properties:
-    type: dict
-    value:
-      template_id: 2
-      type_id: 1
-      priority_id: 3
-      custom_preconds: "Advanced test preconditions"
-      custom_steps_separated:
-        - content: "Step 1 description"
-          expected: "Step 1 expected result"
-        - content: "Step 2 description"
-          expected: "Step 2 expected result"
+    type: str
+    value: '{"template_id": 2, "type_id": 1, "priority_id": 3, "custom_preconds": "Advanced test preconditions", "custom_steps_separated": [{"content": "Step 1 description", "expected": "Step 1 expected result"}, {"content": "Step 2 description", "expected": "Step 2 expected result"}]}'
   tool_result:
     type: dict
   test_results:
