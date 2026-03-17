@@ -965,7 +965,10 @@ class LLMNode(BaseTool):
                 system_content = f"{system_content}\n\n{tool_index}"
                 logger.debug("[LazyTools] Injected tool index into system prompt")
 
-            messages = [SystemMessage(content=system_content), *func_args.get('chat_history', []), HumanMessage(content=str(func_args.get('task')))]
+            task_content = func_args.get('task')
+            if not isinstance(task_content, (str, list)):
+                task_content = str(task_content) if task_content is not None else ""
+            messages = [SystemMessage(content=system_content), *func_args.get('chat_history', []), HumanMessage(content=task_content)]
             # Remove pre-last item if last two messages are same type and content
             if len(messages) >= 2 and type(messages[-1]) == type(messages[-2]) and messages[-1].content == messages[
                 -2].content:
