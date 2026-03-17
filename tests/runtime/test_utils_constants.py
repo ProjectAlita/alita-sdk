@@ -32,14 +32,14 @@ class TestUtilsModule:
         result = clean_string('hello world!')
         assert result == 'helloworld'
         
-        # Test with allowed characters
+        # Test with allowed characters (dots replaced with underscores)
         result = clean_string('a_b-c.d')
-        assert result == 'a_b-c.d'
-        
-        # Test with mixed content
+        assert result == 'a_b-c_d'
+
+        # Test with mixed content (dots replaced with underscores)
         result = clean_string('test123_file-name.txt')
-        assert result == 'test123_file-name.txt'
-    
+        assert result == 'test123_file-name_txt'
+
     def test_clean_string_empty_input(self):
         """Test clean_string with empty input"""
         result = clean_string('')
@@ -51,11 +51,11 @@ class TestUtilsModule:
         assert result == ''
     
     def test_clean_string_only_allowed_chars(self):
-        """Test clean_string with only allowed characters"""
+        """Test clean_string with only allowed characters (dots become underscores)"""
         test_input = 'abcABC123_.-'
         result = clean_string(test_input)
-        assert result == test_input
-    
+        assert result == 'abcABC123__-'
+
     def test_clean_string_whitespace(self):
         """Test clean_string with various whitespace characters"""
         # Spaces should be removed
@@ -84,38 +84,38 @@ class TestUtilsModule:
         result = clean_string('café')
         assert result == 'caf'
         
-        # Mix of unicode and allowed chars
+        # Mix of unicode and allowed chars (dots replaced with underscores)
         result = clean_string('test_file-中文.txt')
-        assert result == 'test_file-.txt'
-    
+        assert result == 'test_file-_txt'
+
     def test_clean_string_numbers_and_letters(self):
         """Test clean_string preserves numbers and letters"""
         result = clean_string('abc123XYZ789')
         assert result == 'abc123XYZ789'
     
     def test_clean_string_special_allowed_chars(self):
-        """Test clean_string preserves underscore, period, and hyphen"""
+        """Test clean_string preserves underscore and hyphen, replaces dots"""
         result = clean_string('test_file-name.extension')
-        assert result == 'test_file-name.extension'
-    
+        assert result == 'test_file-name_extension'
+
     def test_clean_string_mixed_complex(self):
         """Test clean_string with complex mixed input"""
         test_input = 'My_File-Name.txt (copy) [2023]'
-        expected = 'My_File-Name.txtcopy2023'
+        expected = 'My_File-Name_txtcopy2023'
         result = clean_string(test_input)
         assert result == expected
     
     def test_clean_string_brackets_and_parentheses(self):
         """Test clean_string removes brackets and parentheses"""
         result = clean_string('file[1].txt')
-        assert result == 'file1.txt'
-        
+        assert result == 'file1_txt'
+
         result = clean_string('file(copy).txt')
-        assert result == 'filecopy.txt'
-        
+        assert result == 'filecopy_txt'
+
         result = clean_string('file{backup}.txt')
-        assert result == 'filebackup.txt'
-    
+        assert result == 'filebackup_txt'
+
     def test_clean_string_common_symbols(self):
         """Test clean_string removes common symbols"""
         symbols = '!@#$%^&*()+=[]{}|\\:";\'<>?/,`~'
@@ -125,8 +125,8 @@ class TestUtilsModule:
     def test_clean_string_preserves_case(self):
         """Test clean_string preserves case of letters"""
         result = clean_string('MyFile_NAME.TXT')
-        assert result == 'MyFile_NAME.TXT'
-    
+        assert result == 'MyFile_NAME_TXT'
+
     def test_clean_string_long_string(self):
         """Test clean_string with long string"""
         long_input = 'a' * 1000 + '!' * 500 + 'b' * 1000
@@ -156,10 +156,17 @@ class TestUtilsModule:
         result = re.sub(clean_string_pattern, '', test_input)
         assert result == "testfile"
         
-        # This should be equivalent to clean_string
+        # clean_string also replaces dots with underscores on top of the regex
         clean_result = clean_string(test_input)
         assert result == clean_result
-    
+
+        # With dots, regex preserves them but clean_string replaces with _
+        dot_input = "test.file"
+        regex_result = re.sub(clean_string_pattern, '', dot_input)
+        assert regex_result == "test.file"
+        clean_dot_result = clean_string(dot_input)
+        assert clean_dot_result == "test_file"
+
     def test_clean_string_idempotent(self):
         """Test that clean_string is idempotent"""
         test_input = "test!@#file_name-123.txt"
@@ -167,9 +174,9 @@ class TestUtilsModule:
         second_clean = clean_string(first_clean)
         
         assert first_clean == second_clean
-        # Second application should not change anything
-        assert second_clean == "testfile_name-123.txt"
-    
+        # Second application should not change anything (dots already replaced)
+        assert second_clean == "testfile_name-123_txt"
+
     def test_clean_string_type_validation(self):
         """Test clean_string input type handling"""
         # Should work with string input

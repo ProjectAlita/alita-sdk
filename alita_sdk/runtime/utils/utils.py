@@ -29,6 +29,8 @@ clean_string_pattern = re.compile(r'[^a-zA-Z0-9_.-]')
 def clean_string(s: str) -> str:
     # Replace these characters with an empty string
     cleaned_string = re.sub(clean_string_pattern, '', s)
+    # Dots are not allowed in LLM tool names (pattern: ^[a-zA-Z0-9_-]{1,128}$)
+    cleaned_string = cleaned_string.replace('.', '_')
     return cleaned_string
 
 

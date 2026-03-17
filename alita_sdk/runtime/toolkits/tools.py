@@ -445,16 +445,18 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
 
 def _sanitize_tool_names(tools: list) -> list:
     """
-    Sanitize tool names to meet OpenAI's function naming requirements.
-    OpenAI function names must match pattern ^[a-zA-Z0-9_\\.-]+$
+    Sanitize tool names to meet LLM provider function naming requirements.
+    Tool names must match pattern ^[a-zA-Z0-9_-]{1,128}$
     """
     import re
     from langchain_core.tools import BaseTool
     
     def sanitize_name(name):
         """Sanitize a single tool name"""
+        # Replace dots with underscores (dots not allowed in tool names)
+        sanitized = name.replace('.', '_')
         # Replace spaces and other invalid characters with underscores
-        sanitized = re.sub(r'[^a-zA-Z0-9_.-]', '_', name)
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', sanitized)
         # Remove multiple consecutive underscores
         sanitized = re.sub(r'_{2,}', '_', sanitized)
         # Remove leading/trailing underscores
