@@ -825,6 +825,47 @@ def process_pipeline_result(
     )
 
 
+def _extract_hitl_thread_id(result_data: dict) -> Optional[str]:
+    """
+    Extract thread_id from a HITL interrupt response.
+
+    When the platform's sensitive_tool_guard raises a GraphInterrupt, the
+    thread_id is embedded in the tool call metadata. We need it to resume.
+
+    Returns:
+        thread_id string if a HITL (sensitive_tool) interrupt is detected, else None
+    """
+    if not isinstance(result_data, dict):
+        return None
+
+    tool_calls_dict = result_data.get("tool_calls_dict", {})
+    if not isinstance(tool_calls_dict, dict):
+        return None
+
+    for tool_call in tool_calls_dict.values():
+        if not isinstance(tool_call, dict):
+            continue
+
+        # Check for the HITL finish reason
+        if tool_call.get("finish_reason") != "error":
+            continue
+
+        error_text = tool_call.get("error", "")
+        if not isinstance(error_text, str):
+            continue
+
+        # Detect sensitive_tool_guard interrupt signature
+        if "GraphInterrupt" not in error_text and "sensitive_tool" not in error_text:
+            continue
+
+        # Extract thread_id from metadata
+        thread_id = tool_call.get("metadata", {}).get("thread_id")
+        if thread_id:
+            return thread_id
+
+    return None
+
+
 def execute_pipeline(
     base_url: str,
     project_id: int,
@@ -834,7 +875,11 @@ def execute_pipeline(
     logger: Optional[TestLogger] = None,
 ) -> PipelineResult:
     """Execute a pipeline using the v2 predict API (synchronous).
-    
+
+    Automatically handles HITL (Human-in-the-Loop) sensitive_tool_guard interrupts
+    by resuming with an 'approve' action, allowing tests to exercise write-operations
+    (create_issue, update_file, etc.) without manual intervention.
+
     Args:
         logger: Optional TestLogger instance for logging
     """
@@ -939,7 +984,98 @@ def execute_pipeline(
             error="Response is not valid JSON"
         )
 
-    # Process the result using shared function
+    # Auto-resume HITL sensitive_tool_guard interrupts.
+    # The platform's sensitive_tool_guard middleware interrupts execution to request
+    # human approval before write operations (create_issue, update_file, etc.).
+    # A pipeline may contain multiple sensitive tools, each requiring a separate approval.
+    # We loop until no more HITL interrupts are present in the response.
+    # MAX_HITL_APPROVALS guards against infinite loops (e.g., a mis-configured pipeline).
+    MAX_HITL_APPROVALS = 10
+    hitl_approvals = 0
+
+    while hitl_approvals < MAX_HITL_APPROVALS:
+        hitl_thread_id = _extract_hitl_thread_id(result_data)
+        if not hitl_thread_id:
+            break
+
+        hitl_approvals += 1
+        if logger:
+            logger.debug(
+                f"HITL sensitive_tool interrupt detected (thread: {hitl_thread_id}, "
+                f"approval #{hitl_approvals}). Auto-approving for test execution..."
+            )
+
+        resume_payload = {
+            "chat_history": [],
+            "user_input": "",
+            "thread_id": hitl_thread_id,
+            "hitl_resume": True,
+            "hitl_action": "approve",
+        }
+
+        try:
+            resume_response = requests.post(
+                predict_url,
+                headers=headers,
+                json=resume_payload,
+                timeout=timeout,
+            )
+        except requests.exceptions.Timeout:
+            execution_time = time.time() - start_time
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                error=f"HITL resume request timed out after {timeout}s",
+            )
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                error=f"HITL resume request failed: {e}",
+            )
+
+        execution_time = time.time() - start_time
+
+        if resume_response.status_code not in (200, 201):
+            error_text = resume_response.text if resume_response.text else "No response body"
+            if logger:
+                logger.http_error(
+                    resume_response.status_code,
+                    error_text,
+                    context=f"HITL resume POST {predict_url}",
+                )
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                error=f"HITL resume HTTP {resume_response.status_code}: {error_text}",
+            )
+
+        try:
+            result_data = resume_response.json()
+        except json.JSONDecodeError:
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                output=resume_response.text,
+                error="HITL resume response is not valid JSON",
+            )
+
+        if logger:
+            logger.debug(f"HITL resume #{hitl_approvals} completed, checking for further interrupts...")
+
     return process_pipeline_result(
         result_data=result_data,
         pipeline_id=pipeline_id,
