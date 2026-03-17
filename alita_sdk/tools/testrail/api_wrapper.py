@@ -197,8 +197,7 @@ addCase = create_model(
     "addCase",
     section_id=(str, Field(description="Section id")),
     title=(str, Field(description="Title")),
-    case_properties=(Optional[dict],Field(description=_case_properties_description, default={}),
-    ),
+    case_properties=(str, Field(description="JSON string of test case properties. " + _case_properties_description, default="{}")),
 )
 
 addCases = create_model(
@@ -216,15 +215,33 @@ addFileToCase = create_model(
     case_id=(str, Field(description="The ID of the test case to attach the file to")),
     filepath=(str, Field(description="File path in format /{bucket}/{filename} from artifact storage")),
     filename=(Optional[str], Field(description="The name of the file to upload. If not provided, uses the original filename from artifact.", default=None)),
+    embed_in_field=(Optional[str], Field(
+        description=(
+            "Optional: the custom field name to embed the uploaded file inline "
+            "(e.g. 'custom_steps', 'custom_preconds', 'custom_expected'). "
+            "Works for any file type — TestRail renders all attachments as inline icons "
+            "using the data-attachment-id attribute. "
+            "You can provide prefix/suffix text around the attachment using embed_text_before and embed_text_after."
+        ),
+        default=None,
+    )),
+    embed_text_before=(Optional[str], Field(
+        description="Text/HTML to insert before the inline attachment in the field. Example: 'Expected UI state:<br/>'",
+        default="",
+    )),
+    embed_text_after=(Optional[str], Field(
+        description="Text/HTML to insert after the inline attachment in the field.",
+        default="",
+    )),
 )
 
 updateCase = create_model(
     "updateCase",
     case_id=(str, Field(description="Case ID")),
     case_properties=(
-        Optional[dict],
+        str,
         Field(
-            description="""
+            description="""JSON string of test case properties to update.
         Properties of new test case in a key-value format: testcase_field_name=testcase_field_value.
         Possible arguments
             :key title: str
@@ -302,8 +319,19 @@ updateCase = create_model(
              - Each dictionary requires a `content` key for the step text and an `expected` key for the individual expected outcome.
              - If `shared_step_id` is included, it is preserved for that step.
         - `expected` values must always be strings and are required when `steps` is a single string or may be supplied per step when `steps` is a list.
+
+        **Embedding images inline in rich-text fields:**
+        Rich-text fields (custom_preconds, custom_steps, custom_expected) support inline images.
+        To embed an image, first attach the file using add_file_to_case to get an attachment_id,
+        then include this HTML in the field value:
+            <img src="index.php?/attachments/get/ATTACHMENT_ID" />
+        Example:
+        {
+            "custom_steps": "Step 1: Verify the image:<br/><img src=\"index.php?/attachments/get/123\" />"
+        }
+        Alternatively, use add_file_to_case with the embed_in_field parameter to do both in one step.
         """,
-            default={},
+            default="{}",
         ),
     ),
 )
@@ -451,9 +479,9 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                         These are the preconditions for a test case
                 """
         test_cases = json.loads(add_test_cases_data)
-        return [self.add_case(test_case['section_id'], test_case['title'], test_case['case_properties']) for test_case in test_cases]
+        return [self.add_case(test_case['section_id'], test_case['title'], json.dumps(test_case.get('case_properties', {}))) for test_case in test_cases]
 
-    def add_case(self, section_id: str, title: str, case_properties: Optional[dict]):
+    def add_case(self, section_id: str, title: str, case_properties: str = "{}"):
         """Adds new test case into Testrail per defined parameters.
         Parameters:
             section_id: str - test case section id.
@@ -477,12 +505,15 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 These are the preconditions for a test case
         """
         try:
+            props = json.loads(case_properties) if isinstance(case_properties, str) else (case_properties or {})
             created_case = self._client.cases.add_case(
-                section_id=section_id, title=title, **case_properties
+                section_id=section_id, title=title, **props
             )
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ToolException(f"Invalid JSON in case_properties: {e}")
         except StatusCodeError as e:
             return ToolException(f"Unable to add new testcase {e}")
-        return f"New test case has been created: id - {created_case['id']} at '{created_case['created_on']}')"
+        return f"New test case has been created: id - {created_case['id']} at '{created_case['created_on']}'"
 
     def get_case(self, testcase_id: str):
         """Extracts information about single test case from Testrail"""
@@ -614,40 +645,22 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         except (ValueError, json.JSONDecodeError) as e:
             return ToolException(f"Invalid parameter for json_case_arguments: {e}")
 
-    def update_case(self, case_id: str, case_properties: Optional[dict]):
-        """Updates an existing test case (partial updates are supported, i.e.
-        you can submit and update specific fields only).
-
-        :param case_id: T
-            He ID of the test case
-        :param kwargs:
-            :key title: str
-                The title of the test case
-            :key section_id: int
-                The ID of the section (requires TestRail 6.5.2 or later)
-            :key template_id: int
-                The ID of the template (requires TestRail 5.2 or later)
-            :key type_id: int
-                The ID of the case type
-            :key priority_id: int
-                The ID of the case priority
-            :key estimate: str
-                The estimate, e.g. "30s" or "1m 45s"
-            :key milestone_id: int
-                The ID of the milestone to link to the test case
-            :key refs: str
-                A comma-separated list of references/requirements
-        :return: response
+    def update_case(self, case_id: str, case_properties: str = "{}"):
+        """Updates an existing test case. Partial updates are supported.
+        Pass case_properties as a JSON string with the fields to update.
+        Supports custom fields (custom_steps, custom_preconds, custom_expected, etc.)
+        and inline image embedding via HTML img tags.
         """
         try:
+            props = json.loads(case_properties) if isinstance(case_properties, str) else (case_properties or {})
             updated_case = self._client.cases.update_case(
-                case_id=case_id, **case_properties
+                case_id=case_id, **props
             )
+        except (json.JSONDecodeError, ValueError) as e:
+            raise ToolException(f"Invalid JSON in case_properties: {e}")
         except StatusCodeError as e:
             return ToolException(f"Unable to update testcase #{case_id} due to {e}")
-        return (
-            f"Test case #{case_id} has been updated at '{updated_case['updated_on']}')"
-        )
+        return f"Test case #{case_id} has been updated at '{updated_case['updated_on']}'" 
 
     def delete_case(self, case_id: str, soft_delete: bool = True) -> str:
         """Deletes an existing test case.
@@ -689,8 +702,15 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         except Exception as e:
             raise ToolException(f"Error deleting test case #{case_id}: {str(e)}")
 
-    def add_file_to_case(self, case_id: str, filepath: str, filename: str = None) -> str:
-        """Upload file from artifact and attach to TestRail test case."""
+    def add_file_to_case(self, case_id: str, filepath: str, filename: str = None,
+                         embed_in_field: str = None, embed_text_before: str = "",
+                         embed_text_after: str = "") -> str:
+        """Upload file from artifact and attach to TestRail test case.
+
+        Optionally embeds the uploaded image inline in a rich-text field
+        (e.g. custom_preconds, custom_steps, custom_expected) using the
+        returned attachment_id.
+        """
         try:
             artifact_client = self.alita.artifact('__temp__')
             file_bytes, artifact_filename = artifact_client.get_raw_content_by_filepath(filepath)
@@ -713,7 +733,41 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                 )
 
                 attachment_id = result.get('attachment_id')
-                return f"File '{filename}' successfully attached to test case {case_id}. Attachment ID: {attachment_id}"
+
+                # If embed_in_field is specified, update that field with inline reference (images only)
+                if embed_in_field and attachment_id:
+                    # TestRail renders all attachment types as inline icons via data-attachment-id
+                    inline_ref = (
+                        f'<img src="index.php?/attachments/get/{attachment_id}" '
+                        f'id="attachment-{attachment_id}" '
+                        f'data-attachment-id="{attachment_id}" />'
+                    )
+                    field_value = f"{embed_text_before}{inline_ref}{embed_text_after}"
+                    try:
+                        self._client.cases.update_case(
+                            case_id=case_id, **{embed_in_field: field_value}
+                        )
+                        return (
+                            f"File '{filename}' attached to test case {case_id} "
+                            f"(attachment_id: {attachment_id}) and embedded inline "
+                            f"in field '{embed_in_field}'."
+                        )
+                    except StatusCodeError as e:
+                        return (
+                            f"File '{filename}' attached to test case {case_id} "
+                            f"(attachment_id: {attachment_id}), but failed to embed "
+                            f"in field '{embed_in_field}': {e}"
+                        )
+
+                return (
+                    f"File '{filename}' successfully attached to test case {case_id}. "
+                    f"Attachment ID: {attachment_id}. "
+                    f"To embed this file inline in a rich-text field (e.g. custom_steps, "
+                    f"custom_preconds, custom_expected), use update_case with: "
+                    f'<img src="index.php?/attachments/get/{attachment_id}" '
+                    f'id="attachment-{attachment_id}" '
+                    f'data-attachment-id="{attachment_id}" />'
+                )
 
             finally:
                 try:
