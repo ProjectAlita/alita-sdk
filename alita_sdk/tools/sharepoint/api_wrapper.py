@@ -1113,10 +1113,11 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 file_path = document.metadata.get('Path') or document.metadata.get('file_path')
                 if file_path:
                     try:
-                        relative_path = file_path
-                        if '/root:/' in file_path:
-                            relative_path = file_path.split('/root:/', 1)[1]
-                        content_bytes = self._backend.load_file_content_in_bytes(relative_path)
+                        # Pass the full path — load_file_content_in_bytes will
+                        # extract the drive ID from a Graph-style path
+                        # (e.g. "/drives/{id}/root:/folder/file.txt") or fall
+                        # back to the default drive for server-relative paths.
+                        content_bytes = self._backend.load_file_content_in_bytes(file_path)
                         document.metadata[IndexerKeywords.CONTENT_IN_BYTES.value] = content_bytes
                         file_name = document.metadata.get('Name', file_path)
                         _, ext = os.path.splitext(file_name)
