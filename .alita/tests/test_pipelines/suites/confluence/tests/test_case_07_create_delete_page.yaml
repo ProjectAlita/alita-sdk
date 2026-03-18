@@ -69,7 +69,7 @@ nodes:
       - create_result
     structured_output: true
     tool: create_page
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: validate_creation
 
   - id: validate_creation
@@ -129,7 +129,7 @@ nodes:
       - delete_result
     structured_output: true
     tool: delete_page
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: read_page_to
 
   - id: read_page_to
@@ -147,7 +147,7 @@ nodes:
       - read_page_result
     structured_output: false
     tool: search_by_title
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results
 
   - id: process_results

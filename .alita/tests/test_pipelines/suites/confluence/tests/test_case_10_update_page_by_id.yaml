@@ -120,7 +120,7 @@ nodes:
       - create_result
     structured_output: true
     tool: create_page
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: extract_page_id
   - id: extract_page_id
     type: llm
@@ -172,7 +172,7 @@ nodes:
       - update_result
     structured_output: true
     tool: update_page_by_id
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: read_updated_page
   - id: read_updated_page
     type: toolkit
@@ -186,7 +186,7 @@ nodes:
       - read_result
     structured_output: true
     tool: read_page_by_id
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: validate_update
   - id: validate_update
     type: llm
@@ -296,5 +296,5 @@ nodes:
       - delete_result
     structured_output: false
     tool: delete_page
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results

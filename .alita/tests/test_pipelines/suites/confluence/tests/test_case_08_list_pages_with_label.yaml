@@ -27,7 +27,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: list_pages_with_label
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results
   - id: process_results
     type: llm

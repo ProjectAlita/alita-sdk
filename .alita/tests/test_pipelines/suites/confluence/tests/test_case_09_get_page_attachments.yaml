@@ -29,7 +29,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: get_page_attachments
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results
 
   - id: process_results
