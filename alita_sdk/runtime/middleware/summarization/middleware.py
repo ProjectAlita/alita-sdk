@@ -359,10 +359,15 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
 
         # Return preserved messages only — summary is not stored in state.
         # pylon_main persists it in conversation meta and sends it back via chat_history.
+        # Mark preserved messages so downstream code knows they survived summarization.
+        marked_preserved = [
+            msg.model_copy(update={"additional_kwargs": {**msg.additional_kwargs, "lc_summarized": True}})
+            for msg in preserved_messages
+        ]
         return {
             "messages": [
                 RemoveMessage(id=REMOVE_ALL_MESSAGES),
-                *preserved_messages,
+                *marked_preserved,
             ]
         }
 

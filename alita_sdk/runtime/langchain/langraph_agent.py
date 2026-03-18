@@ -1300,16 +1300,17 @@ def convert_dict_to_message(msg_dict):
     if isinstance(msg_dict, dict):
         role = msg_dict.get('role', 'user')
         content = msg_dict.get('content', '')
-        
+        additional_kwargs = msg_dict.get('additional_kwargs') or {}
+
         if role == 'user':
-            return HumanMessage(content=content)
+            return HumanMessage(content=content, additional_kwargs=additional_kwargs)
         elif role == 'assistant':
-            return AIMessage(content=content)
+            return AIMessage(content=content, additional_kwargs=additional_kwargs)
         elif role == 'system':
-            return SystemMessage(content=content)
+            return SystemMessage(content=content, additional_kwargs=additional_kwargs)
         else:
             # Default to HumanMessage for unknown roles
-            return HumanMessage(content=content)
+            return HumanMessage(content=content, additional_kwargs=additional_kwargs)
     
     # If it's neither dict nor BaseMessage, convert to string and make HumanMessage
     return HumanMessage(content=str(msg_dict))
