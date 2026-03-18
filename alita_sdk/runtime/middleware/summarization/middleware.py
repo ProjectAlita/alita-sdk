@@ -10,16 +10,89 @@ Note: System messages are excluded from summarization and NOT persisted in chunk
 They should be handled by the agent's system prompt mechanism.
 """
 
+import math
 import logging
 from typing import Any, Callable, Dict, List, Optional, Union
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, RemoveMessage, SystemMessage
-from langchain_core.messages.utils import count_tokens_approximately
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph.message import REMOVE_ALL_MESSAGES
 
 logger = logging.getLogger(__name__)
+
+# Fixed token estimate per image — mirrors the default in langchain-core's
+# upcoming count_tokens_approximately (tokens_per_image=85, aligned with
+# OpenAI's low-resolution image token cost). Update when langchain-core
+# is upgraded past the version that adds native image support.
+_IMAGE_TOKEN_ESTIMATE = 85
+
+
+def _count_tokens_image_aware(
+    messages,
+    *,
+    chars_per_token: float = 4.0,
+    extra_tokens_per_message: float = 3.0,
+) -> int:
+    """Token counter that skips base64 image data in multimodal messages.
+
+    Replaces LangChain's ``count_tokens_approximately`` which does
+    ``repr(message.content)`` for list content — that stringifies the full
+    base64 payload and inflates counts by tens of thousands of fake tokens.
+
+    For each ``image_url`` / ``image`` block a fixed estimate of
+    ``_IMAGE_TOKEN_ESTIMATE`` tokens is used instead.
+
+    Iterates ``messages`` directly (no ``convert_to_messages``) to avoid
+    LangChain treating content-block lists as tuples of ``(role, content)``.
+    """
+    token_count = 0.0
+    for message in messages:
+        message_chars = 0
+        image_count = 0
+
+        # Normalise to (content, tool_calls, tool_call_id)
+        if isinstance(message, BaseMessage):
+            content = message.content
+            tool_calls = getattr(message, "tool_calls", None) if isinstance(message, AIMessage) else None
+            tool_call_id = getattr(message, "tool_call_id", None) if isinstance(message, ToolMessage) else None
+        elif isinstance(message, dict):
+            content = message.get("content", message.get("text", ""))
+            role = message.get("role", message.get("type", ""))
+            tool_calls = message.get("tool_calls") if role in ("assistant", "ai") else None
+            tool_call_id = message.get("tool_call_id")
+        else:
+            token_count += math.ceil(len(repr(message)) / chars_per_token) + extra_tokens_per_message
+            continue
+
+        if isinstance(content, str):
+            message_chars += len(content)
+        elif isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    message_chars += len(repr(block))
+                    continue
+                block_type = block.get("type")
+                if block_type == "text":
+                    message_chars += len(block.get("text", ""))
+                elif block_type in ("image_url", "image"):
+                    image_count += 1
+                else:
+                    message_chars += len(repr(block))
+        elif content:
+            message_chars += len(repr(content))
+
+        if tool_calls and not isinstance(content, list):
+            message_chars += len(repr(tool_calls))
+
+        if tool_call_id:
+            message_chars += len(str(tool_call_id))
+
+        token_count += math.ceil(message_chars / chars_per_token)
+        token_count += extra_tokens_per_message
+        token_count += image_count * _IMAGE_TOKEN_ESTIMATE
+
+    return math.ceil(token_count)
 
 
 from langchain.agents.middleware.summarization import (
@@ -48,7 +121,7 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
         *,
         trigger: Optional[Union[ContextSize, List[ContextSize]]] = None,
         keep: ContextSize = ("messages", _DEFAULT_MESSAGES_TO_KEEP),
-        token_counter: Callable = count_tokens_approximately,
+        token_counter: Callable = _count_tokens_image_aware,
         summary_prompt: Optional[str] = None,
         trim_tokens_to_summarize: Optional[int] = 4000,
         conversation_id: Optional[str] = None,
@@ -266,34 +339,35 @@ class SummarizationMiddleware(LangChainSummarizationMiddleware):
         })
 
         summary = self._create_summary(messages_to_summarize)
-        new_messages = self._build_new_messages(summary)
 
-        # Calculate token counts for analytics (non-system messages only)
-        summary_tokens = self.token_counter(new_messages) if new_messages else 0
+        # Calculate token counts for analytics (summary is not in state — only preserved count)
         preserved_tokens = self.token_counter(preserved_messages) if preserved_messages else 0
-        new_total_tokens = summary_tokens + preserved_tokens
-        new_message_count = len(new_messages) + len(preserved_messages)
 
         # Update context_info with post-summarization state (unified format)
         self.last_context_info = {
-            'message_count': new_message_count,
-            'token_count': new_total_tokens,
+            'message_count': len(preserved_messages),
+            'token_count': preserved_tokens,
             'summarized': True,
             'summarized_count': len(messages_to_summarize),
             'preserved_count': len(preserved_messages),
             'fitting_count': self._last_fitting_count,
-            'summary_content': summary,  # Include summary text for backend storage
+            'summary_content': summary,
         }
 
         # Fire 'summarized' callback (Alita-specific)
         self._fire_callback('summarized', self.last_context_info)
 
-        # Return summarized messages (system messages handled by system prompt, not persisted)
+        # Return preserved messages only — summary is not stored in state.
+        # pylon_main persists it in conversation meta and sends it back via chat_history.
+        # Mark preserved messages so downstream code knows they survived summarization.
+        marked_preserved = [
+            msg.model_copy(update={"additional_kwargs": {**msg.additional_kwargs, "lc_summarized": True}})
+            for msg in preserved_messages
+        ]
         return {
             "messages": [
                 RemoveMessage(id=REMOVE_ALL_MESSAGES),
-                *new_messages,
-                *preserved_messages,
+                *marked_preserved,
             ]
         }
 
