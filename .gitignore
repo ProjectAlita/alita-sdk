@@ -186,3 +186,4 @@ alita_sdk/docs/
 # tests
 !tests/reports/.gitkeep
 tests/reports/*
+tests/**/test_results
