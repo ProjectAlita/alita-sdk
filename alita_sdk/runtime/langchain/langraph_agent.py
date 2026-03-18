@@ -1422,7 +1422,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Extract text parts and keep non-text parts (images, etc.)
                     text_contents = []
                     non_text_parts = []
-                    
+
                     for item in current_content:
                         if isinstance(item, dict) and item.get('type') == 'text':
                             text_contents.append(item['text'])
@@ -1431,19 +1431,24 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         else:
                             # Keep image_url and other non-text content
                             non_text_parts.append(item)
-                    
-                    # Set input to the joined text
-                    input['input'] = ". ".join(text_contents) if text_contents else ""
-                    
+
                     # If this message came from input['messages'], update or remove it
                     if input_from_messages:
                         if non_text_parts:
-                            # Keep the message but only with non-text content (images, etc.)
-                            current_message.content = non_text_parts
+                            # Multimodal message: preserve the full original content in
+                            # input['input'] so the LLMNode creates ONE unified HumanMessage
+                            # instead of mutating the message into an image-only fragment
+                            # that produces a split pair in checkpoint state.
+                            input['input'] = current_content
                         else:
-                            # All content was text, remove this message from the list
-                            input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+                            # All-text: set input to joined text
+                            input['input'] = ". ".join(text_contents) if text_contents else ""
+                        # Always remove from messages — LLMNode reconstructs the
+                        # HumanMessage from input['input'] (text or full multimodal list).
+                        input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
                     else:
+                        # Set input to the joined text
+                        input['input'] = ". ".join(text_contents) if text_contents else ""
                         # Message came from input['input'], not from input['messages']
                         # If there are non-text parts (images, etc.), preserve them in messages
                         if non_text_parts:
