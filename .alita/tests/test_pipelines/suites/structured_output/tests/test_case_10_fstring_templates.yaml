@@ -46,18 +46,10 @@ nodes:
       task:
         type: fstring
         value: |
-          Generate exactly {num_items} items in the {category} category.
-
-          Requirements:
-          - Output format: {output_format}
-          - Include metadata: {include_metadata}
-          - Each item should have: id, name, description
-
-          If include_metadata is true, also provide:
-          - metadata object with: generated_at (current date string), category, item_count
-          - status: "success"
-
-          Return the results with keys: generated_items, metadata, status
+          Generate {num_items} {category} items in {output_format} format.
+          Each item: id (int), name (str).
+          If include_metadata is {include_metadata}, add metadata with category and item_count, and status "success".
+          Keys: generated_items, metadata, status.
     input:
       - output_format
       - num_items

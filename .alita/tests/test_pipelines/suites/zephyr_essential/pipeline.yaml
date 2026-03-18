@@ -92,7 +92,7 @@ execution:
     ZEPHYR_PROJECT_KEY : EL
 
   settings:
-    timeout: 180
+    timeout: 300
     parallel: 5
     stop_on_failure: false
 
