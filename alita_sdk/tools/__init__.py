@@ -207,19 +207,15 @@ def _filter_blocked_tools(toolkit_tools: list, toolkit_type: str) -> list:
     """Filter out blocked tools from a list of instantiated tools.
 
     This is a security feature that filters tools at runtime based on
-    deployment configuration.
+    deployment configuration.  Uses ``is_tool_blocked`` so that tool-name
+    aliases (prefix stripping) are handled consistently.
     """
     try:
-        from ..runtime.toolkits.security import get_blocked_tools_for_toolkit
-        blocked_tools = get_blocked_tools_for_toolkit(toolkit_type)
-        if not blocked_tools:
-            return toolkit_tools
-
-        blocked_lower = set(t.lower() for t in blocked_tools)
+        from ..runtime.toolkits.security import is_tool_blocked
         filtered = []
         for tool in toolkit_tools:
             tool_name = getattr(tool, 'name', '')
-            if tool_name.lower() in blocked_lower:
+            if is_tool_blocked(toolkit_type, tool_name):
                 logger.warning(f"[SECURITY] Filtering blocked tool '{tool_name}' from toolkit '{toolkit_type}'")
             else:
                 filtered.append(tool)

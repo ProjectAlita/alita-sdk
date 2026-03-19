@@ -57,10 +57,7 @@ nodes:
         value: "[Auto] ART22 Test Case - File Attachment Test"
       case_properties:
         type: fixed
-        value:
-          template_id: 1
-          type_id: 1
-          priority_id: 2
+        value: '{"template_id": 1, "type_id": 1, "priority_id": 2}'
     output:
       - tool_result
     structured_output: true

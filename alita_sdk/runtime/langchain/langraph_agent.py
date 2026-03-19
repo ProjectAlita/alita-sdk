@@ -1008,6 +1008,11 @@ def create_graph(
                 from ..tools.sandbox import create_sandbox_tool
                 sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
                                                    alita_client=kwargs.get('alita_client', None))
+                # Apply middleware wrapping (e.g. sensitive-tool guard) to the
+                # freshly-created sandbox tool — it was not in the `tools` list
+                # that was wrapped during Assistant.__init__().
+                if middleware_manager is not None:
+                    sandbox_tool = middleware_manager.wrap_tool(sandbox_tool)
                 code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
                 lg_builder.add_node(node_id, FunctionTool(
                     tool=sandbox_tool, name=node['id'], return_type='dict',
@@ -1300,16 +1305,17 @@ def convert_dict_to_message(msg_dict):
     if isinstance(msg_dict, dict):
         role = msg_dict.get('role', 'user')
         content = msg_dict.get('content', '')
-        
+        additional_kwargs = msg_dict.get('additional_kwargs') or {}
+
         if role == 'user':
-            return HumanMessage(content=content)
+            return HumanMessage(content=content, additional_kwargs=additional_kwargs)
         elif role == 'assistant':
-            return AIMessage(content=content)
+            return AIMessage(content=content, additional_kwargs=additional_kwargs)
         elif role == 'system':
-            return SystemMessage(content=content)
+            return SystemMessage(content=content, additional_kwargs=additional_kwargs)
         else:
             # Default to HumanMessage for unknown roles
-            return HumanMessage(content=content)
+            return HumanMessage(content=content, additional_kwargs=additional_kwargs)
     
     # If it's neither dict nor BaseMessage, convert to string and make HumanMessage
     return HumanMessage(content=str(msg_dict))
@@ -1422,7 +1428,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     # Extract text parts and keep non-text parts (images, etc.)
                     text_contents = []
                     non_text_parts = []
-                    
+
                     for item in current_content:
                         if isinstance(item, dict) and item.get('type') == 'text':
                             text_contents.append(item['text'])
@@ -1431,19 +1437,24 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         else:
                             # Keep image_url and other non-text content
                             non_text_parts.append(item)
-                    
-                    # Set input to the joined text
-                    input['input'] = ". ".join(text_contents) if text_contents else ""
-                    
+
                     # If this message came from input['messages'], update or remove it
                     if input_from_messages:
                         if non_text_parts:
-                            # Keep the message but only with non-text content (images, etc.)
-                            current_message.content = non_text_parts
+                            # Multimodal message: preserve the full original content in
+                            # input['input'] so the LLMNode creates ONE unified HumanMessage
+                            # instead of mutating the message into an image-only fragment
+                            # that produces a split pair in checkpoint state.
+                            input['input'] = current_content
                         else:
-                            # All content was text, remove this message from the list
-                            input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
+                            # All-text: set input to joined text
+                            input['input'] = ". ".join(text_contents) if text_contents else ""
+                        # Always remove from messages — LLMNode reconstructs the
+                        # HumanMessage from input['input'] (text or full multimodal list).
+                        input['messages'] = [msg for msg in input['messages'] if msg is not current_message]
                     else:
+                        # Set input to the joined text
+                        input['input'] = ". ".join(text_contents) if text_contents else ""
                         # Message came from input['input'], not from input['messages']
                         # If there are non-text parts (images, etc.), preserve them in messages
                         if non_text_parts:
@@ -1559,12 +1570,23 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 elif is_at_end:
                     # Previous run completed - start fresh run with new input
                     # Don't use invoke(None) as that just returns current state without running
-                    logger.info(f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}")
-                    self._rebuild_checkpoint_messages(config, checkpoint_state, input)
-                    # Clear HITL decisions from previous execution batch
-                    if checkpoint_state.values.get('hitl_decisions'):
-                        self.update_state(config, {'hitl_decisions': None})
-
+                    logger.info(
+                        f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}"
+                    )
+                    # FIX: Clear old checkpoint messages to prevent duplication.
+                    # The add_messages reducer would otherwise APPEND new messages to existing ones.
+                    # Use 'in' check instead of truthiness - empty list [] is falsy but means
+                    # "messages key exists with no history" (e.g., after chat clear), which still
+                    # requires clearing the old checkpoint to avoid stale SystemMessages.
+                    existing_messages = checkpoint_state.values.get('messages', [])
+                    if existing_messages:
+                        logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+                        # Create RemoveMessage objects for all existing messages
+                        remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if
+                                       hasattr(msg, 'id') and msg.id]
+                        if remove_msgs:
+                            # Update state to remove old messages before invoking
+                            self.update_state(config, {'messages': remove_msgs})
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
                     # Interrupted mid-execution - update state and continue from where we left off
@@ -1668,68 +1690,6 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     result_with_state[key] = value
 
         return result_with_state
-
-    # =========================================================================
-    # Checkpoint message management
-    # =========================================================================
-
-    def _rebuild_checkpoint_messages(self, config, checkpoint_state, input):
-        """Rebuild checkpoint messages so the SystemMessage stays at position 0.
-
-        Prevents "multiple non-consecutive system messages" errors from
-        Anthropic by replacing the entire checkpoint message list with:
-
-            [SystemMessage from input (if any), old non-system history]
-
-        The indexer always produces at most one SystemMessage in
-        ``input['messages']``: VISION_SYSTEM_MESSAGE and
-        ATTACHMENT_SYSTEM_MESSAGE_TEMPLATE are merged into a single
-        SystemMessage by ``prepend_vision_system_message`` /
-        ``prepend_attachment_system_message`` before the invoke call.
-
-        Old conversation history (Human, AI, summarization summaries) is
-        preserved from the checkpoint so summarization context survives
-        across turns.
-
-        Uses two ``update_state`` calls to guarantee ordering: first remove
-        all existing messages, then restore the rebuilt list. Combining both
-        in a single call can cause the ``add_messages`` reducer to process
-        appends before removes, leaving the checkpoint in a corrupt state.
-        """
-        existing_messages = checkpoint_state.values.get('messages', [])
-        if not existing_messages:
-            return
-
-        input_sys_msgs = [
-            m for m in input.get('messages', [])
-            if isinstance(m, SystemMessage)
-        ]
-        old_non_sys = [
-            m for m in existing_messages
-            if not isinstance(m, SystemMessage)
-        ]
-
-        # Strip SystemMessages from input so that super().invoke(input) doesn't
-        # re-append them via the add_messages reducer after we rebuilt the
-        # checkpoint.  Without this, the original message objects (not yet
-        # assigned a LangGraph id) would be appended as new entries, creating
-        # non-consecutive system messages that Anthropic rejects.
-        if input.get('messages') and input_sys_msgs:
-            input['messages'] = [m for m in input['messages'] if not isinstance(m, SystemMessage)]
-
-        remove_msgs = [
-            RemoveMessage(id=m.id) for m in existing_messages
-            if hasattr(m, 'id') and m.id
-        ]
-        restored = input_sys_msgs + old_non_sys
-
-        logger.info(
-            f"[CHECKPOINT] Rebuilt state: {len(input_sys_msgs)} system + "
-            f"{len(old_non_sys)} non-system messages"
-        )
-        # Two separate calls: remove first, then restore with correct ordering.
-        self.update_state(config, {'messages': remove_msgs})
-        self.update_state(config, {'messages': restored})
 
     # =========================================================================
     # HITL (Human-in-the-Loop) helpers
