@@ -4,6 +4,7 @@ import contextvars
 import inspect
 import json
 import logging
+import re
 import types
 from typing import Any, Callable, Dict, List, Optional
 
@@ -180,7 +181,10 @@ class SensitiveToolGuardMiddleware(Middleware):
         )
 
         normalized_field_name = str(field_name or '').strip().lower()
-        if normalized_field_name and any(marker in normalized_field_name for marker in sensitive_markers):
+        if normalized_field_name and any(
+            re.search(rf'(?:^|[\W_]){re.escape(marker)}(?:$|[\W_])', normalized_field_name)
+            for marker in sensitive_markers
+        ):
             return '***'
 
         if isinstance(value, dict):
