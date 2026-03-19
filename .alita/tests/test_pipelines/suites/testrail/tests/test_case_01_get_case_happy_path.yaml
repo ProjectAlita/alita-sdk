@@ -47,10 +47,7 @@ nodes:
         value: "[Auto] Test Case for TR01 - Get Case Test"
       case_properties:
         type: fixed
-        value:
-          template_id: 1
-          type_id: 1
-          priority_id: 2
+        value: '{"template_id": 1, "type_id": 1, "priority_id": 2}'
     output:
       - tool_result
     structured_output: true

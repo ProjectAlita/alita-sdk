@@ -254,7 +254,10 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
                         if t.metadata is None:
                             t.metadata = {}
                         if isinstance(t.metadata, dict):
-                            t.metadata['toolkit_type'] = 'internal'
+                            # Preserve toolkit_type if the tool already defines one
+                            # (e.g. sandbox tools use 'sandbox' to match sensitive-tools config)
+                            if 'toolkit_type' not in t.metadata:
+                                t.metadata['toolkit_type'] = 'internal'
                             t.metadata['toolkit_name'] = tool['name']           # raw code name; fallback key
                             t.metadata['display_name'] = internal_display_name  # human-readable; chip label
                             _patch_tool_invoke(t)  # forward metadata into LangGraph run config

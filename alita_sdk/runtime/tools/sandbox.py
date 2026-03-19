@@ -112,7 +112,7 @@ class PyodideSandboxTool(BaseTool):
         # no external caller injects metadata before the first tool invocation.
         if kwargs.get('metadata') is None:
             kwargs['metadata'] = {
-                'toolkit_type': 'internal',
+                'toolkit_type': 'sandbox',
                 'toolkit_name': 'pyodide',
                 'display_name': 'Python Sandbox',
             }
