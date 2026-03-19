@@ -7,7 +7,6 @@
     "get_list_columns",
     "create_list_item",
     "get_files_list",
-    "read_document",
-    "upload_file"
+    "read_document"
   ]
 }
