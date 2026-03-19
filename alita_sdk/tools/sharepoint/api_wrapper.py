@@ -1278,12 +1278,17 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 "args_schema": UploadFile,
                 "ref": self.upload_file,
             },
-            {
-                "name": "add_attachment_to_list_item",
-                "description": self.add_attachment_to_list_item.__doc__,
-                "args_schema": AddAttachmentToListItem,
-                "ref": self.add_attachment_to_list_item,
-            },
+            # NOTE: add_attachment_to_list_item is intentionally excluded from available tools.
+            # Microsoft Graph API has no endpoint for SharePoint list item attachments (v1.0 or beta),
+            # and the SharePoint REST API path requires app-only ACS tokens which are frequently blocked
+            # by tenant-level policy (DisableCustomAppAuthentication=True). The implementation is
+            # preserved in case future Graph API support is added or tenant restrictions are lifted.
+            # {
+            #     "name": "add_attachment_to_list_item",
+            #     "description": self.add_attachment_to_list_item.__doc__,
+            #     "args_schema": AddAttachmentToListItem,
+            #     "ref": self.add_attachment_to_list_item,
+            # },
             # ── OneNote ───────────────────────────────────────────────
             {
                 "name": "onenote_get_notebooks",
