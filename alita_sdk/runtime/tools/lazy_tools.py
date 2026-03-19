@@ -721,6 +721,33 @@ class InvokeToolTool(BaseTool):
 
         # Invoke the tool
         try:
+            # Security gate (post-resolution): ensure the *actual* tool cannot bypass blocklist
+            try:
+                from ..toolkits.security import is_tool_blocked, normalize_tool_name
+                metadata = getattr(actual_tool, "metadata", {}) or {}
+                resolved_tool_name = (
+                    metadata.get(TOOL_NAME_META)
+                    or getattr(actual_tool, "name", None)
+                    or tool
+                )
+                resolved_toolkit_type = (
+                    metadata.get(TOOLKIT_TYPE_META)
+                    or self.registry.get_toolkit_type(toolkit)
+                    or toolkit
+                )
+                if is_tool_blocked(resolved_toolkit_type, normalize_tool_name(resolved_tool_name)):
+                    logger.warning(
+                        "[SECURITY] invoke_tool blocked (post-resolution): tool '%s' (resolved '%s') "
+                        "in toolkit '%s' (resolved type '%s')",
+                        tool, resolved_tool_name, toolkit, resolved_toolkit_type,
+                    )
+                    return (
+                        f"Tool '{tool}' is blocked by security policy and cannot be executed. "
+                        f"Please choose a different tool."
+                    )
+            except ImportError:
+                pass
+
             logger.info(f"[LazyTools] Invoking {toolkit}.{tool} with args: {arguments}")
             result = actual_tool.invoke(arguments)
             return str(result) if result is not None else "Tool executed successfully (no output)"
