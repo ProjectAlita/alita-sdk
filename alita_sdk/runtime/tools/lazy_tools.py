@@ -672,6 +672,23 @@ class InvokeToolTool(BaseTool):
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
         """Invoke a tool from the registry."""
+        # Security gate: reject blocked tools before any lookup or execution
+        try:
+            from ..toolkits.security import is_tool_blocked, normalize_tool_name
+            toolkit_type = self.registry.get_toolkit_type(toolkit) or toolkit
+            resolved_name = normalize_tool_name(tool)
+            if is_tool_blocked(toolkit_type, resolved_name):
+                logger.warning(
+                    "[SECURITY] invoke_tool blocked: tool '%s' in toolkit '%s' (type '%s')",
+                    tool, toolkit, toolkit_type,
+                )
+                return (
+                    f"Tool '{tool}' is blocked by security policy and cannot be executed. "
+                    f"Please choose a different tool."
+                )
+        except ImportError:
+            pass
+
         # Strip None values — LLM often sends explicit nulls for optional params
         # (because Pydantic schemas show "default": null), which can cause failures
         # in tools that don't handle None gracefully, leading to retry loops
