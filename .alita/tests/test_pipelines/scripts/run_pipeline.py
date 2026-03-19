@@ -832,6 +832,10 @@ def _extract_hitl_thread_id(result_data: dict) -> Optional[str]:
     When the platform's sensitive_tool_guard raises a GraphInterrupt, the
     thread_id is embedded in the tool call metadata. We need it to resume.
 
+    IMPORTANT: This function must distinguish between:
+    1. Real HITL interrupt: GraphInterrupt from sensitive_tool_guard middleware
+    2. ToolException crash: ValidationError or other errors with GraphInterrupt in traceback
+
     Returns:
         thread_id string if a HITL (sensitive_tool) interrupt is detected, else None
     """
@@ -855,7 +859,15 @@ def _extract_hitl_thread_id(result_data: dict) -> Optional[str]:
             continue
 
         # Detect sensitive_tool_guard interrupt signature
-        if "GraphInterrupt" not in error_text and "sensitive_tool" not in error_text:
+        # BOTH GraphInterrupt AND sensitive_tool must be present (not OR)
+        # This prevents false positives from ToolException crashes that mention
+        # GraphInterrupt in their traceback.
+        if "GraphInterrupt" not in error_text or "sensitive_tool" not in error_text:
+            continue
+
+        # Additional safeguard: exclude ToolException/ValidationError crashes
+        # These are NOT HITL interrupts even if they contain GraphInterrupt text
+        if "ToolException" in error_text or "ValidationError" in error_text:
             continue
 
         # Extract thread_id from metadata
@@ -1045,6 +1057,34 @@ def execute_pipeline(
 
         if resume_response.status_code not in (200, 201):
             error_text = resume_response.text if resume_response.text else "No response body"
+            
+            # Special handling for HTTP 400: Check if this is a ToolException/ValidationError
+            # being incorrectly interpreted as a HITL interrupt.
+            # If the error body contains ToolException or ValidationError traceback,
+            # this is NOT a HITL interrupt - it's a pipeline crash that should be reported.
+            if resume_response.status_code == 400:
+                if "ToolException" in error_text or "ValidationError" in error_text:
+                    if logger:
+                        logger.debug(
+                            f"HTTP 400 contains ToolException/ValidationError - "
+                            f"this is a pipeline crash, not a HITL interrupt. "
+                            f"Returning error to caller."
+                        )
+                    # Parse the original error from the response if possible
+                    try:
+                        error_data = resume_response.json()
+                        # Return the original error, not the HITL resume failure
+                        return process_pipeline_result(
+                            result_data=error_data,
+                            pipeline_id=pipeline_id,
+                            pipeline_name=pipeline_name,
+                            version_id=version_id,
+                            execution_time=execution_time,
+                            logger=logger,
+                        )
+                    except json.JSONDecodeError:
+                        pass  # Fall through to generic error handling
+            
             if logger:
                 logger.http_error(
                     resume_response.status_code,
