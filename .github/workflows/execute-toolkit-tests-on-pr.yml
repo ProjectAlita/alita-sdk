@@ -173,6 +173,43 @@ jobs:
       enable_rp_reporting: false
     secrets: inherit
 
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    container:
+      image: ghcr.io/projectalita/alita-sdk:pyodide
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+        PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make alita-sdk source available
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
+
+      - name: Ensure pytest is available
+        run: python -m pip install -q pytest && python -m pytest --version
+
+      - name: Run unit tests
+        run: |
+          mkdir -p tests/reports
+          python -m pytest tests/ --junit-xml=tests/reports/unit-test-results.xml
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: tests/reports/unit-test-results.xml
+          if-no-files-found: warn
+          retention-days: 7
+
   summarize-and-comment:
     needs: [configure-matrix, test-execution]
     if: always() && needs.configure-matrix.outputs.has-tests == 'true'

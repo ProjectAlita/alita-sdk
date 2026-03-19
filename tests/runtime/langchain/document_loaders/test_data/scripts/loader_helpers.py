@@ -116,4 +116,14 @@ def run_loader_assert(
             lines.append(f"\n  ERROR: {result.error}")
         if result.diffs_summary:
             lines.append(f"\n  DIFFS:\n{result.diffs_summary}")
+        if actual_output_path.exists():
+            try:
+                lines.append(f"\n  ACTUAL DOCS ({actual_output_path.name}):\n{actual_output_path.read_text(encoding='utf-8')}")
+            except Exception:
+                pass
+        if baseline_path.exists():
+            try:
+                lines.append(f"\n  EXPECTED DOCS ({baseline_path.name}):\n{baseline_path.read_text(encoding='utf-8')}")
+            except Exception:
+                pass
         pytest.fail("\n".join(lines))

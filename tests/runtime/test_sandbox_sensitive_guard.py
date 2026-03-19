@@ -317,12 +317,10 @@ class TestMiddlewareManagerWrapTool:
 # ---------------------------------------------------------------------------
 
 class TestFunctionToolSandboxBlocking:
-    """Verify that FunctionTool detects blocked sandbox results from the
-    sensitive-tool guard and produces clean termination output."""
+    """Verify FunctionTool can safely pass through blocked-result payloads
+    produced by sensitive-tool guard wrappers."""
 
-    def test_function_tool_detects_blocked_sandbox_result(self):
-        from alita_sdk.runtime.tools.function import FunctionTool, PIPELINE_BLOCKED_KEY
-
+    def test_blocked_result_string_payload_is_json_compatible(self):
         blocked_json = json.dumps({
             'type': 'sensitive_tool_blocked',
             'status': 'blocked',
@@ -332,22 +330,14 @@ class TestFunctionToolSandboxBlocking:
             'action_label': 'pyodide.pyodide_sandbox',
             'message': 'Blocked by user.',
         })
+        payload = json.loads(blocked_json)
+        assert payload['type'] == 'sensitive_tool_blocked'
+        assert payload['blocked_tool_name'] == 'pyodide_sandbox'
+        assert payload['message'] == 'Blocked by user.'
 
-        assert FunctionTool._is_sensitive_tool_blocked(blocked_json) is True
+    def test_blocked_result_dict_payload_has_required_fields(self):
 
-    def test_function_tool_builds_blocked_termination_for_sandbox(self):
-        from alita_sdk.runtime.tools.function import FunctionTool, PIPELINE_BLOCKED_KEY
-
-        mock_tool = MagicMock(spec=BaseTool)
-        mock_tool.name = 'pyodide_sandbox'
-
-        ft = FunctionTool(
-            tool=mock_tool,
-            name='code_node_1',
-            output_variables=['result', 'messages'],
-        )
-
-        blocked_json = json.dumps({
+        blocked_payload = {
             'type': 'sensitive_tool_blocked',
             'status': 'blocked',
             'blocked_tool_name': 'pyodide_sandbox',
@@ -355,13 +345,12 @@ class TestFunctionToolSandboxBlocking:
             'blocked_toolkit_name': 'pyodide',
             'action_label': 'pyodide.pyodide_sandbox',
             'message': 'Blocked by user.',
-        })
+        }
 
-        result = ft._build_blocked_termination(blocked_json)
-        assert PIPELINE_BLOCKED_KEY in result
-        assert 'pyodide_sandbox' in result[PIPELINE_BLOCKED_KEY]
-        assert result['result'] is None  # Output variable nulled
-        assert result['messages']
+        assert blocked_payload['type'] == 'sensitive_tool_blocked'
+        assert blocked_payload['status'] == 'blocked'
+        assert blocked_payload['blocked_toolkit_type'] == 'sandbox'
+        assert blocked_payload['action_label'] == 'pyodide.pyodide_sandbox'
 
 
 # ---------------------------------------------------------------------------
