@@ -432,6 +432,16 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
     logger.info(f"[RUNTIME_TOOLS] Total tools being returned: {len(tools)}")
     logger.info(f"[RUNTIME_TOOLS] All tool names: {all_tool_names}")
 
+    # Defence-in-depth: final blocked-tool sweep across ALL tools regardless of source.
+    # Earlier filters cover main-loop toolkits; this catches community / alita / MCP tools.
+    pre_filter_count = len(tools)
+    tools = _final_blocked_tools_filter(tools)
+    if len(tools) < pre_filter_count:
+        logger.info(
+            "[SECURITY] Final blocked-tool filter removed %d tool(s)",
+            pre_filter_count - len(tools),
+        )
+
     # Check for indexer tools in the final list
     indexer_tools_final = [n for n in all_tool_names if 'index' in n.lower()]
     if indexer_tools_final:
@@ -441,6 +451,35 @@ def get_tools(tools_list: list, alita_client=None, llm=None, memory_store: BaseS
     # tools = _sanitize_tool_names(tools)
 
     return tools
+
+
+def _final_blocked_tools_filter(tools: list) -> list:
+    """Remove any remaining blocked tools from the final tool list.
+
+    Each tool's metadata is inspected for ``toolkit_type`` so the check
+    matches the same keys used by ``configure_blocklist``.
+    """
+    from langchain_core.tools import BaseTool
+
+    filtered = []
+    for tool in tools:
+        if not isinstance(tool, BaseTool):
+            filtered.append(tool)
+            continue
+        metadata = getattr(tool, 'metadata', None) or {}
+        toolkit_type = (
+            metadata.get('toolkit_type')
+            or metadata.get('type')
+            or ''
+        )
+        if toolkit_type and is_tool_blocked(toolkit_type, tool.name):
+            logger.warning(
+                "[SECURITY] Final filter: removing blocked tool '%s' (type '%s')",
+                tool.name, toolkit_type,
+            )
+            continue
+        filtered.append(tool)
+    return filtered
 
 
 def _sanitize_tool_names(tools: list) -> list:
