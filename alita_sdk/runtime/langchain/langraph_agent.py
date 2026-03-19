@@ -1008,6 +1008,11 @@ def create_graph(
                 from ..tools.sandbox import create_sandbox_tool
                 sandbox_tool = create_sandbox_tool(stateful=False, allow_net=True,
                                                    alita_client=kwargs.get('alita_client', None))
+                # Apply middleware wrapping (e.g. sensitive-tool guard) to the
+                # freshly-created sandbox tool — it was not in the `tools` list
+                # that was wrapped during Assistant.__init__().
+                if middleware_manager is not None:
+                    sandbox_tool = middleware_manager.wrap_tool(sandbox_tool)
                 code_data = node.get('code', {'type': 'fixed', 'value': "return 'Code block is empty'"})
                 lg_builder.add_node(node_id, FunctionTool(
                     tool=sandbox_tool, name=node['id'], return_type='dict',

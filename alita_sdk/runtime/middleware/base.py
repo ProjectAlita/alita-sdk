@@ -175,6 +175,18 @@ class MiddlewareManager:
         self._middleware.append(middleware)
         return self
 
+    def wrap_tool(self, tool: BaseTool) -> BaseTool:
+        """Apply wrap_tool from all registered middleware that support it.
+
+        This ensures tools created outside the normal assistant init path
+        (e.g. pipeline Code nodes) still receive middleware guards such as
+        the sensitive-tool guardrail.
+        """
+        for mw in self._middleware:
+            if hasattr(mw, 'wrap_tool'):
+                tool = mw.wrap_tool(tool)
+        return tool
+
     def get_all_tools(self) -> List[BaseTool]:
         """
         Collect tools from all middleware.

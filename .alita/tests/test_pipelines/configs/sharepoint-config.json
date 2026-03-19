@@ -8,7 +8,6 @@
     "create_list_item",
     "get_files_list",
     "read_document",
-    "upload_file",
-    "add_attachment_to_list_item"
+    "upload_file"
   ]
 }
