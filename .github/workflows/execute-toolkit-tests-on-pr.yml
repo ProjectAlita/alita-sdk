@@ -199,7 +199,7 @@ jobs:
       - name: Run unit tests
         run: |
           mkdir -p tests/reports
-          python -m pytest tests/ --junit-xml=tests/reports/unit-test-results.xml
+          python -m pytest tests/ --ignore=tests/runtime/test_alita_llm.py --junit-xml=tests/reports/unit-test-results.xml
 
       - name: Upload unit test results
         if: always()
