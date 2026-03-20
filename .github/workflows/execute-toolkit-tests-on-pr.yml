@@ -19,12 +19,6 @@ env:
   EXCLUDE_SUITES: 'figma,bitbucket,postman,qtest'
   AGENT_MATRIX_FILE: '.alita/tests/test_pipelines/test_matrix.json'
 
-permissions:
-  contents: read
-  packages: read
-  checks: write
-  pull-requests: write
-
 jobs:
   configure-matrix:
     runs-on: ubuntu-latest
@@ -184,6 +178,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      checks: write
     container:
       image: ghcr.io/projectalita/alita-sdk:pyodide
       credentials:
