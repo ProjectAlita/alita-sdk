@@ -210,6 +210,12 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: PUBLISH TEST REPORT
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: 'tests/reports/unit-test-results.xml'
+
   summarize-and-comment:
     needs: [configure-matrix, test-execution]
     if: always() && needs.configure-matrix.outputs.has-tests == 'true'
