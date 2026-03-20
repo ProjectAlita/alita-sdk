@@ -217,6 +217,11 @@ def create_state(data: Optional[dict] = None):
     # resumes so that blocked tools stay excluded and an audit trail is kept.
     # Uses a custom reducer: list → append, None → clear.
     state_dict["hitl_decisions"] = Annotated[list, _hitl_decisions_reducer]
+    # Flag set by FunctionTool when a sensitive tool is blocked (rejected).
+    # Carries the blocked-termination message string so the output extraction
+    # can use it directly.  Checked by conditional edges (truthy) to route
+    # the pipeline to END cleanly.
+    state_dict["_pipeline_blocked"] = Optional[str]
     logger.debug(f"Created state: {state_dict}")
     return TypedDict('State', state_dict)
 
