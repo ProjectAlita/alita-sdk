@@ -395,6 +395,11 @@ class ConditionalEdge(Runnable):
         self.default_output = clean_string(default_output)
 
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
+        # Route to END if a FunctionTool was blocked by sensitive tool guard
+        if state.get('_pipeline_blocked'):
+            logger.warning("[PIPELINE] _pipeline_blocked — ConditionalEdge routing to END")
+            return END
+
         logger.info(f"Current state in condition edge - {state}")
         input_data = {}
         for field in self.condition_inputs:
@@ -443,6 +448,11 @@ Answer only with step name, no need to add descrip in case none of the steps are
         self.is_node = is_node
 
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: Optional[RunnableConfig] = None) -> str:
+        # Route to END if a FunctionTool was blocked by sensitive tool guard
+        if state.get('_pipeline_blocked'):
+            logger.warning("[PIPELINE] _pipeline_blocked — DecisionEdge routing to END")
+            return END if not self.is_node else {"router_output": "END"}
+
         additional_info = ""
         decision_input = []
         for field in self.decisional_inputs:
@@ -479,6 +489,16 @@ class TransitionalEdge(Runnable):
         self.next_step = next_step
 
     def invoke(self, state: Annotated[BaseStore, InjectedStore()], config: RunnableConfig, *args, **kwargs):
+        # If a FunctionTool node set the _pipeline_blocked flag (sensitive
+        # tool was rejected), route to END so the pipeline terminates
+        # cleanly instead of propagating corrupt state downstream.
+        if state.get('_pipeline_blocked'):
+            logger.warning(
+                "[PIPELINE] _pipeline_blocked flag detected — routing to END "
+                "instead of '%s'", self.next_step,
+            )
+            return END
+
         logger.info(f'Transitioning to: {self.next_step}')
         dispatch_custom_event(
             "on_transitional_edge", {"next_step": self.next_step, "state": state}, config=config
@@ -1389,7 +1409,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         if not config.get("configurable", {}).get("thread_id", ""):
             config["configurable"] = {"thread_id": str(uuid4())}
         thread_id = config.get("configurable", {}).get("thread_id")
-        
+
         # Check if checkpoint exists early for chat_history handling
         checkpoint_exists = self.checkpointer and self.checkpointer.get_tuple(config)
         
@@ -1619,6 +1639,13 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         if remove_msgs:
                             # Update state to remove old messages before invoking
                             self.update_state(config, {'messages': remove_msgs})
+                    # Clear HITL decisions from previous execution batch
+                    if checkpoint_state.values.get('hitl_decisions'):
+                        self.update_state(config, {'hitl_decisions': None})
+                    # Clear pipeline-blocked flag from previous run
+                    if checkpoint_state.values.get('_pipeline_blocked'):
+                        self.update_state(config, {'_pipeline_blocked': None})
+
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
                     # Interrupted mid-execution - update state and continue from where we left off
@@ -1638,6 +1665,15 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             configurable = config.get('configurable', {}) if isinstance(config, dict) else {}
             if isinstance(configurable, dict):
                 configurable.pop('_hitl_resume_context', None)
+
+        # ── Pipeline-blocked fast path ──────────────────────────────────
+        # _pipeline_blocked carries the blocked-termination message string
+        # directly (set by FunctionTool._build_blocked_termination), so we
+        # don't need to parse the messages list.
+        _blocked_output = None
+        if isinstance(result, dict) and result.get('_pipeline_blocked'):
+            _blocked_output = str(result['_pipeline_blocked'])
+            logger.info("[PIPELINE] _pipeline_blocked — output: %.200s", _blocked_output)
 
         try:
             # Check if we're in a HITL interrupt state after execution
@@ -1677,9 +1713,11 @@ class LangGraphAgentRunnable(CompiledStateGraph):
 
                 return result_with_state
 
+            # Use pre-extracted blocked output if available
+            if _blocked_output is not None:
+                output = _blocked_output
             # Check if printer node output exists
-            printer_output = result.get(PRINTER_NODE_RS)
-            if printer_output == PRINTER_COMPLETED_STATE:
+            elif (printer_output := result.get(PRINTER_NODE_RS)) == PRINTER_COMPLETED_STATE:
                 # Printer completed, extract last AI message
                 messages = result['messages']
                 output = next(
@@ -1698,9 +1736,21 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                      if not isinstance(msg, HumanMessage)),
                     None
                 )
-        except Exception:
-            # Fallback: try to get last value or last message
-            output = str(list(result.values())[-1]) if result else 'Output is undefined'
+        except Exception as exc:
+            logger.warning("[OUTPUT] Exception during output extraction: %s", exc, exc_info=True)
+            # If pipeline was blocked, we already have the output — use it
+            if _blocked_output is not None:
+                output = _blocked_output
+            else:
+                # Fallback: try to extract from messages first, then last state value
+                messages = result.get('messages', []) if isinstance(result, dict) else []
+                output = next(
+                    (normalize_message_content(msg.content) for msg in reversed(messages)
+                     if hasattr(msg, 'content') and not isinstance(msg, HumanMessage)),
+                    None,
+                )
+                if output is None:
+                    output = str(list(result.values())[-1]) if result else 'Output is undefined'
         config_state = self.get_state(config)
         is_execution_finished = not config_state.next
         if is_execution_finished:
