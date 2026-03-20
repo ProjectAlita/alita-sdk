@@ -493,14 +493,19 @@ class AlitaClient:
                 "openai_organization": str(self.project_id),
             }
 
-            # OpenAI reasoning models (gpt-5, o1, o3): use reasoning dict format
-            # This enables extended thinking and returns reasoning in content_blocks
             reasoning_effort = model_config.get("reasoning_effort")
             if reasoning_effort:
-                target_kwargs["reasoning"] = {
-                    "effort": reasoning_effort.lower(),
-                    "summary": "auto"  # Return reasoning summary in response
-                }
+                if use_responses_api:
+                    # Responses API path (OpenAI native): use reasoning dict to enable
+                    # extended thinking summaries and content_blocks
+                    target_kwargs["reasoning"] = {
+                        "effort": reasoning_effort.lower(),
+                        "summary": "auto"
+                    }
+                else:
+                    # Chat Completions API path (default): use top-level reasoning_effort
+                    # string — widely supported and does NOT force the Responses API
+                    target_kwargs["reasoning_effort"] = reasoning_effort.lower()
 
             if use_responses_api:
                 target_kwargs["use_responses_api"] = True
