@@ -153,4 +153,66 @@ nodes:
     model: ${DEFAULT_LLM_MODEL}
     output:
       - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: extract_json_result
+
+  - id: extract_json_result
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+
+        # Extract JSON from LLM response which may contain prose + JSON block
+        raw = alita_state.get("test_results", "")
+        result_dict = {}
+
+        def extract_json_from_text(text):
+            if not text or not isinstance(text, str):
+                return {}
+            try:
+                return json.loads(text.strip())
+            except Exception:
+                pass
+            m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+            if not m:
+                m = re.search(r'(\{[^{}]*"test_passed"[^{}]*\})', text, re.DOTALL)
+            if m:
+                try:
+                    return json.loads(m.group(1))
+                except Exception:
+                    pass
+            return {}
+
+        if isinstance(raw, dict) and "test_passed" in raw:
+            result_dict = raw
+        elif isinstance(raw, str) and raw.strip():
+            result_dict = extract_json_from_text(raw)
+
+        # Fallback: scan chat_history for LLM JSON response
+        if not result_dict or "test_passed" not in result_dict:
+            chat_history = alita_state.get("chat_history", [])
+            for msg in reversed(chat_history):
+                content = ""
+                if isinstance(msg, dict):
+                    content = msg.get("content", "")
+                elif hasattr(msg, "content"):
+                    content = msg.content
+                if isinstance(content, str) and "test_passed" in content:
+                    result_dict = extract_json_from_text(content)
+                    if result_dict and "test_passed" in result_dict:
+                        break
+
+        if not result_dict or "test_passed" not in result_dict:
+            result_dict = {"test_passed": None, "error": "Could not extract JSON from LLM response"}
+
+        # Wrap in test_results so framework finds it via result.test_results.test_passed path
+        {"test_results": result_dict}
+    input:
+      - test_results
+    output:
+      - test_results
+    structured_output: true
     transition: END
