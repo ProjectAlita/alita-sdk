@@ -1511,11 +1511,43 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 # Check for HITL dynamic interrupt - these have interrupt payloads in state
                 hitl_interrupt = self._get_hitl_interrupt(checkpoint_state)
 
+                # ── Stale HITL detection ────────────────────────────────
+                # A pending HITL interrupt exists but the incoming message
+                # is NOT an HITL resume action.  This means the user
+                # navigated away (losing the UI authorization dialog) and
+                # later sent a new message.
+                #
+                # Instead of auto-rejecting (which resumes execution and
+                # can trigger continuation loops or pollute message
+                # history), we simply re-surface the HITL interrupt so the
+                # caller can show the authorization dialog again.  The
+                # user's new message is effectively deferred — they must
+                # resolve the pending action first, then re-send.
                 if hitl_interrupt and not self._is_hitl_resume(input):
-                    raise RuntimeError(
-                        "Pipeline execution is paused at a Human-in-the-Loop node. "
-                        "Resume requires an explicit HITL action (approve, reject, or edit)."
+                    hitl_for_ui = {
+                        k: v for k, v in hitl_interrupt.items()
+                        if k != 'tool_args_raw'
+                    }
+                    logger.warning(
+                        "[HITL] Stale HITL interrupt detected for tool '%s'. "
+                        "Returning interrupt to caller for resolution "
+                        "(new message will need to be re-sent after).",
+                        hitl_interrupt.get('tool_name', 'unknown'),
                     )
+                    result_with_state = {
+                        "output": hitl_interrupt.get(
+                            "message",
+                            "A pending action requires your review before continuing.",
+                        ),
+                        "thread_id": thread_id,
+                        "execution_finished": False,
+                        "hitl_interrupt": hitl_for_ui,
+                    }
+                    if hasattr(checkpoint_state, 'values') and checkpoint_state.values:
+                        for key, value in checkpoint_state.values.items():
+                            if key != 'output':
+                                result_with_state[key] = value
+                    return result_with_state
 
                 if hitl_interrupt and self._is_hitl_resume(input):
                     # Resuming from an HITL dynamic interrupt - use Command(resume=...)
