@@ -1,0 +1,408 @@
+state:
+  input:
+    type: string
+  artifact_filepath:
+    type: string
+    value: ''
+  hierarchy_data:
+    type: dict
+    value: {}
+  extracted_acs:
+    type: dict
+    value: {}
+  ac_coverage_map:
+    type: dict
+    value: {}
+  enriched_hierarchy_data:
+    type: dict
+    value: {}
+  output_filepath:
+    type: string
+    value: ''
+  operation_result:
+    type: string
+    value: ''
+entry_point: ParseInput
+nodes:
+  - id: ParseInput
+    type: llm
+    input:
+      - input
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a parameter extraction assistant. Parse the user's request and extract the input artifact filepath.
+          
+          **Expected input format:**
+          - "Process artifact at <filepath>"
+          - "Extract ACs from <filepath>"
+          - "Enrich <filepath> with ACs"
+          
+          **Required parameter:**
+          - artifact_filepath: Path to the JSON artifact containing work item hierarchy
+          
+          **Return JSON:**
+          {
+            "artifact_filepath": "<path_to_json_file>"
+          }
+          
+          If the filepath is missing or invalid, return:
+          {
+            "artifact_filepath": "",
+            "error": "Please provide valid artifact filepath. Example: 'Process artifact at epic_9_hierarchy_03_12_2026.json'"
+          }
+      task:
+        type: fstring
+        value: |
+          Parse this input and extract the artifact filepath:
+          {input}
+          
+          Return the JSON with artifact_filepath field.
+    output:
+      - artifact_filepath
+    structured_output: true
+    transition: LoadHierarchyArtifact
+  - id: LoadHierarchyArtifact
+    type: toolkit
+    input:
+      - artifact_filepath
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filename:
+        type: variable
+        value: artifact_filepath
+      filepath:
+        type: fixed
+        value: null
+    output:
+      - hierarchy_data
+    structured_output: true
+    tool: readFile
+    toolkit_name: epic_artifacts
+    transition: ExtractAcceptanceCriteria
+  - id: ExtractAcceptanceCriteria
+    type: llm
+    input:
+      - hierarchy_data
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are an acceptance criteria extraction specialist. Extract ACs from work item descriptions.
+          
+          **Recognition Patterns:**
+          1. Labeled sections: "Acceptance Criteria", "AC", "ACs", "Definition of Done", "DoD" (case-insensitive)
+          2. Numbered/bulleted lists under AC headers: `1.`, `-`, `*`
+          3. Markdown checkboxes: `- [ ]` (not done), `- [x]` (done)
+          4. Gherkin scenarios: `Given...When...Then` (each scenario = one AC)
+          
+          **Status Determination:**
+          - `[x]` → "done"
+          - `[ ]` → "not_done"
+          - No checkbox → infer from context or return "unknown"
+          
+          **Output Format:**
+          For each item with ACs, return structured JSON mapping item_id to AC list.
+          Each AC must have: text (string), status (done|not_done|unknown), source (checkbox|labeled_section|gherkin|numbered_list)
+          
+          **Rules:**
+          - Skip items with empty/no descriptions
+          - Each AC should be discrete and testable
+          - Preserve original AC text (don't paraphrase)
+      task:
+        type: fstring
+        value: |
+          Extract acceptance criteria from all work items in this hierarchy.
+          
+          Epic (ID {hierarchy_data[epic][id]}):
+          Description: {hierarchy_data[epic][description]}
+          
+          Child Items:
+          {% for item_id, item in hierarchy_data[items].items() %}
+          - Item ID {item_id} ({item[type]}): {item[title]}
+            Description: {item[description]}
+          {% endfor %}
+          
+          Return JSON with this structure:
+          {{
+            "acs_by_item": {{
+              "<item_id>": [
+                {{"text": "...", "status": "done|not_done|unknown", "source": "checkbox|labeled_section|gherkin|numbered_list"}}
+              ]
+            }}
+          }}
+          
+          Only include items that have ACs. Omit items with no ACs.
+    output:
+      - extracted_acs
+    structured_output: true
+    transition: MatchChildrenToParentACs
+  - id: MatchChildrenToParentACs
+    type: llm
+    input:
+      - hierarchy_data
+      - extracted_acs
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are an AC coverage mapping specialist. Determine which parent ACs each child work item addresses.
+          
+          **Matching Rules:**
+          1. **Direct parent only** - match child to its immediate parent's ACs (not grandparent or higher)
+          2. **Explicit match** - child's description/ACs explicitly reference parent AC
+          3. **Semantic match** - child's title/description semantically relates to parent AC (when child has no explicit ACs)
+          4. **No forced matching** - if no confident match exists, return empty coverage
+          
+          **Confidence Levels:**
+          - "explicit" - child description directly addresses parent AC
+          - "semantic" - child title implies work toward parent AC (moderate confidence)
+          - "none" - no match found
+          
+          **Output Format:**
+          Map each child_id to covered parent AC indices with confidence and reasoning.
+      task:
+        type: fstring
+        value: |
+          Map child work items to parent ACs they cover.
+          
+          Hierarchy structure (children by parent):
+          {% for item_id, item in hierarchy_data[items].items() %}
+          {% if item[children_ids]|length > 0 %}
+          Parent ID {item_id} ({item[type]}): {item[title]}
+          Parent ACs:
+          {% if item_id in extracted_acs.get('acs_by_item', {}) %}
+          {% for idx, ac in enumerate(extracted_acs['acs_by_item'][item_id], 1) %}
+            AC-{idx}: {ac[text]} [{ac[status]}]
+          {% endfor %}
+          {% else %}
+          (No ACs found)
+          {% endif %}
+          
+          Children:
+          {% for child_id in item[children_ids] %}
+            - Child ID {child_id}: {hierarchy_data[items][str(child_id)][title]}
+              Child Description: {hierarchy_data[items][str(child_id)][description][:200]}...
+              Child ACs: {% if str(child_id) in extracted_acs.get('acs_by_item', {}) %}{{ extracted_acs['acs_by_item'][str(child_id)]|length }} found{% else %}None{% endif %}
+          {% endfor %}
+          {% endif %}
+          {% endfor %}
+          
+          Return JSON:
+          {{
+            "coverage_map": {{
+              "<child_id>": [
+                {{
+                  "parent_ac_index": 1,
+                  "parent_id": "<parent_id>",
+                  "confidence": "explicit|semantic|none",
+                  "reason": "Brief explanation"
+                }}
+              ]
+            }}
+          }}
+          
+          Only include children that cover at least one parent AC.
+    output:
+      - ac_coverage_map
+    structured_output: true
+    transition: EnrichHierarchyWithACs
+  - id: EnrichHierarchyWithACs
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        extracted_acs = alita_state.get('extracted_acs', {})
+        ac_coverage_map = alita_state.get('ac_coverage_map', {})
+        
+        # Extract nested if needed
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        if isinstance(extracted_acs, dict) and 'extracted_acs' in extracted_acs:
+            extracted_acs = extracted_acs['extracted_acs']
+        if isinstance(ac_coverage_map, dict) and 'ac_coverage_map' in ac_coverage_map:
+            ac_coverage_map = ac_coverage_map['ac_coverage_map']
+        
+        acs_by_item = extracted_acs.get('acs_by_item', {})
+        coverage = ac_coverage_map.get('coverage_map', {})
+        
+        # Process Epic ACs
+        epic_id = str(hierarchy_data['epic']['id'])
+        if epic_id in acs_by_item:
+            own_acs = []
+            for idx, ac in enumerate(acs_by_item[epic_id], 1):
+                ac_entry = {
+                    'ac_id': f'{epic_id}-ac-{idx}',
+                    'text': ac['text'],
+                    'status': ac['status'],
+                    'source': ac['source'],
+                    'covered_by_children': []
+                }
+                own_acs.append(ac_entry)
+            hierarchy_data['epic']['own_acs'] = own_acs
+        else:
+            hierarchy_data['epic']['own_acs'] = []
+        
+        # Process all items
+        for item_id, item in hierarchy_data['items'].items():
+            # Add own_acs (when item is a parent)
+            if item_id in acs_by_item:
+                own_acs = []
+                for idx, ac in enumerate(acs_by_item[item_id], 1):
+                    ac_entry = {
+                        'ac_id': f'{item_id}-ac-{idx}',
+                        'text': ac['text'],
+                        'status': ac['status'],
+                        'source': ac['source'],
+                        'covered_by_children': []
+                    }
+                    own_acs.append(ac_entry)
+                item['own_acs'] = own_acs
+            else:
+                item['own_acs'] = []
+            
+            # Add covered_parent_acs (when item is a child)
+            if item_id in coverage:
+                covered = []
+                for mapping in coverage[item_id]:
+                    covered.append({
+                        'parent_ac_id': f"{mapping['parent_id']}-ac-{mapping['parent_ac_index']}",
+                        'parent_id': mapping['parent_id'],
+                        'parent_ac_index': mapping['parent_ac_index'],
+                        'confidence': mapping['confidence'],
+                        'reason': mapping['reason']
+                    })
+                item['covered_parent_acs'] = covered
+            else:
+                item['covered_parent_acs'] = []
+        
+        # Populate covered_by_children in parent ACs
+        for item_id, item in hierarchy_data['items'].items():
+            if 'covered_parent_acs' in item:
+                for coverage_entry in item['covered_parent_acs']:
+                    parent_id = str(coverage_entry['parent_id'])
+                    parent_ac_idx = coverage_entry['parent_ac_index'] - 1  # Convert to 0-based
+                    
+                    # Find parent and update its AC
+                    if parent_id == epic_id:
+                        if parent_ac_idx < len(hierarchy_data['epic']['own_acs']):
+                            hierarchy_data['epic']['own_acs'][parent_ac_idx]['covered_by_children'].append(int(item_id))
+                    elif parent_id in hierarchy_data['items']:
+                        if parent_ac_idx < len(hierarchy_data['items'][parent_id]['own_acs']):
+                            hierarchy_data['items'][parent_id]['own_acs'][parent_ac_idx]['covered_by_children'].append(int(item_id))
+        
+        {'enriched_hierarchy_data': hierarchy_data}
+    input:
+      - hierarchy_data
+      - extracted_acs
+      - ac_coverage_map
+    output:
+      - enriched_hierarchy_data
+    structured_output: true
+    transition: GenerateOutputFilepath
+  - id: GenerateOutputFilepath
+    type: code
+    code:
+      type: fixed
+      value: |-
+        from datetime import datetime
+        
+        artifact_filepath = alita_state.get('artifact_filepath', '')
+        
+        # Generate output filename based on input
+        if artifact_filepath:
+            # Remove .json extension and add _with_acs suffix
+            base_name = artifact_filepath.replace('.json', '')
+            output_filename = f"{base_name}_with_acs.json"
+        else:
+            # Fallback: generate timestamp-based name
+            now = datetime.now()
+            timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
+            output_filename = f"hierarchy_with_acs_{timestamp}.json"
+        
+        {
+            'output_filepath': output_filename
+        }
+    input:
+      - artifact_filepath
+    output:
+      - output_filepath
+    structured_output: true
+    transition: SaveEnrichedHierarchy
+  - id: SaveEnrichedHierarchy
+    type: toolkit
+    input:
+      - enriched_hierarchy_data
+      - output_filepath
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filedata:
+        type: fstring
+        value: '{enriched_hierarchy_data}'
+      filename:
+        type: variable
+        value: output_filepath
+      filepath:
+        type: fixed
+        value: null
+    output: []
+    structured_output: true
+    tool: createFile
+    toolkit_name: epic_artifacts
+    transition: FormatSuccessResult
+  - id: FormatSuccessResult
+    type: state_modifier
+    input:
+      - artifact_filepath
+      - output_filepath
+      - enriched_hierarchy_data
+    output:
+      - operation_result
+    template: '{"operation": "ac_enrichment", "status": "success", "input_file": "{{ artifact_filepath }}", "output_file": "{{ output_filepath }}", "summary": {"total_acs": {{ enriched_hierarchy_data.epic.own_acs|length + enriched_hierarchy_data.items.values()|map(attribute="own_acs")|map("length")|sum }}, "epic_id": {{ enriched_hierarchy_data.epic.id }}}}'
+    transition: ReplyComposer
+    variables_to_clean: []
+  - id: ReplyComposer
+    type: llm
+    input:
+      - operation_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |-
+          You are a communication specialist. Format the operation result for the user.
+          
+          * Be concise and professional
+          * Confirm successful AC extraction and enrichment
+          * Show input and output file paths
+          * Summarize AC metrics (total ACs extracted, epic ID)
+          * Don't suggest further operations
+      task:
+        type: fstring
+        value: |-
+          Operation result:
+          {operation_result}
+          
+          Format a clear success message showing the input file, output file, and AC summary.
+    output: []
+    structured_output: false
+    transition: END
