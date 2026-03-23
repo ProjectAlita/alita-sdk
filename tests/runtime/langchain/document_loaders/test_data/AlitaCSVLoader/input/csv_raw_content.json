@@ -1,0 +1,10 @@
+{
+    "tags": ["loader:csv", "feature:raw_content"],
+    "file_path": "../files/csv_simple.csv",
+    "configs": [
+        {},
+        {"max_tokens": 1024},
+        {"raw_content": true},
+        {"raw_content": true, "max_tokens": 512}
+    ]
+}

@@ -1,0 +1,23 @@
+{
+  "file_path": "../files/disc.png",
+  "tags": ["loader_image", "feature_llm", "feature_multimodal", "format_png"],
+  "configs": [
+    {
+      "_name": "ocr_only",
+      "use_llm": false,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_default_prompt",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_disc_analysis",
+      "use_llm": true,
+      "prompt": "Analyze this disc/circular object and describe: 1) Type of disc (CD, DVD, record, icon, etc.), 2) Visual characteristics (colors, patterns, labels), 3) Any text or branding visible, 4) Whether it's a photograph, diagram, icon, or illustration.",
+      "max_tokens": 2048
+    }
+  ]
+}

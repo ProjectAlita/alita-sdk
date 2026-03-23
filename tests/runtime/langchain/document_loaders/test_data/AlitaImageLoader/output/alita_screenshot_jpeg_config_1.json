@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "## What I'm Looking At\n\nThis appears to be **Agentive** (or a similar AI agent platform), showing a chat interface with:\n\n### Key Elements Visible:\n\n**Left Sidebar:**\n- Navigation: Agents, Pipelines, Credentials, Toolkits, Applications, MCPs, Artifacts\n- Conversation history from today/this week\n- \"Agents Studio\" at bottom\n\n**Main Chat Area:**\nThe AI response covers **AI Agent learning concepts**:\n- Design patterns (Reflection, Tool Use, ReAct, Planning, Multi-Agent)\n- Core concepts (Cooperation, Guardrails, Memory types)\n- A 5-level progressive learning path\n- **Confidence Score: 95/100**\n- Source: *AI Agents (2025).pdf*\n\n**Right Panel:**\n- Participants section\n- **Toolkits added:** `ytesting` and `aipdf` ← this likely enabled the PDF analysis\n- MCPs section (empty)\n- Context Budget: 0/64,000 tokens\n- Model: **Anthropic Claude 4.5 Sonnet**\n\n### What Happened:\nThe user uploaded/connected an **AI Agents PDF** via the `aipdf` toolkit, and Claude analyzed it to create a structured learning roadmap with citations.\n\nWould you like help with anything specific about this setup? 🤖",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/alita_screenshot.jpeg"
+    }
+  }
+]

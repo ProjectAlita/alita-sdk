@@ -3,6 +3,7 @@
     "page_content": "product_name,description,price,category,notes\n\"Laptop, Professional Edition\",\"High-performance laptop with 16GB RAM, 512GB SSD, and Intel i7 processor\",1299.99,Electronics,\"Popular choice for developers\n\n Includes 2-year warranty\"\n\"Coffee Maker \"\"Deluxe\"\"\",Programmable coffee maker with thermal carafe and built-in grinder,89.95,Appliances,\"Rated 4.5/5 stars\nCustomer favorite\"\nOffice Chair,Ergonomic office chair with lumbar support and adjustable armrests,245.00,Furniture,Ships fully assembled\n\"Book: \"\"Data Science, 2nd Edition\"\"\",\"Comprehensive guide to machine learning, statistics, and Python programming\",54.99,Books,Includes online resources\nWireless Mouse,Bluetooth mouse with precision tracking and rechargeable battery,29.99,Electronics,\"Compatible with Windows, Mac, Linux\"\n\"Notebook Set (Pack of 5)\",\"Five ruled notebooks, 100 pages each, with durable covers\",12.50,Stationery,Eco-friendly recycled paper\n",
     "metadata": {
       "source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_special.csv:1",
+      "chunk_id": 1,
       "table_source": "tests/runtime/langchain/document_loaders/test_data/AlitaCSVLoader/files/csv_special.csv"
     }
   }

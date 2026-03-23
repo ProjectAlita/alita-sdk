@@ -1,9 +1,16 @@
 [
   {
-    "page_content": "{\"company\": {\"name\": \"Tech Corp\", \"founded\": 2010, \"headquarters\": {\"address\": {\"street\": \"123 Tech Street\", \"city\": \"San Francisco\", \"state\": \"CA\", \"zip\": \"94105\"}, \"phone\": \"+1-555-0100\"}, \"departments\": {\"engineering\": {\"head\": \"Jane Smith\", \"employees\": 50, \"teams\": [\"backend\", \"frontend\", \"mobile\", \"devops\"]}, \"sales\": {\"head\": \"Bob Johnson\", \"employees\": 25, \"regions\": [\"North\", \"South\", \"East\", \"West\"]}}}}",
+    "page_content": "{\"company\": {\"name\": \"Tech Corp\", \"founded\": 2010, \"headquarters\": {\"address\": {\"street\": \"123 Tech Street\", \"city\": \"San Francisco\", \"state\": \"CA\", \"zip\": \"94105\"}, \"phone\": \"+1-555-0100\"}}}",
     "metadata": {
       "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLoader/files/json_nested.json",
       "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"company\": {\"departments\": {\"engineering\": {\"head\": \"Jane Smith\", \"employees\": 50, \"teams\": [\"backend\", \"frontend\", \"mobile\", \"devops\"]}, \"sales\": {\"head\": \"Bob Johnson\", \"employees\": 25, \"regions\": [\"North\", \"South\", \"East\", \"West\"]}}}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLoader/files/json_nested.json",
+      "chunk_id": 2
     }
   }
 ]

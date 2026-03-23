@@ -77,14 +77,24 @@ def run_loader_assert(
     config: Dict[str, Any],
     file_path: Path,
     baseline_path: Path,
+    llm=None,
 ) -> None:
     """
     Execute the loader for one (input, config) pair and assert it matches the
     committed baseline. Produces a rich failure message on mismatch.
+    
+    Args:
+        llm: Optional LLM instance for multimodal loaders (e.g. AlitaImageLoader)
     """
     from loader_test_runner import run_single_config_test  # on sys.path via conftest
 
-    actual_output_path = tmp_path / f"{input_name}_config_{config_index}.json"
+    # Save actual output to persistent location in project
+    # loader_helpers.py is at: tests/runtime/langchain/document_loaders/test_data/scripts/loader_helpers.py
+    # Go up: scripts -> test_data -> document_loaders -> langchain -> runtime -> tests -> project_root (7 levels)
+    project_root = Path(__file__).parent.parent.parent.parent.parent.parent.parent
+    results_dir = project_root / "tests" / "runtime" / "langchain" / "document_loaders" / "test_results" / loader_name
+    results_dir.mkdir(parents=True, exist_ok=True)
+    actual_output_path = results_dir / f"{input_name}_config_{config_index}.json"
 
     result = run_single_config_test(
         loader_name=loader_name,
@@ -94,6 +104,7 @@ def run_loader_assert(
         file_path=file_path,
         baseline_path=baseline_path,
         actual_output_path=actual_output_path,
+        llm=llm,
     )
 
     if result.passed:
