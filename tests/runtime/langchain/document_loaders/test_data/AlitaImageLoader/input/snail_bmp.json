@@ -12,12 +12,6 @@
       "use_llm": true,
       "prompt_default": true,
       "max_tokens": 2048
-    },
-    {
-      "_name": "llm_custom_nature_analysis",
-      "use_llm": true,
-      "prompt": "Describe this nature/wildlife image in detail including: 1) Main subject (snail characteristics, shell patterns, body features), 2) Environment and setting, 3) Colors and textures, 4) Any additional elements visible (plants, background, etc.), 5) Image quality and style (photo, illustration, macro, etc.).",
-      "max_tokens": 2048
     }
   ]
 }

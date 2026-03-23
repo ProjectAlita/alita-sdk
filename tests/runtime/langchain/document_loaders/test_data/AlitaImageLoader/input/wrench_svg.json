@@ -12,12 +12,6 @@
       "use_llm": true,
       "prompt_default": true,
       "max_tokens": 2048
-    },
-    {
-      "_name": "llm_custom_tool_analysis",
-      "use_llm": true,
-      "prompt": "Analyze this tool/wrench image and describe: 1) Type of tool shown, 2) Visual characteristics (shape, color, style), 3) Any text or labels visible, 4) Whether it's a photo, illustration, icon, or diagram.",
-      "max_tokens": 2048
     }
   ]
 }

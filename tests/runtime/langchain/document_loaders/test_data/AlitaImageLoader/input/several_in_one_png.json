@@ -12,18 +12,6 @@
       "use_llm": true,
       "prompt_default": true,
       "max_tokens": 2048
-    },
-    {
-      "_name": "llm_identify_sections",
-      "use_llm": true,
-      "prompt": "How many parts have readable text? What is the content of other parts (brif description in around 30 words)?",
-      "max_tokens": 2048
-    },
-    {
-      "_name": "llm_composite_layout_analysis",
-      "use_llm": true,
-      "prompt": "Describe the overall layout and composition of this multi-part image. How many distinct sections are there? What is the spatial arrangement? Are the sections related thematically, or are they independent? Provide a structured description of the complete composite.",
-      "max_tokens": 2048
     }
   ]
 }
