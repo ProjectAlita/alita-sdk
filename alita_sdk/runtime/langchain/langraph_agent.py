@@ -1546,7 +1546,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 if hitl_interrupt and not self._is_hitl_resume(input):
                     hitl_for_ui = {
                         k: v for k, v in hitl_interrupt.items()
-                        if k != 'tool_args_raw'
+                        if k not in ('tool_args_raw', '_pending_messages')
                     }
                     logger.warning(
                         "[HITL] Stale HITL interrupt detected for tool '%s'. "
@@ -1609,6 +1609,37 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                             decision.get('action'),
                             decision.get('tool_name'),
                         )
+
+                        # ── Restore intermediate tool messages ──────────────
+                        # The LLMNode runs LLM calls AND tool execution inside
+                        # a single graph node (__perform_tool_calling loop).
+                        # When interrupt() fires from the sensitive-tool guard,
+                        # LangGraph checkpoints the state *before* the LLMNode
+                        # started — all intermediate messages (completed tool
+                        # calls + their results) are lost.  The middleware
+                        # captured them as '_pending_messages' in the interrupt
+                        # payload.  Inject them into graph state now so the
+                        # re-executed LLMNode sees the full conversation.
+                        pending_msgs_dicts = hitl_interrupt.get('_pending_messages') or []
+                        if pending_msgs_dicts:
+                            # Remove the trailing AIMessage that triggered the
+                            # sensitive tool — it will be replaced by the
+                            # synthetic AIMessage from _hitl_resume_context.
+                            trimmed = self._trim_pending_messages(pending_msgs_dicts)
+                            if trimmed:
+                                from langchain_core.messages.utils import messages_from_dict
+                                try:
+                                    restored_messages = messages_from_dict(trimmed)
+                                    self.update_state(config, {'messages': restored_messages})
+                                    logger.info(
+                                        "[HITL] Restored %d intermediate messages to graph state",
+                                        len(restored_messages),
+                                    )
+                                except Exception as exc:
+                                    logger.warning(
+                                        "[HITL] Failed to restore intermediate messages: %s",
+                                        exc,
+                                    )
 
                     result = super().invoke(
                         Command(resume=hitl_resume_value),
@@ -1696,7 +1727,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
 
                 # Strip internal-only fields (e.g. unmasked tool args) before logging
                 # or returning results that will be emitted to UI clients.
-                hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k != 'tool_args_raw'}
+                hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k not in ('tool_args_raw', '_pending_messages')}
                 logger.info(f"[HITL] Execution paused at HITL node: {hitl_for_ui}")
 
                 result_with_state = {
@@ -1821,6 +1852,89 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         interrupt_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args') or {}
         resumed_args = hitl_resume_ctx.get('tool_args') or {}
         return interrupt_args == resumed_args
+
+    @staticmethod
+    def _trim_pending_messages(pending_msgs_dicts: list[dict]) -> list[dict]:
+        """Remove the trailing AIMessage that triggered the sensitive tool.
+
+        The messages captured by the sensitive-tool guard include the AIMessage
+        whose tool_call caused the interrupt.  On resume, this is replaced by
+        the synthetic AIMessage from ``_hitl_resume_context``, so we must not
+        inject the original to avoid duplicate / orphaned tool-call IDs.
+
+        Additionally, any ToolMessages that belong to incomplete tool_calls in
+        the trailing AIMessage are kept (they are results of non-sensitive
+        sibling tools that already executed successfully).
+        """
+        if not pending_msgs_dicts:
+            return []
+
+        def _msg_type(message_dict: dict) -> str:
+            if not isinstance(message_dict, dict):
+                return ''
+            if 'type' in message_dict and isinstance(message_dict.get('data'), dict):
+                return message_dict.get('type', '')
+            return message_dict.get('type', '')
+
+        def _msg_data(message_dict: dict) -> dict:
+            if not isinstance(message_dict, dict):
+                return {}
+            data = message_dict.get('data')
+            return data if isinstance(data, dict) else message_dict
+
+        def _tool_calls(message_dict: dict) -> list[dict]:
+            data = _msg_data(message_dict)
+            tool_calls = data.get('tool_calls', [])
+            return tool_calls if isinstance(tool_calls, list) else []
+
+        def _tool_call_id(message_dict: dict) -> str:
+            data = _msg_data(message_dict)
+            value = data.get('tool_call_id', '')
+            return value if isinstance(value, str) else ''
+
+        # Walk backwards to find the last AI message.
+        last_ai_idx = None
+        for i in range(len(pending_msgs_dicts) - 1, -1, -1):
+            msg_type = _msg_type(pending_msgs_dicts[i])
+            if msg_type == 'ai':
+                last_ai_idx = i
+                break
+
+        if last_ai_idx is None:
+            # No AIMessage found — return everything as-is.
+            return list(pending_msgs_dicts)
+
+        # Keep everything before the last AIMessage.  ToolMessages that follow
+        # (results of sibling tool_calls in the same batch) are kept too — they
+        # are valid results that should be visible to the LLM.
+        result = list(pending_msgs_dicts[:last_ai_idx])
+
+        # Collect ToolMessages that follow the last AIMessage (sibling results).
+        last_ai_tool_call_ids: set = set()
+        for tc in _tool_calls(pending_msgs_dicts[last_ai_idx]):
+            tc_id = tc.get('id', '')
+            if tc_id:
+                last_ai_tool_call_ids.add(tc_id)
+
+        for msg in pending_msgs_dicts[last_ai_idx + 1:]:
+            if _msg_type(msg) == 'tool' and _tool_call_id(msg) in last_ai_tool_call_ids:
+                # This is a sibling tool result — keep it but we need its
+                # parent AIMessage too.  Re-include the AIMessage.
+                pass  # handled below
+
+        # If there are completed sibling ToolMessages, we must keep the AIMessage
+        # (since ToolMessages require a matching AIMessage).  Only remove the
+        # AIMessage when ALL its ToolMessages are missing (common single-tool case).
+        sibling_tool_msgs = [
+            msg for msg in pending_msgs_dicts[last_ai_idx + 1:]
+            if _msg_type(msg) == 'tool' and _tool_call_id(msg) in last_ai_tool_call_ids
+        ]
+        if sibling_tool_msgs:
+            # Keep the AIMessage and its completed siblings.
+            result.append(pending_msgs_dicts[last_ai_idx])
+            result.extend(sibling_tool_msgs)
+
+        return result
 
     @staticmethod
     def _is_hitl_resume(input_data: dict) -> bool:
