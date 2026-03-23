@@ -8,6 +8,7 @@ import re
 import types
 from typing import Any, Callable, Dict, List, Optional
 
+from langchain_core.messages.base import message_to_dict
 from langchain_core.tools import BaseTool, StructuredTool
 from langgraph.types import interrupt
 
@@ -252,6 +253,25 @@ class SensitiveToolGuardMiddleware(Middleware):
             )
             return {'action': 'approve', 'value': ''}
 
+        # Capture intermediate messages accumulated by __perform_tool_calling
+        # before the interrupt.  These will be stored in the checkpoint and
+        # injected back into graph state on HITL resume so the LLM retains
+        # awareness of all previously completed tool calls.
+        from ..tools.llm import _PENDING_TOOL_MESSAGES
+        pending_msgs = _PENDING_TOOL_MESSAGES.get([])
+        serialized_pending: list[dict] = []
+        if pending_msgs:
+            for msg in pending_msgs:
+                try:
+                    serialized_pending.append(message_to_dict(msg))
+                except Exception:
+                    pass
+            if serialized_pending:
+                logger.info(
+                    "[HITL] Captured %d intermediate messages for checkpoint restore",
+                    len(serialized_pending),
+                )
+
         interrupt_payload = {
             'type': 'hitl',
             'guardrail_type': 'sensitive_tool',
@@ -267,6 +287,12 @@ class SensitiveToolGuardMiddleware(Middleware):
             'tool_args_raw': sensitive_tool_context.get('tool_args_raw', sensitive_tool_context['tool_args']),
             'policy_message': sensitive_tool_context['policy_message'],
         }
+
+        # Store pending messages in interrupt payload (internal only). This field
+        # is explicitly filtered/stripped by downstream interrupt/UI handling
+        # logic to ensure it is never exposed to end users.
+        if serialized_pending:
+            interrupt_payload['_pending_messages'] = serialized_pending
 
         resume_value = interrupt(interrupt_payload)
         if not isinstance(resume_value, dict):
