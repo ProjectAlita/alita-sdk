@@ -52,15 +52,6 @@ state:
   validation_passed:
     type: bool
     value: false
-  extracted_acs:
-    type: dict
-    value: {}
-  ac_coverage_map:
-    type: dict
-    value: {}
-  ac_metrics:
-    type: dict
-    value: {}
 entry_point: AnalyzeRequest
 nodes:
   - id: AnalyzeRequest
@@ -523,236 +514,6 @@ nodes:
     output:
       - hierarchy_data
     structured_output: false
-    transition: ExtractAcceptanceCriteria
-  - id: ExtractAcceptanceCriteria
-    type: llm
-    input:
-      - hierarchy_data
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |
-          You are an acceptance criteria extraction specialist. Extract ACs from work item descriptions.
-          
-          **Recognition Patterns:**
-          1. Labeled sections: "Acceptance Criteria", "AC", "ACs", "Definition of Done", "DoD" (case-insensitive)
-          2. Numbered/bulleted lists under AC headers: `1.`, `-`, `*`
-          3. Markdown checkboxes: `- [ ]` (not done), `- [x]` (done)
-          4. Gherkin scenarios: `Given...When...Then` (each scenario = one AC)
-          
-          **Status Determination:**
-          - `[x]` → "done"
-          - `[ ]` → "not_done"
-          - No checkbox → infer from context or return "unknown"
-          
-          **Output Format:**
-          For each item with ACs, return structured JSON mapping item_id to AC list.
-          Each AC must have: text (string), status (done|not_done|unknown), source (checkbox|labeled_section|gherkin|numbered_list)
-          
-          **Rules:**
-          - Skip items with empty/no descriptions
-          - Strip HTML before parsing (already done by pipeline)
-          - Each AC should be discrete and testable
-          - Preserve original AC text (don't paraphrase)
-      task:
-        type: fstring
-        value: |
-          Extract acceptance criteria from all work items in this hierarchy.
-          
-          Epic (ID {hierarchy_data[epic][id]}):
-          Description: {hierarchy_data[epic][description]}
-          
-          Child Items:
-          {% for item_id, item in hierarchy_data[items].items() %}
-          - Item ID {item_id} ({item[type]}): {item[title]}
-            Description: {item[description]}
-          {% endfor %}
-          
-          Return JSON with this structure:
-          {{
-            "acs_by_item": {{
-              "<item_id>": [
-                {{"text": "...", "status": "done|not_done|unknown", "source": "checkbox|labeled_section|gherkin|numbered_list"}}
-              ]
-            }}
-          }}
-          
-          Only include items that have ACs. Omit items with no ACs.
-    output:
-      - extracted_acs
-    structured_output: true
-    transition: MatchChildrenToParentACs
-  - id: MatchChildrenToParentACs
-    type: llm
-    input:
-      - hierarchy_data
-      - extracted_acs
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |
-          You are an AC coverage mapping specialist. Determine which parent ACs each child work item addresses.
-          
-          **Matching Rules:**
-          1. **Direct parent only** - match child to its immediate parent's ACs (not grandparent or higher)
-          2. **Explicit match** - child's description/ACs explicitly reference parent AC
-          3. **Semantic match** - child's title/description semantically relates to parent AC (when child has no explicit ACs)
-          4. **No forced matching** - if no confident match exists, return empty coverage
-          
-          **Confidence Levels:**
-          - "explicit" - child description directly addresses parent AC
-          - "semantic" - child title implies work toward parent AC (moderate confidence)
-          - "none" - no match found
-          
-          **Output Format:**
-          Map each child_id to covered parent AC indices with confidence and reasoning.
-      task:
-        type: fstring
-        value: |
-          Map child work items to parent ACs they cover.
-          
-          Hierarchy structure (children by parent):
-          {% for item_id, item in hierarchy_data[items].items() %}
-          {% if item[children_ids]|length > 0 %}
-          Parent ID {item_id} ({item[type]}): {item[title]}
-          Parent ACs:
-          {% if item_id in extracted_acs.get('acs_by_item', {}) %}
-          {% for idx, ac in enumerate(extracted_acs['acs_by_item'][item_id], 1) %}
-            AC-{idx}: {ac[text]} [{ac[status]}]
-          {% endfor %}
-          {% else %}
-          (No ACs found)
-          {% endif %}
-          
-          Children:
-          {% for child_id in item[children_ids] %}
-            - Child ID {child_id}: {hierarchy_data[items][str(child_id)][title]}
-              Child Description: {hierarchy_data[items][str(child_id)][description][:200]}...
-              Child ACs: {% if str(child_id) in extracted_acs.get('acs_by_item', {}) %}{{ extracted_acs['acs_by_item'][str(child_id)]|length }} found{% else %}None{% endif %}
-          {% endfor %}
-          {% endif %}
-          {% endfor %}
-          
-          Return JSON:
-          {{
-            "coverage_map": {{
-              "<child_id>": [
-                {{
-                  "parent_ac_index": 1,
-                  "parent_id": "<parent_id>",
-                  "confidence": "explicit|semantic|none",
-                  "reason": "Brief explanation"
-                }}
-              ]
-            }}
-          }}
-          
-          Only include children that cover at least one parent AC.
-    output:
-      - ac_coverage_map
-    structured_output: true
-    transition: EnrichHierarchyWithACs
-  - id: EnrichHierarchyWithACs
-    type: code
-    code:
-      type: fixed
-      value: |-
-        import json
-        
-        hierarchy_data = alita_state.get('hierarchy_data', {})
-        extracted_acs = alita_state.get('extracted_acs', {})
-        ac_coverage_map = alita_state.get('ac_coverage_map', {})
-        
-        # Extract nested if needed
-        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
-            hierarchy_data = hierarchy_data['hierarchy_data']
-        if isinstance(extracted_acs, dict) and 'extracted_acs' in extracted_acs:
-            extracted_acs = extracted_acs['extracted_acs']
-        if isinstance(ac_coverage_map, dict) and 'ac_coverage_map' in ac_coverage_map:
-            ac_coverage_map = ac_coverage_map['ac_coverage_map']
-        
-        acs_by_item = extracted_acs.get('acs_by_item', {})
-        coverage = ac_coverage_map.get('coverage_map', {})
-        
-        # Process Epic ACs
-        epic_id = str(hierarchy_data['epic']['id'])
-        if epic_id in acs_by_item:
-            own_acs = []
-            for idx, ac in enumerate(acs_by_item[epic_id], 1):
-                ac_entry = {
-                    'ac_id': f'{epic_id}-ac-{idx}',
-                    'text': ac['text'],
-                    'status': ac['status'],
-                    'source': ac['source'],
-                    'covered_by_children': []  # Will populate below
-                }
-                own_acs.append(ac_entry)
-            hierarchy_data['epic']['own_acs'] = own_acs
-        else:
-            hierarchy_data['epic']['own_acs'] = []
-        
-        # Process all items
-        for item_id, item in hierarchy_data['items'].items():
-            # Add own_acs (when item is a parent)
-            if item_id in acs_by_item:
-                own_acs = []
-                for idx, ac in enumerate(acs_by_item[item_id], 1):
-                    ac_entry = {
-                        'ac_id': f'{item_id}-ac-{idx}',
-                        'text': ac['text'],
-                        'status': ac['status'],
-                        'source': ac['source'],
-                        'covered_by_children': []
-                    }
-                    own_acs.append(ac_entry)
-                item['own_acs'] = own_acs
-            else:
-                item['own_acs'] = []
-            
-            # Add covered_parent_acs (when item is a child)
-            if item_id in coverage:
-                covered = []
-                for mapping in coverage[item_id]:
-                    covered.append({
-                        'parent_ac_id': f"{mapping['parent_id']}-ac-{mapping['parent_ac_index']}",
-                        'parent_id': mapping['parent_id'],
-                        'parent_ac_index': mapping['parent_ac_index'],
-                        'confidence': mapping['confidence'],
-                        'reason': mapping['reason']
-                    })
-                item['covered_parent_acs'] = covered
-            else:
-                item['covered_parent_acs'] = []
-        
-        # Populate covered_by_children in parent ACs
-        for item_id, item in hierarchy_data['items'].items():
-            if 'covered_parent_acs' in item:
-                for coverage_entry in item['covered_parent_acs']:
-                    parent_id = str(coverage_entry['parent_id'])
-                    parent_ac_idx = coverage_entry['parent_ac_index'] - 1  # Convert to 0-based
-                    
-                    # Find parent and update its AC
-                    if parent_id == epic_id:
-                        if parent_ac_idx < len(hierarchy_data['epic']['own_acs']):
-                            hierarchy_data['epic']['own_acs'][parent_ac_idx]['covered_by_children'].append(int(item_id))
-                    elif parent_id in hierarchy_data['items']:
-                        if parent_ac_idx < len(hierarchy_data['items'][parent_id]['own_acs']):
-                            hierarchy_data['items'][parent_id]['own_acs'][parent_ac_idx]['covered_by_children'].append(int(item_id))
-        
-        {'hierarchy_data': hierarchy_data}
-    input:
-      - hierarchy_data
-      - extracted_acs
-      - ac_coverage_map
-    output:
-      - hierarchy_data
-    structured_output: true
     transition: CalculateReadiness
   - id: CalculateReadiness
     type: code
@@ -837,71 +598,6 @@ nodes:
                 'percentage': round(type_pct, 1)
             })
 
-        # ===== NEW AC METRICS CALCULATION =====
-        total_acs = 0
-        completed_acs = 0
-        uncovered_acs = []
-
-        # Count epic ACs
-        epic_acs = epic.get('own_acs', [])
-        for ac in epic_acs:
-            total_acs += 1
-            if ac['status'] == 'done':
-                completed_acs += 1
-            if len(ac.get('covered_by_children', [])) == 0:
-                uncovered_acs.append({
-                    'item_id': epic['id'],
-                    'item_title': epic['title'],
-                    'ac_text': ac['text'],
-                    'ac_id': ac['ac_id']
-                })
-
-        # Count item ACs
-        for item_id, item in items.items():
-            item_acs = item.get('own_acs', [])
-            for ac in item_acs:
-                total_acs += 1
-                if ac['status'] == 'done':
-                    completed_acs += 1
-                if len(ac.get('covered_by_children', [])) == 0:
-                    uncovered_acs.append({
-                        'item_id': item['id'],
-                        'item_title': item['title'],
-                        'ac_text': ac['text'],
-                        'ac_id': ac['ac_id']
-                    })
-
-        ac_completion_percentage = (completed_acs / total_acs * 100) if total_acs > 0 else 0
-
-        # Determine AC readiness status
-        if total_acs == 0:
-            ac_readiness_status = 'AC_NOT_DEFINED'
-            ac_status_reason = 'No acceptance criteria detected'
-        elif ac_completion_percentage >= 100:
-            ac_readiness_status = 'AC_COMPLETE'
-            ac_status_reason = 'All acceptance criteria satisfied'
-        elif ac_completion_percentage >= 90:
-            ac_readiness_status = 'AC_READY'
-            ac_status_reason = 'Nearly done, minor ACs pending'
-        elif ac_completion_percentage >= 50:
-            ac_readiness_status = 'AC_IN_PROGRESS'
-            ac_status_reason = 'Significant ACs still open'
-        else:
-            ac_readiness_status = 'AC_AT_RISK'
-            ac_status_reason = 'Majority of ACs not yet satisfied'
-
-        # Build AC metrics object
-        ac_metrics = {
-            'total_acs': total_acs,
-            'completed_acs': completed_acs,
-            'pending_acs': total_acs - completed_acs,
-            'ac_completion_percentage': round(ac_completion_percentage, 1),
-            'uncovered_acs_count': len(uncovered_acs),
-            'uncovered_acs': uncovered_acs,
-            'ac_readiness_status': ac_readiness_status,
-            'ac_status_reason': ac_status_reason
-        }
-
         # Build formatted markdown report
         report_lines = []
         report_lines.append(f"# Readiness report for Epic {epic.get('id')}:\n")
@@ -911,20 +607,11 @@ nodes:
         report_lines.append(f"State: {epic.get('state')}")
         report_lines.append(f"URL: {epic.get('url')}\n")
 
-        report_lines.append("## Work Item Readiness")
+        report_lines.append("## Readiness status")
         report_lines.append(f"Total work items (including epic): {total_items}")
         report_lines.append(f"Completed items: {completed_items}")
         report_lines.append(f"Completion: {round(completion_percentage, 1)}% ({completed_items} / {total_items})")
         report_lines.append(f"Overall status: {readiness_status} ({status_reason})\n")
-
-        # Add AC metrics section
-        report_lines.append("## Acceptance Criteria Readiness")
-        report_lines.append(f"Total ACs identified: {total_acs}")
-        report_lines.append(f"Completed ACs: {completed_acs} ✅")
-        report_lines.append(f"Pending ACs: {total_acs - completed_acs} ❌")
-        report_lines.append(f"AC completion: {round(ac_completion_percentage, 1)}%")
-        report_lines.append(f"AC readiness status: {ac_readiness_status} ({ac_status_reason})")
-        report_lines.append(f"Uncovered ACs (no children addressing them): {len(uncovered_acs)}\n")
 
         # Add blockers section
         if blockers:
@@ -956,7 +643,6 @@ nodes:
             'breakdown_by_type': type_breakdown,
             'blockers': blockers,
             'max_hierarchy_level': hierarchy_data.get('metadata', {}).get('max_level', 0),
-            'ac_metrics': ac_metrics,
             'formatted_report': formatted_report
         }
 
@@ -1038,40 +724,6 @@ nodes:
         md_lines.append("\n(Status icons: ✅ Done/Closed/Completed — ⚠️ In Progress/Active — ❌ To Do/New/other)")
 
         hierarchy_markdown = "\n".join(md_lines)
-
-        # Add AC Coverage Section
-        ac_lines = []
-        ac_lines.append("\n\n## Acceptance Criteria Coverage\n")
-
-        # Epic ACs
-        epic_acs = epic.get('own_acs', [])
-        if epic_acs:
-            ac_lines.append(f"### Epic ACs (ID {epic['id']})")
-            for idx, ac in enumerate(epic_acs, 1):
-                status_icon = '✅' if ac['status'] == 'done' else '❌'
-                coverage_info = ""
-                if ac.get('covered_by_children'):
-                    child_ids = ', '.join(map(str, ac['covered_by_children']))
-                    coverage_info = f" (covered by: {child_ids})"
-                ac_lines.append(f"- AC {idx}: {ac['text']} {status_icon}{coverage_info}")
-            ac_lines.append("")
-
-        # Item ACs
-        for item_id, item in items.items():
-            item_acs = item.get('own_acs', [])
-            if item_acs:
-                ac_lines.append(f"### {item['type']} ACs (ID {item_id}): {item['title']}")
-                for idx, ac in enumerate(item_acs, 1):
-                    status_icon = '✅' if ac['status'] == 'done' else '❌'
-                    coverage_info = ""
-                    if ac.get('covered_by_children'):
-                        child_ids = ', '.join(map(str, ac['covered_by_children']))
-                        coverage_info = f" (covered by: {child_ids})"
-                    ac_lines.append(f"- AC {idx}: {ac['text']} {status_icon}{coverage_info}")
-                ac_lines.append("")
-
-        if len(ac_lines) > 2:  # More than just the header
-            hierarchy_markdown += "\n".join(ac_lines)
 
         {
             'hierarchy_markdown': hierarchy_markdown
