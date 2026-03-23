@@ -288,8 +288,9 @@ class SensitiveToolGuardMiddleware(Middleware):
             'policy_message': sensitive_tool_context['policy_message'],
         }
 
-        # Store pending messages in interrupt payload (internal only — stripped
-        # before sending to UI by the existing 'tool_args_raw' filter pattern).
+        # Store pending messages in interrupt payload (internal only). This field
+        # is explicitly filtered/stripped by downstream interrupt/UI handling
+        # logic to ensure it is never exposed to end users.
         if serialized_pending:
             interrupt_payload['_pending_messages'] = serialized_pending
 
