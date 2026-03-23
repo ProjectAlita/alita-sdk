@@ -1,17 +1,16 @@
-Fetches complete Azure DevOps work item hierarchies with all descendant items recursively. Returns structured JSON with parent-child relationships, hierarchy levels, readiness analysis, and visual tree representation.
- 
+Fetches Azure DevOps work item hierarchies with all descendants recursively. Returns a list of lists with work item IDs. Each work item is fetched with complete hierarchy structure, including parent-child relationships.
 **Required Input (JSON object):**
 ```json
 {
   "ids": [9, 42, 123],
-  "expand_output": true
+  "output_expand": true,
+  "output_name": "my_run"
 }
 ```
-
-- `ids` (array of integers): List of work item IDs to fetch. Examples: `[9]`, `[42, 123]`, `[9, 42, 123, 456]`
-- `expand_output` (boolean): Controls output detail level. `true` for full details, `false` for summary.
- 
-**Optional Input:**
-- `artifact_filepath` (string): Base file path for saving data. Auto-generated if not provided (format: `epic_{id}_hierarchy_{timestamp}.json`). When processing multiple IDs, each gets a separate numbered file.
- 
-**Output:** For each work item ID, saves two files - JSON with complete hierarchy data including readiness report, and Markdown with visual tree structure and status icons.
+- `ids` (integers): List of work item IDs to process. Examples: `[9]`, `[9, 42, 456]`
+- `output_expand` (boolean): Controls output content. `true` = include all descendants, `false` = only input IDs
+- `output_name` (string, optional): Output identifier/postfix for file names. Auto-generated random 8-character string if not provided.
+**Output Format Example:**
+```json
+[[9_feature, 10, 11, 12, 13], [42_feature]]
+```

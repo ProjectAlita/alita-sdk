@@ -29,9 +29,12 @@ state:
   processed_results:
     type: list
     value: []
-  expand_output:
+  output_expand:
     type: bool
     value: true
+  output_name:
+    type: string
+    value: ''
   error_message:
     type: string
     value: ''
@@ -79,10 +82,11 @@ nodes:
         if not input_str:
             result = {
                 "validation_passed": False,
-                "error_message": "Input is required. Please provide JSON: {\"ids\": [9, 42], \"expand_output\": true}",
+                "error_message": "Input is required. Please provide JSON: {\"ids\": [9, 42], \"output_expand\": true}",
                 "epic_ids_to_process": [],
                 "current_epic_index": 0,
-                "expand_output": True
+                "output_expand": True,
+                "output_name": ""
             }
         else:
             # Step 2: Try to parse JSON
@@ -91,55 +95,72 @@ nodes:
             except json.JSONDecodeError:
                 result = {
                     "validation_passed": False,
-                    "error_message": "Input is not parsable json. Expected format: {\"ids\": [9, 42], \"expand_output\": true}",
+                    "error_message": "Input is not parsable json. Expected format: {\"ids\": [9, 42], \"output_expand\": true, \"output_name\": \"optional\"}",
                     "epic_ids_to_process": [],
                     "current_epic_index": 0,
-                    "expand_output": True
+                    "output_expand": True,
+                    "output_name": ""
                 }
             else:
                 # Step 3: Validate JSON structure and types
                 if not isinstance(input_data, dict):
                     result = {
                         "validation_passed": False,
-                        "error_message": "Input must be a JSON object. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "error_message": "Input must be a JSON object. Expected: {\"ids\": [9, 42], \"output_expand\": true}",
                         "epic_ids_to_process": [],
                         "current_epic_index": 0,
-                        "expand_output": True
+                        "output_expand": True,
+                        "output_name": ""
                     }
                 elif 'ids' not in input_data:
                     result = {
                         "validation_passed": False,
-                        "error_message": "Missing required field 'ids'. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "error_message": "Missing required field 'ids'. Expected: {\"ids\": [9, 42], \"output_expand\": true}",
                         "epic_ids_to_process": [],
                         "current_epic_index": 0,
-                        "expand_output": input_data.get('expand_output', True)
+                        "output_expand": input_data.get('output_expand', True),
+                        "output_name": input_data.get('output_name', '')
                     }
                 elif not isinstance(input_data['ids'], list):
                     result = {
                         "validation_passed": False,
-                        "error_message": "Field 'ids' must be an array. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "error_message": "Field 'ids' must be an array. Expected: {\"ids\": [9, 42], \"output_expand\": true}",
                         "epic_ids_to_process": [],
                         "current_epic_index": 0,
-                        "expand_output": input_data.get('expand_output', True)
+                        "output_expand": input_data.get('output_expand', True),
+                        "output_name": input_data.get('output_name', '')
                     }
                 elif len(input_data['ids']) == 0:
                     result = {
                         "validation_passed": False,
-                        "error_message": "Field 'ids' must contain at least one element. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "error_message": "Field 'ids' must contain at least one element. Expected: {\"ids\": [9, 42], \"output_expand\": true}",
                         "epic_ids_to_process": [],
                         "current_epic_index": 0,
-                        "expand_output": input_data.get('expand_output', True)
+                        "output_expand": input_data.get('output_expand', True),
+                        "output_name": input_data.get('output_name', '')
                     }
                 else:
-                    # Step 4: Validate expand_output type if provided
-                    expand_output = input_data.get('expand_output', True)
-                    if 'expand_output' in input_data and not isinstance(expand_output, bool):
+                    # Step 4: Validate output_expand type if provided
+                    output_expand = input_data.get('output_expand', True)
+                    output_name = input_data.get('output_name', '')
+                    
+                    if 'output_expand' in input_data and not isinstance(output_expand, bool):
                         result = {
                             "validation_passed": False,
-                            "error_message": "Field 'expand_output' must be a boolean (true or false). Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                            "error_message": "Field 'output_expand' must be a boolean (true or false). Expected: {\"ids\": [9, 42], \"output_expand\": true}",
                             "epic_ids_to_process": [],
                             "current_epic_index": 0,
-                            "expand_output": True
+                            "output_expand": True,
+                            "output_name": ""
+                        }
+                    elif 'output_name' in input_data and not isinstance(output_name, str):
+                        result = {
+                            "validation_passed": False,
+                            "error_message": "Field 'output_name' must be a string. Expected: {\"ids\": [9, 42], \"output_expand\": true, \"output_name\": \"my_run\"}",
+                            "epic_ids_to_process": [],
+                            "current_epic_index": 0,
+                            "output_expand": True,
+                            "output_name": ""
                         }
                     else:
                         # Step 5: Validate ID values
@@ -162,7 +183,8 @@ nodes:
                                 "error_message": f"Invalid work item ID(s): {', '.join(invalid_ids)}. All IDs must be positive integers.",
                                 "epic_ids_to_process": [],
                                 "current_epic_index": 0,
-                                "expand_output": expand_output
+                                "output_expand": output_expand,
+                                "output_name": output_name
                             }
                         elif not epic_ids:
                             result = {
@@ -170,17 +192,25 @@ nodes:
                                 "error_message": "No valid work item IDs found. All IDs must be positive integers.",
                                 "epic_ids_to_process": [],
                                 "current_epic_index": 0,
-                                "expand_output": expand_output
+                                "output_expand": output_expand,
+                                "output_name": output_name
                             }
                         else:
-                            # All validations passed
+                            # All validations passed - generate output_name if not provided
+                            import random
+                            import string
+                            
+                            if not output_name or not output_name.strip():
+                                output_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                            
                             result = {
                                 "validation_passed": True,
                                 "error_message": "",
                                 "epic_ids_to_process": epic_ids,
                                 "current_epic_index": 0,
                                 "processed_results": [],
-                                "expand_output": expand_output
+                                "output_expand": output_expand,
+                                "output_name": output_name
                             }
         
         result
@@ -192,7 +222,8 @@ nodes:
       - epic_ids_to_process
       - current_epic_index
       - processed_results
-      - expand_output
+      - output_expand
+      - output_name
     structured_output: true
     transition: ValidationRouter
   - id: ValidationRouter
@@ -876,33 +907,18 @@ nodes:
     code:
       type: fixed
       value: |-
-        from datetime import datetime
-
         epic_id = alita_state.get('epic_id', 0)
-        user_provided_filepath = alita_state.get('artifact_filepath', '').strip()
+        output_name = alita_state.get('output_name', 'unknown')
         
-        # If user provided a filepath, use it as base and add epic_id
-        # Otherwise generate default filename
-        if user_provided_filepath:
-            # If user provided path has extension, insert epic_id before extension
-            if '.' in user_provided_filepath:
-                parts = user_provided_filepath.rsplit('.', 1)
-                filename = f"{parts[0]}_epic_{epic_id}.{parts[1]}"
-            else:
-                filename = f"{user_provided_filepath}_epic_{epic_id}.json"
-        else:
-            # Generate default filename with timestamp
-            prefix = f"epic_{epic_id}_hierarchy"
-            now = datetime.now()
-            timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
-            filename = f"{prefix}_{timestamp}.json"
+        # New naming pattern: {id}_feature_{output_name}.json
+        filename = f"{epic_id}_feature_{output_name}.json"
 
         {
             "artifact_filepath": filename
         }
     input:
       - epic_id
-      - artifact_filepath
+      - output_name
     output:
       - artifact_filepath
     structured_output: true
@@ -983,33 +999,39 @@ nodes:
     code:
       type: fixed
       value: |-
-        artifact_filepath = alita_state.get('artifact_filepath', '')
-        md_filepath = alita_state.get('md_filepath', '')
         epic_id = alita_state.get('epic_id')
-        readiness_report = alita_state.get('readiness_report', {})
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        output_expand = alita_state.get('output_expand', True)
         processed_results = alita_state.get('processed_results', [])
         
         # Extract nested if needed
         if isinstance(processed_results, dict) and 'processed_results' in processed_results:
             processed_results = processed_results['processed_results']
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
         
-        # Add current result to list
-        current_result = {
-            "item_id": epic_id,
-            "filepath": artifact_filepath,
-            "md_filepath": md_filepath,
-            "readiness_report": readiness_report
-        }
-        processed_results.append(current_result)
+        # Build list of IDs for this epic
+        if output_expand:
+            # Include parent ID with _feature suffix + all descendant IDs
+            result_ids = [f"{epic_id}_feature"]
+            items = hierarchy_data.get('items', {})
+            # Add all item IDs (descendants) without suffix
+            for item_id_str in items.keys():
+                result_ids.append(int(item_id_str))
+        else:
+            # Only the input ID with _feature suffix
+            result_ids = [f"{epic_id}_feature"]
+        
+        # Add this epic's ID list to processed results
+        processed_results.append(result_ids)
         
         {
             "processed_results": processed_results
         }
     input:
-      - artifact_filepath
-      - md_filepath
       - epic_id
-      - readiness_report
+      - hierarchy_data
+      - output_expand
       - processed_results
     output:
       - processed_results
@@ -1055,13 +1077,8 @@ nodes:
             # No results - this means validation failed
             operation_result = '{"operation": "fetch_hierarchy", "status": "error", "error": "No results processed"}'
         else:
-            # Format all results
-            operation_result = json.dumps({
-                "operation": "fetch_hierarchy",
-                "status": "success",
-                "total_items_processed": len(processed_results),
-                "results": processed_results
-            })
+            # Return list of lists format: [[id1, ...], [id2, ...], ...]
+            operation_result = json.dumps(processed_results)
         
         {
             "operation_result": operation_result
@@ -1088,13 +1105,9 @@ nodes:
           * Be friendly and professional
           * Formulate final output clearly
           * For successful operations: 
-            - If multiple items were processed, list each one with its readiness report
-            - Display the formatted readiness report from each result's readiness_report.formatted_report
-            - Include file locations (JSON and MD) for each processed item
-            - Do NOT summarize or rewrite the reports - output them verbatim as markdown
-          * For single item operations:
-            - Display the formatted readiness report verbatim
-            - Include both file locations at the end
+            - Display the result as a JSON list of lists
+            - Each inner list represents one input ID and its descendants (if expanded)
+            - Format: [[id1, descendants...], [id2, descendants...], ...]
           * For errors: Provide clear explanation and suggest correct input format
           * Don't suggest further operations unless it's error recovery guidance
       task:
@@ -1103,9 +1116,8 @@ nodes:
           Operation result:
           {operation_result}
 
-          If this is a successful multi-item operation, display each item's formatted_report and file locations.
-          If this is a single item operation, display the formatted_report and file locations.
-          If this is an error, explain the issue and provide example input format.
+          If this is a successful operation, display the result as JSON list of lists.
+          If this is an error, explain the issue and provide the correct input format: {{"ids": [9, 42], "output_expand": true, "output_name": "optional"}}.
     output: []
     structured_output: false
     transition: END
