@@ -15,6 +15,9 @@ from ..langchain.utils import propagate_the_input_mapping, safe_serialize, objec
 
 logger = logging.getLogger(__name__)
 
+# State key used to signal that a FunctionTool node was blocked
+PIPELINE_BLOCKED_KEY = '_pipeline_blocked'
+
 def replace_escaped_newlines(data):
     """
         Replace \\n with \n in all string values recursively.
@@ -134,6 +137,72 @@ alita_state = json.loads(state_json)
         """Check if the current tool is a PyodideSandboxTool."""
         return self.tool.name.lower() == 'pyodide_sandbox'
 
+    @staticmethod
+    def _is_sensitive_tool_blocked(tool_result: Any) -> bool:
+        """Check if the tool result is a sensitive-tool blocked payload."""
+        if not isinstance(tool_result, str):
+            return False
+        try:
+            parsed = json.loads(tool_result)
+            return isinstance(parsed, dict) and parsed.get('type') == 'sensitive_tool_blocked'
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return False
+
+    def _build_blocked_termination(self, tool_result: str) -> dict:
+        """Build a clean termination result when a FunctionTool's tool is blocked.
+
+        Writes None/empty to all declared output variables so downstream nodes
+        don't receive corrupt blocked-result JSON. Adds a clear assistant
+        message and sets the ``_pipeline_blocked`` flag so the graph routes
+        to END.
+        """
+        try:
+            blocked = json.loads(tool_result)
+        except (json.JSONDecodeError, TypeError):
+            blocked = {}
+
+        blocked_tool = blocked.get('blocked_tool_name', self.tool.name)
+        toolkit_type = blocked.get('blocked_toolkit_type', '')
+        node_name = self.name or ''
+
+        # Build a clean, user-friendly markdown message
+        parts = [f"**Pipeline stopped** — the action **{blocked_tool}**"]
+        details = []
+        if toolkit_type:
+            details.append(f"toolkit type: *{toolkit_type}*")
+        if node_name:
+            details.append(f"node: *{node_name}*")
+        if details:
+            parts[0] += f" ({', '.join(details)})"
+        parts[0] += " was **blocked** by user."
+
+        parts.append(
+            f"Downstream nodes that depend on `{blocked_tool}` output "
+            f"were skipped to prevent invalid data."
+        )
+        parts.append(
+            "> **Tip:** Regenerate this message to re-trigger the approval "
+            "request and try again."
+        )
+        message = "\n\n".join(parts)
+
+        result: dict[str, Any] = {
+            "messages": [{"role": "assistant", "content": message}],
+            PIPELINE_BLOCKED_KEY: message,
+        }
+
+        # Null-out all declared output variables
+        if self.output_variables:
+            for var in self.output_variables:
+                if var != "messages":
+                    result[var] = None
+
+        logger.warning(
+            "[PIPELINE] FunctionTool '%s' blocked — clean termination. Tool: %s",
+            self.name, blocked_tool,
+        )
+        return result
+
     def invoke(
             self,
             state: Union[str, dict, ToolCall],
@@ -161,6 +230,13 @@ alita_state = json.loads(state_json)
 
         try:
             tool_result = self.tool.invoke(func_args, config, **kwargs)
+
+            # If the tool was blocked by the sensitive-tool guard (user
+            # rejected), return a clean termination instead of propagating
+            # the blocked-result JSON as a real tool output.
+            if self._is_sensitive_tool_blocked(tool_result):
+                return self._build_blocked_termination(tool_result)
+
             dispatch_custom_event(
                 "on_function_tool_node", {
                     "input_mapping": self.input_mapping,

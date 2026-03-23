@@ -11,6 +11,7 @@ Directory layout (base_dir = tests/runtime/langchain/document_loaders/test_data/
 
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from pathlib import Path
@@ -69,11 +70,62 @@ def _rp_log(msg: str, *, attachment: Optional[Dict[str, Any]] = None) -> None:
     _RP_LOGGER.info(msg)
 
 
-def _load_documents_with_production_config(file_path: Path, config: Dict[str, Any]) -> List:
+def _get_llm_for_tests():
+    """Create LLM instance for image loader tests using env var.
+    
+    Returns None if DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS is not set or if
+    AlitaClient credentials are not configured.
+    
+    Requires environment variables:
+    - DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: Model name
+    - DEPLOYMENT_URL: Alita deployment URL
+    - PROJECT_ID: Project ID
+    - ALITA_API_KEY: API key
+    """
+    model_name = os.getenv('DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS')
+    if not model_name:
+        return None
+    
+    # Check if required client credentials are available
+    deployment_url = os.getenv('DEPLOYMENT_URL')
+    project_id = os.getenv('PROJECT_ID')
+    api_key = os.getenv('ALITA_API_KEY')
+    
+    if not all([deployment_url, project_id, api_key]):
+        _rp_log(f"Warning: Cannot create LLM - missing credentials (DEPLOYMENT_URL, PROJECT_ID, or ALITA_API_KEY)")
+        return None
+    
+    try:
+        from alita_sdk.runtime.clients.client import AlitaClient
+        client = AlitaClient(
+            base_url=deployment_url,
+            project_id=int(project_id),
+            auth_token=api_key
+        )
+        llm = client.get_llm(
+            model_name=model_name,
+            model_config={
+                'temperature': 0.7,
+                'max_tokens': 2000
+            }
+        )
+        _rp_log(f"LLM instance created: {model_name}")
+        return llm
+    except Exception as e:
+        _rp_log(f"Warning: Failed to create LLM instance: {e}")
+        return None
+
+
+def _load_documents_with_production_config(file_path: Path, config: Dict[str, Any], llm=None) -> List:
     """Load documents using production configuration logic.
     
     This replicates the logic from process_content_by_type but uses the actual
     file path instead of creating a temp file, so metadata contains correct paths.
+    
+    Args:
+        file_path: Path to the file to load
+        config: Configuration dict from test input
+        llm: Optional LLM instance for image/multimodal loaders
     """
     from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map, LoaderProperties
     
@@ -98,7 +150,7 @@ def _load_documents_with_production_config(file_path: Path, config: Dict[str, An
     
     # Handle LLM and prompt placeholders
     if LoaderProperties.LLM.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.LLM.value):
-        loader_kwargs['llm'] = None  # No LLM in tests
+        loader_kwargs['llm'] = llm  # Use provided LLM instance
     if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value):
         from alita_sdk.tools.utils.content_parser import image_processing_prompt
         loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
@@ -124,11 +176,12 @@ def _load_expected_documents_for_test(baseline_path: Path) -> List:
         return docs
 
 
-def _load_actual_documents_for_test(file_path: Path, config: Dict[str, Any]) -> List:
+def _load_actual_documents_for_test(file_path: Path, config: Dict[str, Any], llm=None) -> List:
     with rp_step(f"Load actual documents from source {file_path}"):
         from loader_test_utils import serialize_documents
-        docs = _load_documents_with_production_config(file_path, config)
-        _rp_log(f"Loaded {len(docs)} actual document(s) with config: {config or {}}")
+        docs = _load_documents_with_production_config(file_path, config, llm=llm)
+        llm_info = f" with LLM={type(llm).__name__}" if llm else ""
+        _rp_log(f"Loaded {len(docs)} actual document(s) with config: {config or {}}{llm_info}")
         _rp_log(
             f"Actual documents ({len(docs)})",
             attachment={
@@ -148,10 +201,17 @@ def _save_actual_documents_for_test(actual_docs: List, actual_output_path: Path)
         _rp_log(f"Saved {len(actual_docs)} document(s) to {actual_output_path}")
 
 
-def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_name: str):
+def _compare_documents_for_test(actual_docs: List, expected_docs: List, loader_name: str, llm=None, debug_log_path: str = None, input_context: str = None):
     with rp_step(f"Compare actual output with baseline for {loader_name}"):
         from loader_test_utils import compare_documents
-        cmp = compare_documents(actual_docs, expected_docs, loader_name=loader_name)
+        
+        # Log validation method
+        validation_method = "LLM-based semantic validation" if llm is not None else "Similarity-based comparison"
+        if input_context and llm:
+            validation_method += f" (with input context: {input_context[:50]}...)"
+        _rp_log(f"Using {validation_method} for content comparison")
+        
+        cmp = compare_documents(actual_docs, expected_docs, loader_name=loader_name, llm=llm, debug_log_path=debug_log_path, input_context=input_context)
         status = "PASSED" if cmp.passed else "FAILED"
         _rp_log(f"Result: {status} | actual={cmp.actual_count} docs, expected={cmp.expected_count} docs")
         if cmp.diffs:
@@ -232,11 +292,13 @@ def run_single_config_test(
     file_path: Path,
     baseline_path: Path,
     actual_output_path: Path,
+    llm=None,
 ) -> TestResult:
     """Execute loader for one config, save actual output, compare against baseline.
 
     baseline_path      - data/[LOADER]/output/[filename]  (expected/stable)
     actual_output_path - output_[TIMESTAMP]/[LOADER]/[filename]  (this run)
+    llm                - Optional LLM instance for multimodal loaders
     """
 
     result = TestResult(
@@ -264,7 +326,7 @@ def run_single_config_test(
 
     try:
         # Use production configuration logic while preserving file paths
-        actual_docs = _load_actual_documents_for_test(file_path, config)
+        actual_docs = _load_actual_documents_for_test(file_path, config, llm=llm)
         result.actual_doc_count = len(actual_docs)
     except Exception as exc:
         result.error = f"Loader exception: {exc}"
@@ -276,7 +338,28 @@ def run_single_config_test(
     except Exception as exc:
         logger.warning(f"Could not save actual output to {actual_output_path}: {exc}")
 
-    cmp = _compare_documents_for_test(actual_docs, expected_docs, loader_name=loader_name)
+    # Only use LLM for comparison if config explicitly uses LLM for loading
+    # This ensures OCR-only configs (use_llm: false) use similarity-based comparison
+    comparison_llm = None
+    debug_log_path = None
+    input_context = None
+    
+    if config.get("use_llm"):
+        # Config uses LLM - use LLM for semantic validation in comparison
+        comparison_llm = llm
+        
+        # Construct debug log path for LLM validation comparison
+        if llm is not None:
+            debug_log_path = str(actual_output_path.parent / f"llm_validation_debug_{input_name}_config_{config_index}.jsonl")
+        
+        # Extract input context (prompt) from config for better LLM validation
+        if "prompt" in config:
+            input_context = config["prompt"]
+        elif config.get("prompt_default"):
+            from alita_sdk.tools.utils.content_parser import image_processing_prompt
+            input_context = image_processing_prompt
+
+    cmp = _compare_documents_for_test(actual_docs, expected_docs, loader_name=loader_name, llm=comparison_llm, debug_log_path=debug_log_path, input_context=input_context)
     result.passed = cmp.passed
     result.diffs_summary = cmp.summary() if not cmp.passed else None
     return result

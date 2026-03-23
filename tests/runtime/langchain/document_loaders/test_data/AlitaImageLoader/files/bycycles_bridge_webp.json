@@ -1,0 +1,23 @@
+{
+  "file_path": "../files/bycycles_bridge.webp",
+  "tags": ["loader_image", "feature_llm", "feature_multimodal", "format_webp", "outdoor_scene"],
+  "configs": [
+    {
+      "_name": "ocr_only",
+      "use_llm": false,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_default_prompt",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_scene_description",
+      "use_llm": true,
+      "prompt": "Describe this outdoor scene in detail including: 1) Main subjects (bicycles, bridge, water, landscape), 2) Setting and location type, 3) Colors and lighting conditions, 4) Any text, watermarks, or attribution visible, 5) Atmosphere and mood of the scene.",
+      "max_tokens": 2048
+    }
+  ]
+}

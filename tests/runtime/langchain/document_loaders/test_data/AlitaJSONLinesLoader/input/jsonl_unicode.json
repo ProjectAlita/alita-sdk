@@ -1,0 +1,8 @@
+{
+  "tags": ["loader:jsonlines", "content:unicode"],
+  "file_path": "../files/jsonl_unicode.jsonl",
+  "configs": [
+    {},
+    {"max_tokens": 256}
+  ]
+}

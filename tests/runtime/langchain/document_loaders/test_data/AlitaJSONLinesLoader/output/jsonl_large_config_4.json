@@ -1,0 +1,107 @@
+[
+  {
+    "page_content": "{\"log_id\": 1, \"timestamp\": \"2026-03-12T10:00:00Z\", \"level\": \"INFO\", \"service\": \"api-gateway\", \"message\": \"Request received from client 192.168.1.100 for endpoint /api/v1/users\", \"metadata\": {\"request_id\": \"req-001\", \"user_agent\": \"Mozilla/5.0\", \"method\": \"GET\", \"status\": 200, \"duration_ms\": 45}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 2, \"timestamp\": \"2026-03-12T10:00:01Z\", \"level\": \"INFO\", \"service\": \"auth-service\", \"message\": \"User authentication successful for user_id=12345\", \"metadata\": {\"request_id\": \"req-002\", \"user_id\": 12345, \"session_id\": \"sess-abc123\", \"ip\": \"192.168.1.100\", \"method\": \"POST\", \"endpoint\": \"/auth/login\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 3, \"timestamp\": \"2026-03-12T10:00:02Z\", \"level\": \"WARN\", \"service\": \"database\", \"message\": \"Query execution time exceeded threshold: 500ms for table users\", \"metadata\": {\"request_id\": \"req-003\", \"query\": \"SELECT * FROM users WHERE status='active'\", \"execution_time_ms\": 523, \"rows_returned\": 1500, \"table\": \"users\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 4, \"timestamp\": \"2026-03-12T10:00:03Z\", \"level\": \"ERROR\", \"service\": \"payment-processor\", \"message\": \"Payment transaction failed due to insufficient funds\", \"metadata\": {\"request_id\": \"req-004\", \"transaction_id\": \"txn-xyz789\", \"user_id\": 67890, \"amount\": 99.99, \"currency\": \"USD\", \"error_code\": \"INSUFFICIENT_FUNDS\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 5, \"timestamp\": \"2026-03-12T10:00:04Z\", \"level\": \"INFO\", \"service\": \"notification-service\", \"message\": \"Email notification sent successfully to user\", \"metadata\": {\"request_id\": \"req-005\", \"user_id\": 12345, \"email\": \"user@example.com\", \"template\": \"welcome_email\", \"delivery_status\": \"sent\", \"provider\": \"sendgrid\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 6, \"timestamp\": \"2026-03-12T10:00:05Z\", \"level\": \"DEBUG\", \"service\": \"cache-layer\", \"message\": \"Cache hit for key user:12345:profile\", \"metadata\": {\"request_id\": \"req-006\", \"cache_key\": \"user:12345:profile\", \"ttl_seconds\": 3600, \"hit_count\": 15, \"backend\": \"redis\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 7, \"timestamp\": \"2026-03-12T10:00:06Z\", \"level\": \"INFO\", \"service\": \"api-gateway\", \"message\": \"Request received from client 192.168.1.101 for endpoint /api/v1/products\", \"metadata\": {\"request_id\": \"req-007\", \"user_agent\": \"curl/7.68.0\", \"method\": \"GET\", \"status\": 200, \"duration_ms\": 32}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 8, \"timestamp\": \"2026-03-12T10:00:07Z\", \"level\": \"WARN\", \"service\": \"rate-limiter\", \"message\": \"Rate limit approaching threshold for user_id=12345\", \"metadata\": {\"request_id\": \"req-008\", \"user_id\": 12345, \"current_count\": 95, \"limit\": 100, \"window_seconds\": 60, \"endpoint\": \"/api/v1/users\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 9, \"timestamp\": \"2026-03-12T10:00:08Z\", \"level\": \"ERROR\", \"service\": \"storage-service\", \"message\": \"Failed to upload file to S3 bucket\", \"metadata\": {\"request_id\": \"req-009\", \"bucket\": \"user-uploads\", \"file_name\": \"document.pdf\", \"file_size_bytes\": 2048000, \"error\": \"NetworkError: Connection timeout\", \"retry_count\": 3}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 10, \"timestamp\": \"2026-03-12T10:00:09Z\", \"level\": \"INFO\", \"service\": \"analytics\", \"message\": \"Event tracked for user interaction\", \"metadata\": {\"request_id\": \"req-010\", \"user_id\": 12345, \"event_type\": \"page_view\", \"page\": \"/dashboard\", \"session_duration_seconds\": 120, \"referrer\": \"https://google.com\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 11, \"timestamp\": \"2026-03-12T10:00:10Z\", \"level\": \"INFO\", \"service\": \"api-gateway\", \"message\": \"Request received from client 192.168.1.102 for endpoint /api/v1/orders\", \"metadata\": {\"request_id\": \"req-011\", \"user_agent\": \"PostmanRuntime/7.28.4\", \"method\": \"POST\", \"status\": 201, \"duration_ms\": 78}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 12, \"timestamp\": \"2026-03-12T10:00:11Z\", \"level\": \"DEBUG\", \"service\": \"load-balancer\", \"message\": \"Health check passed for backend server\", \"metadata\": {\"request_id\": \"req-012\", \"server\": \"app-server-01\", \"ip\": \"10.0.1.100\", \"response_time_ms\": 5, \"status\": \"healthy\", \"last_check\": \"2026-03-12T10:00:11Z\"}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 13, \"timestamp\": \"2026-03-12T10:00:12Z\", \"level\": \"INFO\", \"service\": \"auth-service\", \"message\": \"User logged out successfully\", \"metadata\": {\"request_id\": \"req-013\", \"user_id\": 12345, \"session_id\": \"sess-abc123\", \"session_duration_seconds\": 720}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 14, \"timestamp\": \"2026-03-12T10:00:13Z\", \"level\": \"WARN\", \"service\": \"database\", \"message\": \"Connection pool running low on available connections\", \"metadata\": {\"request_id\": \"req-014\", \"pool_size\": 20, \"active_connections\": 18, \"idle_connections\": 2, \"pending_requests\": 5}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  },
+  {
+    "page_content": "{\"log_id\": 15, \"timestamp\": \"2026-03-12T10:00:14Z\", \"level\": \"ERROR\", \"service\": \"external-api\", \"message\": \"Third-party API call failed with 503 Service Unavailable\", \"metadata\": {\"request_id\": \"req-015\", \"api_endpoint\": \"https://api.thirdparty.com/v1/data\", \"status_code\": 503, \"retry_after_seconds\": 60, \"attempt\": 2}}",
+    "metadata": {
+      "source": "tests/runtime/langchain/document_loaders/test_data/AlitaJSONLinesLoader/files/jsonl_large.jsonl",
+      "chunk_id": 1
+    }
+  }
+]

@@ -1,0 +1,52 @@
+{
+  "file_path": "../files/image_regular.jpg",
+  "tags": ["loader_image", "feature_llm", "feature_multimodal"],
+  "configs": [
+    {
+      "use_llm": false,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_default_prompt_high_tokens",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_prompt_describe",
+      "use_llm": true,
+      "prompt": "Describe this image in detail, including all visible objects, colors, and text.",
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_prompt_structured",
+      "use_llm": true,
+      "prompt": "Analyze this image and provide: 1) Main subject, 2) Colors used, 3) Text visible, 4) Purpose/context",
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_prompt_brief",
+      "use_llm": true,
+      "prompt": "Provide a brief 2-3 sentence description of this image.",
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_prompt_extract_text",
+      "use_llm": true,
+      "prompt": "Extract and list all visible text from this image, maintaining the original formatting where possible.",
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_prompt_json_format",
+      "use_llm": true,
+      "prompt": "Describe this image in JSON format with keys: subject, colors, text_content, estimated_age_group, brand_visible",
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_default_prompt_minimal_tokens",
+      "use_llm": true,
+      "prompt": "Provide description (just general descriptions) of this image in around 1000 tokens.",
+      "max_tokens": 256
+    }
+  ]
+}

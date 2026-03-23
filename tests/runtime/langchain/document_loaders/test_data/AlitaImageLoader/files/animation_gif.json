@@ -1,0 +1,23 @@
+{
+  "file_path": "../files/animation.gif",
+  "tags": ["loader_image", "feature_llm", "feature_multimodal", "format_gif", "animated"],
+  "configs": [
+    {
+      "_name": "ocr_only",
+      "use_llm": false,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_default_prompt",
+      "use_llm": true,
+      "prompt_default": true,
+      "max_tokens": 2048
+    },
+    {
+      "_name": "llm_custom_scene_analysis",
+      "use_llm": true,
+      "prompt": "Describe this animated scene including: 1) Main elements (house, landscape, sky objects), 2) Colors of each element, 3) Any animation or movement visible, 4) Overall atmosphere and style (cartoon, realistic, etc.).",
+      "max_tokens": 2048
+    }
+  ]
+}

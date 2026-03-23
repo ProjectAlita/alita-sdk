@@ -1,0 +1,10 @@
+{
+    "tags": ["loader:csv", "encoding:latin1"],
+    "file_path": "../files/csv_latin1.csv",
+    "configs": [
+        {},
+        {"max_tokens": 512},
+        {"raw_content": true},
+        {"raw_content": false, "max_tokens": 256}
+    ]
+}

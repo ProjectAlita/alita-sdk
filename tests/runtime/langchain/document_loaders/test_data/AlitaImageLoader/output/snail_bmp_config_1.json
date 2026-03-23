@@ -1,0 +1,8 @@
+[
+  {
+    "page_content": "This is an illustrated drawing of a snail. It has a bright yellow and brown spiral shell with black stripes, and a yellow-orange colored body with textured details. The snail's antennae are extended forward. The illustration style appears to be vintage, possibly from a 19th or early 20th century natural history book, with detailed linework and vivid colors typical of that period. The snail is positioned on what looks like a light gray or white surface.",
+    "metadata": {
+      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/snail.bmp"
+    }
+  }
+]
