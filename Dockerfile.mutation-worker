@@ -1,0 +1,23 @@
+# Mutation testing worker image.
+# Built on top of the existing SDK image so all dependencies are already present.
+# Each container runs a cosmic-ray HTTP worker that receives a single mutation
+# from the coordinator, executes the test suite, and returns the result.
+
+FROM ghcr.io/projectalita/alita-sdk:pyodide
+
+WORKDIR /app
+
+# Install cosmic-ray and pytest (not in the base image)
+RUN pip install --no-cache-dir cosmic-ray pytest
+
+# Copy source + tests into the container.
+# The coordinator mutates files inside the container, so each worker has its
+# own independent copy — no file-locking conflicts between workers.
+COPY alita_sdk/ ./alita_sdk/
+COPY tests/ ./tests/
+COPY pyproject.toml ./
+
+# Expose the worker port (mapped by docker-compose to 8001/8002/8003 on host)
+EXPOSE 8080
+
+CMD ["cosmic-ray", "--verbosity", "INFO", "http-worker", "--port", "8080"]

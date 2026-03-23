@@ -6,7 +6,7 @@
     "alita_title": "ado",
     "private": false
   },
-  "organization_url": "https://dev.azure.com/${ADO_ORG}",
+  "organization_url": "https://dev.azure.com/epameliteatest",
   "project": "${ADO_PROJECT}",
   "token": "${ADO_TOKEN}",
   "selected_tools": [
