@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 import logging
 from traceback import format_exc
@@ -28,6 +29,14 @@ logger = logging.getLogger(__name__)
 SENSITIVE_TOOL_BLOCKED_RESULT_TYPE = 'sensitive_tool_blocked'
 MAX_BLOCKED_TOOL_CONTINUATION_ATTEMPTS = 5
 BLOCKED_TOOL_CONTINUATION_NUDGE_MARKER = 'This is a continuation turn after the blocked action(s):'
+
+# ContextVar used by __perform_tool_calling to expose intermediate messages
+# accumulated during the current LLMNode execution.  The sensitive-tool guard
+# middleware reads this before calling interrupt() so the messages can be
+# persisted in the checkpoint and restored on resume.
+_PENDING_TOOL_MESSAGES: contextvars.ContextVar[list] = contextvars.ContextVar(
+    '_pending_tool_messages', default=[],
+)
 
 
 # def _is_thinking_model(llm_client: Any) -> bool:
@@ -1492,6 +1501,13 @@ class LLMNode(BaseTool):
         new_messages = messages + [completion]
         iteration = 0
 
+        # Track the number of input messages so we can compute intermediate
+        # messages produced during this execution (for HITL checkpoint restore).
+        _input_msg_count = len(messages)
+
+        # Reset the pending-messages contextvar at the start of each execution.
+        _PENDING_TOOL_MESSAGES.set([])
+
         # Extra tool lookup table populated after a blocked-tool continuation turn.
         # In lazy-tools mode the regular get_filtered_tools() returns only
         # meta-tools, so direct continuation tool calls would fail to resolve.
@@ -1558,6 +1574,12 @@ class LLMNode(BaseTool):
                     try:
                         logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
 
+                        # Expose accumulated intermediate messages BEFORE invoking
+                        # the tool.  If the tool triggers a sensitive-tool interrupt,
+                        # the guard reads this contextvar so the messages survive the
+                        # checkpoint and can be restored on resume.
+                        _PENDING_TOOL_MESSAGES.set(list(new_messages[_input_msg_count:]))
+
                         # Try async invoke first (for MCP tools), fallback to sync
                         tool_result = None
                         if hasattr(tool_to_execute, 'ainvoke'):
@@ -1620,8 +1642,11 @@ class LLMNode(BaseTool):
                         # GraphInterrupt (from interrupt()) and other graph-level
                         # signals must propagate to the graph executor.
                         # Reset auto-approve context before propagating.
+                        # NOTE: _PENDING_TOOL_MESSAGES was set right before invoke
+                        # and already consumed by the middleware's interrupt() call.
                         if _approved_token is not None:
                             reset_hitl_approved_tools(_approved_token)
+                        _PENDING_TOOL_MESSAGES.set([])
                         raise
                     except Exception as e:
                         import traceback
@@ -1758,6 +1783,7 @@ class LLMNode(BaseTool):
                 # Reset auto-approve context before propagating.
                 if _approved_token is not None:
                     reset_hitl_approved_tools(_approved_token)
+                _PENDING_TOOL_MESSAGES.set([])
                 raise
             except Exception as e:
                 error_str = str(e).lower()
@@ -2014,6 +2040,8 @@ class LLMNode(BaseTool):
         else:
             logger.info(f"Tool execution completed after {iteration} iterations")
 
+        # Clear the pending-messages contextvar on normal completion.
+        _PENDING_TOOL_MESSAGES.set([])
         return new_messages, current_completion
 
     def __get_struct_output_model(self, llm_client, pydantic_model, method: Literal["function_calling", "json_mode", "json_schema"] = "function_calling"):
