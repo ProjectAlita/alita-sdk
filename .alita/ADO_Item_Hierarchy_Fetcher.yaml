@@ -20,9 +20,24 @@ state:
   epic_id:
     type: int
     value: 0
+  epic_ids_to_process:
+    type: list
+    value: []
+  current_epic_index:
+    type: int
+    value: 0
+  processed_results:
+    type: list
+    value: []
+  expand_output:
+    type: bool
+    value: true
   error_message:
     type: string
     value: ''
+  has_more_epics:
+    type: bool
+    value: false
   has_more_levels:
     type: bool
     value: false
@@ -34,15 +49,6 @@ state:
     value: ''
   input:
     type: string
-  intent:
-    type: string
-    value: ''
-  level_items:
-    type: list
-    value: []
-  md_filepath:
-    type: string
-    value: ''
   operation_result:
     type: string
     value: ''
@@ -52,85 +58,205 @@ state:
   validation_passed:
     type: bool
     value: false
-entry_point: AnalyzeRequest
+  level_items:
+    type: list
+    value: []
+  md_filepath:
+    type: string
+    value: ''
+entry_point: ParseInput
 nodes:
-  - id: AnalyzeRequest
-    type: llm
+  - id: ParseInput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        input_str = alita_state.get('input', '').strip()
+        
+        # Step 1: Check if input is provided
+        if not input_str:
+            result = {
+                "validation_passed": False,
+                "error_message": "Input is required. Please provide JSON: {\"ids\": [9, 42], \"expand_output\": true}",
+                "epic_ids_to_process": [],
+                "current_epic_index": 0,
+                "expand_output": True
+            }
+        else:
+            # Step 2: Try to parse JSON
+            try:
+                input_data = json.loads(input_str)
+            except json.JSONDecodeError:
+                result = {
+                    "validation_passed": False,
+                    "error_message": "Input is not parsable json. Expected format: {\"ids\": [9, 42], \"expand_output\": true}",
+                    "epic_ids_to_process": [],
+                    "current_epic_index": 0,
+                    "expand_output": True
+                }
+            else:
+                # Step 3: Validate JSON structure and types
+                if not isinstance(input_data, dict):
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Input must be a JSON object. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "epic_ids_to_process": [],
+                        "current_epic_index": 0,
+                        "expand_output": True
+                    }
+                elif 'ids' not in input_data:
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Missing required field 'ids'. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "epic_ids_to_process": [],
+                        "current_epic_index": 0,
+                        "expand_output": input_data.get('expand_output', True)
+                    }
+                elif not isinstance(input_data['ids'], list):
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Field 'ids' must be an array. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "epic_ids_to_process": [],
+                        "current_epic_index": 0,
+                        "expand_output": input_data.get('expand_output', True)
+                    }
+                elif len(input_data['ids']) == 0:
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Field 'ids' must contain at least one element. Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                        "epic_ids_to_process": [],
+                        "current_epic_index": 0,
+                        "expand_output": input_data.get('expand_output', True)
+                    }
+                else:
+                    # Step 4: Validate expand_output type if provided
+                    expand_output = input_data.get('expand_output', True)
+                    if 'expand_output' in input_data and not isinstance(expand_output, bool):
+                        result = {
+                            "validation_passed": False,
+                            "error_message": "Field 'expand_output' must be a boolean (true or false). Expected: {\"ids\": [9, 42], \"expand_output\": true}",
+                            "epic_ids_to_process": [],
+                            "current_epic_index": 0,
+                            "expand_output": True
+                        }
+                    else:
+                        # Step 5: Validate ID values
+                        epic_ids = []
+                        invalid_ids = []
+                        
+                        for id_value in input_data['ids']:
+                            try:
+                                epic_id = int(id_value)
+                                if epic_id <= 0:
+                                    invalid_ids.append(str(id_value))
+                                else:
+                                    epic_ids.append(epic_id)
+                            except (ValueError, TypeError):
+                                invalid_ids.append(str(id_value))
+                        
+                        if invalid_ids:
+                            result = {
+                                "validation_passed": False,
+                                "error_message": f"Invalid work item ID(s): {', '.join(invalid_ids)}. All IDs must be positive integers.",
+                                "epic_ids_to_process": [],
+                                "current_epic_index": 0,
+                                "expand_output": expand_output
+                            }
+                        elif not epic_ids:
+                            result = {
+                                "validation_passed": False,
+                                "error_message": "No valid work item IDs found. All IDs must be positive integers.",
+                                "epic_ids_to_process": [],
+                                "current_epic_index": 0,
+                                "expand_output": expand_output
+                            }
+                        else:
+                            # All validations passed
+                            result = {
+                                "validation_passed": True,
+                                "error_message": "",
+                                "epic_ids_to_process": epic_ids,
+                                "current_epic_index": 0,
+                                "processed_results": [],
+                                "expand_output": expand_output
+                            }
+        
+        result
     input:
       - input
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |
-          You are an Azure DevOps data extraction assistant tasked to fetch epic hierarchies with all descendant work items.
-
-          **Your job:**
-          * Classify user requests and extract required parameters
-          * Validate that all required inputs are present
-          * Return one standardized JSON response
-
-          **Operation: fetch_epic_hierarchy**
-          Required parameters:
-          - item_id (required): The numeric ID of the work item (epic, feature, etc.) to fetch. Must be a positive integer.
-
-          Optional parameters:
-          - artifact_filepath (optional): Destination file path to store hierarchy data. If not provided, auto-generated filename will be used (format: epic_{id}_hierarchy_{timestamp}.json)
-
-          **Validation rules:**
-          1. If item_id is missing, return error JSON:
-             {"intent":"ERROR","error_details":"item_id is required. Please provide a work item ID number. Example: 'Fetch epic 42' or 'Get hierarchy for item 123'"}
-
-          2. If item_id is not a valid positive integer, return error:
-             {"intent":"ERROR","error_details":"item_id must be a positive integer. Provided value: {value}"}
-
-          3. If request is unclear or ambiguous, return error with explanation and examples
-
-          **Successful response format:**
-          Return JSON with these keys (use "" for unused values):
-          {
-            "intent": "fetch_epic_hierarchy",
-            "item_id": <positive_integer>,
-            "artifact_filepath": "<string or "">"
-          }
-
-          **Examples:**
-          - "Fetch epic 9" → {"intent": "fetch_epic_hierarchy", "item_id": 9, "artifact_filepath": ""}
-          - "Get hierarchy for epic 42 and save to epic42.json" → {"intent": "fetch_epic_hierarchy", "item_id": 42, "artifact_filepath": "epic42.json"}
-          - "Retrieve item 15 data as my_epic.json" → {"intent": "fetch_epic_hierarchy", "item_id": 15, "artifact_filepath": "my_epic.json"}
-          - "Show me work item 123 hierarchy" → {"intent": "fetch_epic_hierarchy", "item_id": 123, "artifact_filepath": ""}
-          - "Show me the data" → {"intent": "ERROR", "error_details": "item_id is required. Please provide..."}
-          - "Fetch epic abc" → {"intent": "ERROR", "error_details": "item_id must be a positive integer. Provided value: abc"}
-
-          **Response must include all keys. Set unused optional fields to "".**
-      task:
-        type: fstring
-        value: |
-          Analyze this user request and extract parameters:
-          {input}
-
-          Return the classification JSON with all required fields.
-          Ensure intent is 'ERROR' if required fields are missing or invalid.
     output:
-      - intent
-      - epic_id
-      - artifact_filepath
+      - validation_passed
+      - error_message
+      - epic_ids_to_process
+      - current_epic_index
+      - processed_results
+      - expand_output
     structured_output: true
-    transition: IntentRouter
-  - id: IntentRouter
+    transition: ValidationRouter
+  - id: ValidationRouter
     type: router
     condition: |
-      {% if intent == 'fetch_epic_hierarchy' %}
-        FetchEpic
+      {% if validation_passed %}
+        SetCurrentEpicId
+      {% else %}
+        FormatErrorResult
       {% endif %}
-    default_output: END
+    default_output: FormatErrorResult
     input:
-      - intent
+      - validation_passed
+    routes:
+      - SetCurrentEpicId
+      - FormatErrorResult
+  - id: SetCurrentEpicId
+    type: code
+    code:
+      type: fixed
+      value: |-
+        epic_ids_to_process = alita_state.get('epic_ids_to_process', [])
+        current_epic_index = alita_state.get('current_epic_index', 0)
+        
+        # Extract nested if needed
+        if isinstance(epic_ids_to_process, dict) and 'epic_ids_to_process' in epic_ids_to_process:
+            epic_ids_to_process = epic_ids_to_process['epic_ids_to_process']
+        if isinstance(current_epic_index, dict) and 'current_epic_index' in current_epic_index:
+            current_epic_index = current_epic_index['current_epic_index']
+        
+        # Check if we have more IDs to process
+        if current_epic_index < len(epic_ids_to_process):
+            epic_id = epic_ids_to_process[current_epic_index]
+            has_more = True
+        else:
+            epic_id = 0
+            has_more = False
+        
+        {
+            "epic_id": epic_id,
+            "has_more_epics": has_more
+        }
+    input:
+      - epic_ids_to_process
+      - current_epic_index
+    output:
+      - epic_id
+      - has_more_epics
+    structured_output: true
+    transition: CheckMoreEpicsRouter
+  - id: CheckMoreEpicsRouter
+    type: router
+    condition: |
+      {% if has_more_epics %}
+        FetchEpic
+      {% else %}
+        CompileResults
+      {% endif %}
+    default_output: CompileResults
+    input:
+      - has_more_epics
     routes:
       - FetchEpic
-      - END
+      - CompileResults
   - id: FetchEpic
     type: toolkit
     input:
@@ -180,8 +306,8 @@ nodes:
       - validation_passed
       - error_message
     structured_output: true
-    transition: ValidationRouter
-  - id: ValidationRouter
+    transition: EpicValidationRouter
+  - id: EpicValidationRouter
     type: router
     condition: |
       {% if validation_passed %}
@@ -237,7 +363,8 @@ nodes:
             "current_query": current_query,
             "all_item_ids": [],
             "all_fetched_items": [],
-            "current_parent_ids": [epic_id]  # Track which parent IDs we're querying for
+            "current_parent_ids": [epic_id],  # Track which parent IDs we're querying for
+            "artifact_filepath": ""  # Clear filepath for new epic - will be auto-generated
         }
         result
     input:
@@ -247,6 +374,7 @@ nodes:
       - all_item_ids
       - all_fetched_items
       - current_parent_ids
+      - artifact_filepath
     structured_output: true
     transition: FetchLevel
   - id: FetchLevel
@@ -751,17 +879,30 @@ nodes:
         from datetime import datetime
 
         epic_id = alita_state.get('epic_id', 0)
-        prefix = f"epic_{epic_id}_hierarchy"
-
-        now = datetime.now()
-        timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
-        filename = f"{prefix}_{timestamp}.json"
+        user_provided_filepath = alita_state.get('artifact_filepath', '').strip()
+        
+        # If user provided a filepath, use it as base and add epic_id
+        # Otherwise generate default filename
+        if user_provided_filepath:
+            # If user provided path has extension, insert epic_id before extension
+            if '.' in user_provided_filepath:
+                parts = user_provided_filepath.rsplit('.', 1)
+                filename = f"{parts[0]}_epic_{epic_id}.{parts[1]}"
+            else:
+                filename = f"{user_provided_filepath}_epic_{epic_id}.json"
+        else:
+            # Generate default filename with timestamp
+            prefix = f"epic_{epic_id}_hierarchy"
+            now = datetime.now()
+            timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
+            filename = f"{prefix}_{timestamp}.json"
 
         {
             "artifact_filepath": filename
         }
     input:
       - epic_id
+      - artifact_filepath
     output:
       - artifact_filepath
     structured_output: true
@@ -838,17 +979,99 @@ nodes:
     toolkit_name: epic_artifacts
     transition: FormatSuccessResult
   - id: FormatSuccessResult
-    type: state_modifier
+    type: code
+    code:
+      type: fixed
+      value: |-
+        artifact_filepath = alita_state.get('artifact_filepath', '')
+        md_filepath = alita_state.get('md_filepath', '')
+        epic_id = alita_state.get('epic_id')
+        readiness_report = alita_state.get('readiness_report', {})
+        processed_results = alita_state.get('processed_results', [])
+        
+        # Extract nested if needed
+        if isinstance(processed_results, dict) and 'processed_results' in processed_results:
+            processed_results = processed_results['processed_results']
+        
+        # Add current result to list
+        current_result = {
+            "item_id": epic_id,
+            "filepath": artifact_filepath,
+            "md_filepath": md_filepath,
+            "readiness_report": readiness_report
+        }
+        processed_results.append(current_result)
+        
+        {
+            "processed_results": processed_results
+        }
     input:
       - artifact_filepath
       - md_filepath
       - epic_id
       - readiness_report
+      - processed_results
+    output:
+      - processed_results
+    structured_output: true
+    transition: IncrementEpicIndex
+  - id: IncrementEpicIndex
+    type: code
+    code:
+      type: fixed
+      value: |-
+        current_epic_index = alita_state.get('current_epic_index', 0)
+        
+        # Extract nested if needed
+        if isinstance(current_epic_index, dict) and 'current_epic_index' in current_epic_index:
+            current_epic_index = current_epic_index['current_epic_index']
+        
+        # Increment index for next epic
+        next_index = current_epic_index + 1
+        
+        {
+            "current_epic_index": next_index
+        }
+    input:
+      - current_epic_index
+    output:
+      - current_epic_index
+    structured_output: true
+    transition: SetCurrentEpicId
+  - id: CompileResults
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        processed_results = alita_state.get('processed_results', [])
+        
+        # Extract nested if needed
+        if isinstance(processed_results, dict) and 'processed_results' in processed_results:
+            processed_results = processed_results['processed_results']
+        
+        if not processed_results:
+            # No results - this means validation failed
+            operation_result = '{"operation": "fetch_hierarchy", "status": "error", "error": "No results processed"}'
+        else:
+            # Format all results
+            operation_result = json.dumps({
+                "operation": "fetch_hierarchy",
+                "status": "success",
+                "total_items_processed": len(processed_results),
+                "results": processed_results
+            })
+        
+        {
+            "operation_result": operation_result
+        }
+    input:
+      - processed_results
     output:
       - operation_result
-    template: '{"operation": "fetch_hierarchy", "status": "success", "item_id": {{ epic_id }}, "filepath": "{{ artifact_filepath }}", "md_filepath": "{{ md_filepath }}", "readiness_report": {{ readiness_report | tojson }}}'
+    structured_output: true
     transition: ReplyComposer
-    variables_to_clean: []
   - id: ReplyComposer
     type: llm
     input:
@@ -865,10 +1088,14 @@ nodes:
           * Be friendly and professional
           * Formulate final output clearly
           * For successful operations: 
-            - Display the formatted readiness report from operation_result.readiness_report.formatted_report
-            - Include both file locations (JSON and MD) at the end
-            - Do NOT summarize or rewrite the report - output it verbatim as markdown
-          * For errors: Provide clear explanation and suggest next steps
+            - If multiple items were processed, list each one with its readiness report
+            - Display the formatted readiness report from each result's readiness_report.formatted_report
+            - Include file locations (JSON and MD) for each processed item
+            - Do NOT summarize or rewrite the reports - output them verbatim as markdown
+          * For single item operations:
+            - Display the formatted readiness report verbatim
+            - Include both file locations at the end
+          * For errors: Provide clear explanation and suggest correct input format
           * Don't suggest further operations unless it's error recovery guidance
       task:
         type: fstring
@@ -876,8 +1103,9 @@ nodes:
           Operation result:
           {operation_result}
 
-          Extract and display the formatted_report exactly as provided in the readiness_report field.
-          Then mention both saved file locations (JSON and Markdown).
+          If this is a successful multi-item operation, display each item's formatted_report and file locations.
+          If this is a single item operation, display the formatted_report and file locations.
+          If this is an error, explain the issue and provide example input format.
     output: []
     structured_output: false
     transition: END
