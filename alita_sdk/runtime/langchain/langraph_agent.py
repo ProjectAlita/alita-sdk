@@ -1916,12 +1916,6 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             if tc_id:
                 last_ai_tool_call_ids.add(tc_id)
 
-        for msg in pending_msgs_dicts[last_ai_idx + 1:]:
-            if _msg_type(msg) == 'tool' and _tool_call_id(msg) in last_ai_tool_call_ids:
-                # This is a sibling tool result — keep it but we need its
-                # parent AIMessage too.  Re-include the AIMessage.
-                pass  # handled below
-
         # If there are completed sibling ToolMessages, we must keep the AIMessage
         # (since ToolMessages require a matching AIMessage).  Only remove the
         # AIMessage when ALL its ToolMessages are missing (common single-tool case).
