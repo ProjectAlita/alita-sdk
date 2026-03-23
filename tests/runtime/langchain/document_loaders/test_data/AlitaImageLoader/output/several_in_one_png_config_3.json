@@ -1,8 +1,0 @@
-[
-  {
-    "page_content": "The image contains 3 sections in an overlapping layered layout. A large AI chat interface screenshot with a dark background takes up most of the center and is the dominant element. A pink children's bicycle is placed in the top-left corner. A wildlife painting showing animals in a tropical or savanna setting is in the bottom-right corner. The three sections are from different sources and are not thematically related to each other.",
-    "metadata": {
-      "source": "/tests/runtime/langchain/document_loaders/test_data/AlitaImageLoader/files/several_in_one.png"
-    }
-  }
-]
