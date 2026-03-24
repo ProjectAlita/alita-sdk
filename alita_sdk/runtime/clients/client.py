@@ -711,6 +711,7 @@ class AlitaClient:
         self,
         middleware_list: list,
         conversation_id: Optional[str] = None,
+        auto_approve_sensitive_actions: bool = False,
     ) -> None:
         """Inject sensitive tool authorization middleware when configured."""
         try:
@@ -722,7 +723,10 @@ class AlitaClient:
             if any(isinstance(mw, SensitiveToolGuardMiddleware) for mw in middleware_list):
                 return
 
-            middleware_list.append(SensitiveToolGuardMiddleware(conversation_id=conversation_id))
+            middleware_list.append(SensitiveToolGuardMiddleware(
+                conversation_id=conversation_id,
+                auto_approve=auto_approve_sensitive_actions,
+            ))
         except Exception as e:
             logger.warning(f"Failed to auto-inject SensitiveToolGuardMiddleware: {e}")
 
@@ -734,7 +738,8 @@ class AlitaClient:
                     llm: Optional[ChatOpenAI] = None, mcp_tokens: Optional[dict] = None,
                     conversation_id: Optional[str] = None, ignored_mcp_servers: Optional[list] = None,
                     is_subgraph: bool = False, middleware: Optional[list] = None,
-                    exception_handling_enabled: bool = False, context_settings: Optional[dict] = None):
+                    exception_handling_enabled: bool = False, context_settings: Optional[dict] = None,
+                    auto_approve_sensitive_actions: bool = False):
         if tools is None:
             tools = []
         if chat_history is None:
@@ -787,7 +792,7 @@ class AlitaClient:
             logger.info(f"Auto-created PlanningMiddleware for conversation_id={conversation_id}")
 
         # Inject sensitive tool authorization guard when configured
-        self._inject_sensitive_tool_guard(middleware_list, conversation_id)
+        self._inject_sensitive_tool_guard(middleware_list, conversation_id, auto_approve_sensitive_actions)
 
         # add ToolExceptionHandlerMiddleware to handle tool errors with LLM messages
         # Can be disabled by setting exception_handling_enabled=False
@@ -1234,7 +1239,7 @@ class AlitaClient:
                       ignored_mcp_servers: Optional[list] = None, persona: Optional[str] = "generic",
                       lazy_tools_mode: Optional[bool] = False, internal_tools: Optional[list] = None,
                       exception_handling_enabled: bool = False, context_settings: Optional[dict] = None,
-                      step_limit: Optional[int] = None):
+                      step_limit: Optional[int] = None, auto_approve_sensitive_actions: bool = False):
         """
         Create a predict-type agent with minimal configuration.
 
@@ -1316,7 +1321,7 @@ class AlitaClient:
         self._inject_summarization(middleware_list, context_settings, conversation_id)
 
         # Inject sensitive tool authorization guard when configured
-        self._inject_sensitive_tool_guard(middleware_list, conversation_id)
+        self._inject_sensitive_tool_guard(middleware_list, conversation_id, auto_approve_sensitive_actions)
 
         # LangChainAssistant constructor calls get_tools() which may raise McpAuthorizationRequired
         # The exception will propagate naturally to the indexer worker's outer handler
