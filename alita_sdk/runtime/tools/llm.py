@@ -1621,9 +1621,21 @@ class LLMNode(BaseTool):
                             continue
 
                         # Check if tool_result is structured content (list of dicts)
-                        # TODO: need solid check for being compatible with ToolMessage content format
-                        if isinstance(tool_result, list) and all(
-                                isinstance(item, dict) and 'type' in item for item in tool_result
+                        # Only use the structured fast-path when every item has an
+                        # LLM-standard content block type AND no bytes values are
+                        # present (bytes are not JSON-serializable and would cause
+                        # a 400 from the LLM API).
+                        _STANDARD_CONTENT_TYPES = {"text", "image", "image_url", "document", "search_result"}
+
+                        def _is_llm_safe_content_block(item: dict) -> bool:
+                            if not isinstance(item, dict):
+                                return False
+                            if item.get('type') not in _STANDARD_CONTENT_TYPES:
+                                return False
+                            return not any(isinstance(v, bytes) for v in item.values())
+
+                        if isinstance(tool_result, list) and tool_result and all(
+                                _is_llm_safe_content_block(item) for item in tool_result
                         ):
                             # Use structured content directly for multimodal support
                             tool_message = ToolMessage(
