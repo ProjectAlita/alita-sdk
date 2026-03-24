@@ -1652,36 +1652,22 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                     result = super().invoke(input, config=config, *args, **kwargs)
                 elif is_at_end:
                     # Previous run completed - start fresh run with new input
-                    # Don't use invoke(None) as that just returns current state without running
                     logger.info(
                         f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}"
                     )
-                    # FIX: Clear old checkpoint messages to prevent duplication.
-                    # The add_messages reducer would otherwise APPEND new messages to existing ones.
-                    # Use 'in' check instead of truthiness - empty list [] is falsy but means
-                    # "messages key exists with no history" (e.g., after chat clear), which still
-                    # requires clearing the old checkpoint to avoid stale SystemMessages.
-                    existing_messages = checkpoint_state.values.get('messages', [])
-                    if existing_messages:
-                        logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
-                        # Create RemoveMessage objects for all existing messages
-                        remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if
-                                       hasattr(msg, 'id') and msg.id]
-                        if remove_msgs:
-                            # Update state to remove old messages before invoking
-                            self.update_state(config, {'messages': remove_msgs})
-                    # Clear HITL decisions from previous execution batch
-                    if checkpoint_state.values.get('hitl_decisions'):
-                        self.update_state(config, {'hitl_decisions': None})
-                    # Clear pipeline-blocked flag from previous run
-                    if checkpoint_state.values.get('_pipeline_blocked'):
-                        self.update_state(config, {'_pipeline_blocked': None})
-
+                    self._clear_stale_checkpoint(config, checkpoint_state)
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
-                    # Interrupted mid-execution - update state and continue from where we left off
-                    self.update_state(config, input)
-                    result = super().invoke(None, config=config, *args, **kwargs)
+                    # Previous execution was interrupted (killed/stopped/crashed)
+                    # without completing. Clear stale checkpoint so the new
+                    # input (which carries full chat history from the DB)
+                    # doesn't get duplicated by the add_messages reducer.
+                    logger.info(
+                        f"[CHECKPOINT] Previous run interrupted (not at END), "
+                        f"clearing stale checkpoint for thread {thread_id}"
+                    )
+                    self._clear_stale_checkpoint(config, checkpoint_state)
+                    result = super().invoke(input, config=config, *args, **kwargs)
             else:
                 result = super().invoke(input, config=config, *args, **kwargs)
         except GraphRecursionError as e:
@@ -1969,6 +1955,28 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             "action": action,
             "value": value,
         }
+
+    def _clear_stale_checkpoint(self, config: RunnableConfig, checkpoint_state) -> None:
+        """Remove stale messages and flags from a previous checkpoint.
+
+        Called before starting a fresh turn when a checkpoint exists
+        (either completed or interrupted). Prevents the add_messages
+        reducer from appending new input on top of old state.
+        """
+        existing_messages = checkpoint_state.values.get('messages', [])
+        if existing_messages:
+            logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+            remove_msgs = [
+                RemoveMessage(id=msg.id)
+                for msg in existing_messages
+                if hasattr(msg, 'id') and msg.id
+            ]
+            if remove_msgs:
+                self.update_state(config, {'messages': remove_msgs})
+        if checkpoint_state.values.get('hitl_decisions'):
+            self.update_state(config, {'hitl_decisions': None})
+        if checkpoint_state.values.get('_pipeline_blocked'):
+            self.update_state(config, {'_pipeline_blocked': None})
 
     def _handle_graph_recursion_error(
             self,
