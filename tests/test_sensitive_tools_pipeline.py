@@ -182,7 +182,7 @@ class TestApiTrustModel:
             set_hitl_approved_tools,
             reset_hitl_approved_tools,
         )
-        token = set_hitl_approved_tools({"create_issue", "close_issue"})
+        token = set_hitl_approved_tools({"github.create_issue", "github.close_issue"})
         try:
             ctx = {
                 "tool_name": "create_issue",

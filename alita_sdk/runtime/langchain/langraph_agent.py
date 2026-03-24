@@ -1584,6 +1584,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         tool_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args', {})
                         resume_ctx = {
                             'tool_name': hitl_interrupt.get('tool_name', ''),
+                            'toolkit_name': hitl_interrupt.get('toolkit_name', ''),
                             'tool_args': tool_args if isinstance(tool_args, dict) else {},
                             'tool_call_id': f"call_{uuid4().hex[:24]}",
                             'action': hitl_resume_value.get('action', 'approve'),
