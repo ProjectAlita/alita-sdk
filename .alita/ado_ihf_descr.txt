@@ -1,16 +1,17 @@
-Fetches Azure DevOps work item hierarchies with all descendants recursively. Returns a list of lists with work item IDs. Each work item is fetched with complete hierarchy structure, including parent-child relationships.
-**Required Input (JSON object):**
+Fetches Azure DevOps work item hierarchy and saves to JSON file. Returns the filename in a list format.
+
+**Input:**
 ```json
-{
-  "ids": [9, 42, 123],
-  "output_expand": true,
-  "output_name": "my_run"
-}
+{"id": 9, "expand": true, "output_name": "my_run"}
 ```
-- `ids` (integers): List of work item IDs to process. Examples: `[9]`, `[9, 42, 456]`
-- `output_expand` (boolean): Controls output content. `true` = include all descendants, `false` = only input IDs
-- `output_name` (string, optional): Output identifier/postfix for file names. Auto-generated random 8-character string if not provided.
-**Output Format Example:**
-```json
-[[9_feature, 10, 11, 12, 13], [42_feature]]
-```
+
+**Fields:**
+- `id` (integer, required): Work item ID. Example: `9`, `42`, `123`
+- `expand` (boolean, required): Hierarchy content. `true` = include all descendants, `false` = only item
+- `output_name` (string, optional): Custom filename identifier. Auto-generated if not provided
+
+**Output:** `["9_feature_my_run.json"]`
+
+**Filename:** Format: `{id}_feature_{output_name}.json` or `{id}_feature.json`
+
+**Files Created:** JSON with hierarchy data, and TXT with visual tree format. The `expand` flag determines whether child work items are included in the saved JSON file.

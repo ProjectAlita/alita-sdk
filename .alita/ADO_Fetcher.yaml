@@ -1,194 +1,221 @@
 state:
-  input:
-    type: string
-  epic_id:
-    type: int
-    value: 0
-  artifact_filepath:
-    type: string
-    value: ''
-  intent:
-    type: string
-    value: ''
-  error_message:
-    type: string
-    value: ''
-  fetch_result:
-    type: dict
-    value: {}
-  validation_passed:
-    type: bool
-    value: false
-  hierarchy_json_path:
-    type: string
-    value: ''
-  hierarchy_data:
-    type: dict
-    value: {}
-  extracted_acs:
-    type: dict
-    value: {}
   ac_coverage_map:
     type: dict
     value: {}
+  artifact_filepath:
+    type: string
+    value: ''
   enriched_hierarchy_data:
     type: dict
     value: {}
-  enriched_json_path:
+  epic_id:
+    type: int
+    value: 0
+  error_message:
     type: string
     value: ''
+  expand:
+    type: bool
+    value: true
+  extracted_acs:
+    type: dict
+    value: {}
+  hierarchy_data:
+    type: dict
+    value: {}
+  hierarchy_filename:
+    type: string
+    value: ''
+  input:
+    type: string
   operation_result:
     type: string
     value: ''
-entry_point: AnalyzeRequest
+  output_name:
+    type: string
+    value: ''
+  result_filename:
+    type: list
+    value: []
+  validation_passed:
+    type: bool
+    value: false
+entry_point: ParseInput
 nodes:
-  - id: AnalyzeRequest
-    type: llm
-    input:
-      - input
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |
-          You are an Azure DevOps data extraction assistant. Parse user requests to fetch epic hierarchies with AC enrichment.
-
-          **Your job:**
-          * Extract required parameters from user request
-          * Validate inputs
-          * Return standardized JSON response
-
-          **Required parameters:**
-          - epic_id (required): The numeric ID of the work item (epic, feature, etc.) to fetch. Must be a positive integer.
-
-          **Optional parameters:**
-          - artifact_filepath (optional): Destination file path prefix for output files. If not provided, auto-generated.
-
-          **Validation rules:**
-          1. If epic_id is missing, return error JSON:
-             {"intent":"ERROR","error_message":"epic_id is required. Please provide a work item ID number. Example: 'Fetch epic 42'"}
-
-          2. If epic_id is not a valid positive integer, return error:
-             {"intent":"ERROR","error_message":"epic_id must be a positive integer. Provided value: {value}"}
-
-          **Successful response format:**
-          {
-            "intent": "fetch_epic_with_acs",
-            "epic_id": <positive_integer>,
-            "artifact_filepath": "<string or empty>"
-          }
-
-          **Examples:**
-          - "Fetch epic 9" → {"intent": "fetch_epic_with_acs", "epic_id": 9, "artifact_filepath": ""}
-          - "Get epic 42 with ACs" → {"intent": "fetch_epic_with_acs", "epic_id": 42, "artifact_filepath": ""}
-          - "Fetch epic abc" → {"intent": "ERROR", "error_message": "epic_id must be a positive integer. Provided value: abc"}
-      task:
-        type: fstring
-        value: |
-          Analyze this user request and extract parameters:
-          {input}
-
-          Return the classification JSON with all required fields.
-    output:
-      - intent
-      - epic_id
-      - artifact_filepath
-      - error_message
-    structured_output: true
-    transition: IntentRouter
-  - id: IntentRouter
-    type: router
-    condition: |
-      {% if intent == 'fetch_epic_with_acs' %}
-        CallHierarchyFetcher
-      {% else %}
-        HandleError
-      {% endif %}
-    default_output: HandleError
-    input:
-      - intent
-    routes:
-      - CallHierarchyFetcher
-      - HandleError
-  - id: CallHierarchyFetcher
-    type: agent
-    input:
-      - epic_id
-      - artifact_filepath
-    input_mapping:
-      chat_history:
-        type: fixed
-        dataType: array
-        value: []
-      input:
-        type: fstring
-        value: 'Fetch epic {epic_id}'
-    output: []
-    tool: ADO_Item_Hierarchy_Fetcher
-    transition: ParseFetchResult
-  - id: ParseFetchResult
+  - id: ParseInput
     type: code
     code:
       type: fixed
       value: |-
         import json
-        
-        # When using type: agent, the result is in the entire alita_state
-        # The ADO_Item_Hierarchy_Fetcher should leave 'operation_result' in state
-        operation_result = alita_state.get('operation_result', {})
-        
-        # It might also be in a string format
-        if isinstance(operation_result, str):
-            try:
-                operation_result = json.loads(operation_result)
-            except:
-                # If it's not JSON, try to extract from the string
-                pass
-        
-        # Parse operation_result if it's still a string after initial attempt
-        if isinstance(operation_result, str) and operation_result.startswith('{'):
-            try:
-                operation_result = json.loads(operation_result)
-            except:
-                operation_result = {}
-        
-        # Extract status and filepath
-        status = operation_result.get('status', 'unknown') if isinstance(operation_result, dict) else 'unknown'
-        hierarchy_json_path = operation_result.get('filepath', '') if isinstance(operation_result, dict) else ''
-        error_msg = operation_result.get('error', '') if isinstance(operation_result, dict) else ''
-        
-        if status == 'success' and hierarchy_json_path:
-            validation_passed = True
-            error_message = ''
-        else:
-            validation_passed = False
-            # Provide detailed error message
-            if not operation_result or operation_result == {}:
-                # List all state keys for debugging
-                state_keys = [k for k in alita_state.keys() if not k.startswith('_')]
-                error_message = f"No operation_result found in state. Available state keys: {state_keys}"
+
+        input_str = alita_state.get('input', '')
+
+        # Handle if input is already a dict (pre-parsed)
+        if isinstance(input_str, dict):
+            input_data = input_str
+            # Skip to validation
+            expand = input_data.get('expand', True)
+            output_name = input_data.get('output_name', '')
+            
+            if 'id' not in input_data:
+                result = {
+                    "validation_passed": False,
+                    "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"expand\": true}",
+                    "epic_id": 0,
+                    "expand": True,
+                    "output_name": ""
+                }
             else:
-                error_message = error_msg or f"Hierarchy fetch failed. Status: {status}, operation_result type: {type(operation_result).__name__}"
-        
-        {
-            'validation_passed': validation_passed,
-            'hierarchy_json_path': hierarchy_json_path,
-            'error_message': error_message
-        }
-    input: []
+                try:
+                    epic_id = int(input_data['id'])
+                    if epic_id <= 0:
+                        result = {
+                            "validation_passed": False,
+                            "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
+                            "epic_id": 0,
+                            "expand": expand,
+                            "output_name": output_name
+                        }
+                    else:
+                        # Generate output_name if not provided
+                        import random
+                        import string
+                        
+                        if not output_name or not output_name.strip():
+                            output_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                        
+                        result = {
+                            "validation_passed": True,
+                            "error_message": "",
+                            "epic_id": epic_id,
+                            "expand": expand,
+                            "output_name": output_name
+                        }
+                except (ValueError, TypeError):
+                    result = {
+                        "validation_passed": False,
+                        "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
+                        "epic_id": 0,
+                        "expand": expand,
+                        "output_name": output_name
+                    }
+        else:
+            # Input is a string, parse as JSON
+            input_str = str(input_str).strip()
+            
+            # Step 1: Check if input is provided
+            if not input_str:
+                result = {
+                    "validation_passed": False,
+                    "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"expand\": true}",
+                    "epic_id": 0,
+                    "expand": True,
+                    "output_name": ""
+                }
+            else:
+                # Step 2: Try to parse JSON
+                try:
+                    input_data = json.loads(input_str)
+                except json.JSONDecodeError:
+                    result = {
+                        "validation_passed": False,
+                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"expand\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
+                        "epic_id": 0,
+                        "expand": True,
+                        "output_name": ""
+                    }
+                else:
+                    # Step 3: Validate JSON structure and types
+                    if not isinstance(input_data, dict):
+                        result = {
+                            "validation_passed": False,
+                            "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"expand\": true}",
+                            "epic_id": 0,
+                            "expand": True,
+                            "output_name": ""
+                        }
+                    elif 'id' not in input_data:
+                        result = {
+                            "validation_passed": False,
+                            "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"expand\": true}",
+                            "epic_id": 0,
+                            "expand": input_data.get('expand', True),
+                            "output_name": input_data.get('output_name', '')
+                        }
+                    else:
+                        # Step 4: Validate expand and output_name types if provided
+                        expand = input_data.get('expand', True)
+                        output_name = input_data.get('output_name', '')
+                        
+                        if 'expand' in input_data and not isinstance(expand, bool):
+                            result = {
+                                "validation_passed": False,
+                                "error_message": "Field 'expand' must be a boolean (true or false). Expected: {\"id\": 9, \"expand\": true}",
+                                "epic_id": 0,
+                                "expand": True,
+                                "output_name": ""
+                            }
+                        elif 'output_name' in input_data and not isinstance(output_name, str):
+                            result = {
+                                "validation_passed": False,
+                                "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"expand\": true, \"output_name\": \"my_run\"}",
+                                "epic_id": 0,
+                                "expand": True,
+                                "output_name": ""
+                            }
+                        else:
+                            # Step 5: Validate ID value
+                            try:
+                                epic_id = int(input_data['id'])
+                                if epic_id <= 0:
+                                    result = {
+                                        "validation_passed": False,
+                                        "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
+                                        "epic_id": 0,
+                                        "expand": expand,
+                                        "output_name": output_name
+                                    }
+                                else:
+                                    # All validations passed - generate output_name if not provided
+                                    import random
+                                    import string
+                                    
+                                    if not output_name or not output_name.strip():
+                                        output_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                                    
+                                    result = {
+                                        "validation_passed": True,
+                                        "error_message": "",
+                                        "epic_id": epic_id,
+                                        "expand": expand,
+                                        "output_name": output_name
+                                    }
+                            except (ValueError, TypeError):
+                                result = {
+                                    "validation_passed": False,
+                                    "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
+                                    "epic_id": 0,
+                                    "expand": expand,
+                                    "output_name": output_name
+                                }
+
+        result
+    input:
+      - input
     output:
       - validation_passed
-      - hierarchy_json_path
       - error_message
+      - epic_id
+      - expand
+      - output_name
     structured_output: true
     transition: ValidationRouter
   - id: ValidationRouter
     type: router
     condition: |
       {% if validation_passed %}
-        LoadHierarchyData
+        SetDefaults
       {% else %}
         FormatErrorResult
       {% endif %}
@@ -196,19 +223,121 @@ nodes:
     input:
       - validation_passed
     routes:
-      - LoadHierarchyData
+      - SetDefaults
       - FormatErrorResult
-  - id: LoadHierarchyData
+  - id: SetDefaults
+    type: code
+    code:
+      type: fixed
+      value: |-
+        epic_id = alita_state.get('epic_id')
+        output_name = alita_state.get('output_name', '')
+
+        # Generate filename pattern: {id}_acs_{output_name}.json
+        if output_name:
+            artifact_filepath = f"{epic_id}_acs_{output_name}.json"
+        else:
+            artifact_filepath = f"{epic_id}_acs.json"
+
+        {'artifact_filepath': artifact_filepath}
+    input:
+      - epic_id
+      - output_name
+    output:
+      - artifact_filepath
+    structured_output: true
+    transition: CallHierarchyFetcher
+  - id: CallHierarchyFetcher
+    type: agent
+    input:
+      - epic_id
+      - expand
+      - output_name
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      task:
+        type: fstring
+        value: '{"id": {epic_id}, "expand": true, "output_name": "{output_name}"}'
+    output:
+      - operation_result
+    output_mapping:
+      operation_result:
+        type: variable
+        value: operation_result
+    tool: ADO_Item_Hierarchy_Fetcher
+    transition: LoadHierarchyFromFetcher
+  - id: LoadHierarchyFromFetcher
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+
+        # Get operation_result from input parameter
+        operation_result = alita_state.get('operation_result', '')
+
+        # Parse the operation_result to get the filename list
+        try:
+            if isinstance(operation_result, str):
+                result_filename = json.loads(operation_result)
+            elif isinstance(operation_result, list):
+                result_filename = operation_result
+            else:
+                result_filename = []
+        except:
+            result_filename = []
+
+        # Validate we got a filename
+        if not result_filename or not isinstance(result_filename, list) or len(result_filename) == 0:
+            validation_passed = False
+            error_message = "Hierarchy fetcher did not return a valid filename"
+            hierarchy_filename = ""
+        else:
+            # Get first filename from list
+            hierarchy_filename = result_filename[0]
+            validation_passed = True
+            error_message = ""
+
+        {
+            'validation_passed': validation_passed,
+            'hierarchy_filename': hierarchy_filename,
+            'error_message': error_message
+        }
+    input:
+      - operation_result
+    output:
+      - validation_passed
+      - hierarchy_filename
+      - error_message
+    structured_output: true
+    transition: HierarchyLoadRouter
+  - id: HierarchyLoadRouter
+    type: router
+    condition: |
+      {% if validation_passed %}
+        LoadHierarchyFile
+      {% else %}
+        FormatErrorResult
+      {% endif %}
+    default_output: FormatErrorResult
+    input:
+      - validation_passed
+    routes:
+      - LoadHierarchyFile
+      - FormatErrorResult
+  - id: LoadHierarchyFile
     type: toolkit
     input:
-      - hierarchy_json_path
+      - hierarchy_filename
     input_mapping:
       bucket_name:
         type: fixed
         value: null
       filename:
         type: variable
-        value: hierarchy_json_path
+        value: hierarchy_filename
       filepath:
         type: fixed
         value: null
@@ -230,22 +359,22 @@ nodes:
         type: fixed
         value: |
           You are an acceptance criteria extraction specialist. Extract ACs from work item descriptions.
-          
+
           **Recognition Patterns:**
           1. Labeled sections: "Acceptance Criteria", "AC", "ACs", "Definition of Done", "DoD" (case-insensitive)
           2. Numbered/bulleted lists under AC headers: `1.`, `-`, `*`
           3. Markdown checkboxes: `- [ ]` (not done), `- [x]` (done)
           4. Gherkin scenarios: `Given...When...Then` (each scenario = one AC)
-          
+
           **Status Determination:**
           - `[x]` → "done"
           - `[ ]` → "not_done"
           - No checkbox → infer from context or return "unknown"
-          
+
           **Output Format:**
           For each item with ACs, return structured JSON mapping item_id to AC list.
           Each AC must have: text (string), status (done|not_done|unknown), source (checkbox|labeled_section|gherkin|numbered_list)
-          
+
           **Rules:**
           - Skip items with empty/no descriptions
           - Each AC should be discrete and testable
@@ -254,16 +383,18 @@ nodes:
         type: fstring
         value: |
           Extract acceptance criteria from all work items in this hierarchy.
-          
+
           Epic (ID {hierarchy_data[epic][id]}):
-          Description: {hierarchy_data[epic][description]}
-          
+          Description: {hierarchy_data[epic].get('description', '')}
+
+          {% if hierarchy_data[items] %}
           Child Items:
           {% for item_id, item in hierarchy_data[items].items() %}
           - Item ID {item_id} ({item[type]}): {item[title]}
-            Description: {item[description]}
+            Description: {item.get('description', '')}
           {% endfor %}
-          
+          {% endif %}
+
           Return JSON with this structure:
           {{
             "acs_by_item": {{
@@ -272,7 +403,7 @@ nodes:
               ]
             }}
           }}
-          
+
           Only include items that have ACs. Omit items with no ACs.
     output:
       - extracted_acs
@@ -291,28 +422,29 @@ nodes:
         type: fixed
         value: |
           You are an AC coverage mapping specialist. Determine which parent ACs each child work item addresses.
-          
+
           **Matching Rules:**
           1. **Direct parent only** - match child to its immediate parent's ACs (not grandparent or higher)
           2. **Explicit match** - child's description/ACs explicitly reference parent AC
           3. **Semantic match** - child's title/description semantically relates to parent AC (when child has no explicit ACs)
           4. **No forced matching** - if no confident match exists, return empty coverage
-          
+
           **Confidence Levels:**
           - "explicit" - child description directly addresses parent AC
           - "semantic" - child title implies work toward parent AC (moderate confidence)
           - "none" - no match found
-          
+
           **Output Format:**
           Map each child_id to covered parent AC indices with confidence and reasoning.
       task:
         type: fstring
         value: |
           Map child work items to parent ACs they cover.
-          
+
+          {% if hierarchy_data[items] %}
           Hierarchy structure (children by parent):
           {% for item_id, item in hierarchy_data[items].items() %}
-          {% if item[children_ids]|length > 0 %}
+          {% if item.get('children_ids', [])|length > 0 %}
           Parent ID {item_id} ({item[type]}): {item[title]}
           Parent ACs:
           {% if item_id in extracted_acs.get('acs_by_item', {}) %}
@@ -322,16 +454,19 @@ nodes:
           {% else %}
           (No ACs found)
           {% endif %}
-          
+
           Children:
-          {% for child_id in item[children_ids] %}
+          {% for child_id in item.get('children_ids', []) %}
             - Child ID {child_id}: {hierarchy_data[items][str(child_id)][title]}
-              Child Description: {hierarchy_data[items][str(child_id)][description][:200]}...
+              Child Description: {hierarchy_data[items][str(child_id)].get('description', '')[:200]}...
               Child ACs: {% if str(child_id) in extracted_acs.get('acs_by_item', {}) %}{{ extracted_acs['acs_by_item'][str(child_id)]|length }} found{% else %}None{% endif %}
           {% endfor %}
           {% endif %}
           {% endfor %}
-          
+          {% else %}
+          No child items found in hierarchy.
+          {% endif %}
+
           Return JSON:
           {{
             "coverage_map": {{
@@ -345,8 +480,8 @@ nodes:
               ]
             }}
           }}
-          
-          Only include children that cover at least one parent AC.
+
+          Only include children that cover at least one parent AC. If no children or no coverage, return empty coverage_map.
     output:
       - ac_coverage_map
     structured_output: true
@@ -357,11 +492,11 @@ nodes:
       type: fixed
       value: |-
         import json
-        
+
         hierarchy_data = alita_state.get('hierarchy_data', {})
         extracted_acs = alita_state.get('extracted_acs', {})
         ac_coverage_map = alita_state.get('ac_coverage_map', {})
-        
+
         # Extract nested if needed
         if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
             hierarchy_data = hierarchy_data['hierarchy_data']
@@ -369,10 +504,10 @@ nodes:
             extracted_acs = extracted_acs['extracted_acs']
         if isinstance(ac_coverage_map, dict) and 'ac_coverage_map' in ac_coverage_map:
             ac_coverage_map = ac_coverage_map['ac_coverage_map']
-        
+
         acs_by_item = extracted_acs.get('acs_by_item', {})
         coverage = ac_coverage_map.get('coverage_map', {})
-        
+
         # Process Epic ACs
         epic_id = str(hierarchy_data['epic']['id'])
         if epic_id in acs_by_item:
@@ -389,9 +524,9 @@ nodes:
             hierarchy_data['epic']['own_acs'] = own_acs
         else:
             hierarchy_data['epic']['own_acs'] = []
-        
+
         # Process all items
-        for item_id, item in hierarchy_data['items'].items():
+        for item_id, item in hierarchy_data.get('items', {}).items():
             # Add own_acs (when item is a parent)
             if item_id in acs_by_item:
                 own_acs = []
@@ -422,9 +557,9 @@ nodes:
                 item['covered_parent_acs'] = covered
             else:
                 item['covered_parent_acs'] = []
-        
+
         # Populate covered_by_children in parent ACs
-        for item_id, item in hierarchy_data['items'].items():
+        for item_id, item in hierarchy_data.get('items', {}).items():
             if 'covered_parent_acs' in item:
                 for coverage_entry in item['covered_parent_acs']:
                     parent_id = str(coverage_entry['parent_id'])
@@ -434,10 +569,10 @@ nodes:
                     if parent_id == epic_id:
                         if parent_ac_idx < len(hierarchy_data['epic']['own_acs']):
                             hierarchy_data['epic']['own_acs'][parent_ac_idx]['covered_by_children'].append(int(item_id))
-                    elif parent_id in hierarchy_data['items']:
+                    elif parent_id in hierarchy_data.get('items', {}):
                         if parent_ac_idx < len(hierarchy_data['items'][parent_id]['own_acs']):
                             hierarchy_data['items'][parent_id]['own_acs'][parent_ac_idx]['covered_by_children'].append(int(item_id))
-        
+
         {'enriched_hierarchy_data': hierarchy_data}
     input:
       - hierarchy_data
@@ -446,38 +581,12 @@ nodes:
     output:
       - enriched_hierarchy_data
     structured_output: true
-    transition: GenerateEnrichedFilepath
-  - id: GenerateEnrichedFilepath
-    type: code
-    code:
-      type: fixed
-      value: |-
-        hierarchy_json_path = alita_state.get('hierarchy_json_path', '')
-        
-        # Generate output filename based on input
-        if hierarchy_json_path:
-            # Remove .json extension and add _with_acs suffix
-            base_name = hierarchy_json_path.replace('.json', '')
-            enriched_json_path = f"{base_name}_with_acs.json"
-        else:
-            # Fallback: should not happen
-            from datetime import datetime
-            now = datetime.now()
-            timestamp = now.strftime("%d_%m_%Y_%H_%M_%S")
-            enriched_json_path = f"hierarchy_with_acs_{timestamp}.json"
-        
-        {'enriched_json_path': enriched_json_path}
-    input:
-      - hierarchy_json_path
-    output:
-      - enriched_json_path
-    structured_output: true
     transition: SaveEnrichedHierarchy
   - id: SaveEnrichedHierarchy
     type: toolkit
     input:
       - enriched_hierarchy_data
-      - enriched_json_path
+      - artifact_filepath
     input_mapping:
       bucket_name:
         type: fixed
@@ -487,7 +596,7 @@ nodes:
         value: '{enriched_hierarchy_data}'
       filename:
         type: variable
-        value: enriched_json_path
+        value: artifact_filepath
       filepath:
         type: fixed
         value: null
@@ -501,40 +610,36 @@ nodes:
     code:
       type: fixed
       value: |-
-        enriched_hierarchy_data = alita_state.get('enriched_hierarchy_data', {})
-        hierarchy_json_path = alita_state.get('hierarchy_json_path', '')
-        enriched_json_path = alita_state.get('enriched_json_path', '')
-        epic_id = alita_state.get('epic_id', 0)
-        
-        # Extract nested if needed
-        if isinstance(enriched_hierarchy_data, dict) and 'enriched_hierarchy_data' in enriched_hierarchy_data:
-            enriched_hierarchy_data = enriched_hierarchy_data['enriched_hierarchy_data']
-        
-        # Count total ACs
-        total_acs = len(enriched_hierarchy_data.get('epic', {}).get('own_acs', []))
-        for item in enriched_hierarchy_data.get('items', {}).values():
-            total_acs += len(item.get('own_acs', []))
-        
-        result = {
-            'operation': 'fetch_and_enrich_with_acs',
-            'status': 'success',
-            'epic_id': epic_id,
-            'files': {
-                'hierarchy_json': hierarchy_json_path,
-                'enriched_json': enriched_json_path
-            },
-            'summary': {
-                'total_acs_extracted': total_acs,
-                'total_items': len(enriched_hierarchy_data.get('items', {})) + 1
-            }
-        }
-        
-        {'operation_result': result}
+        artifact_filepath = alita_state.get('artifact_filepath', '')
+
+        # Return filename in list format like ADO_Item_Hierarchy_Fetcher
+        result_filename = [artifact_filepath]
+
+        {'result_filename': result_filename}
     input:
-      - enriched_hierarchy_data
-      - hierarchy_json_path
-      - enriched_json_path
-      - epic_id
+      - artifact_filepath
+    output:
+      - result_filename
+    structured_output: true
+    transition: CompileResults
+  - id: CompileResults
+    type: code
+    code:
+      type: fixed
+      value: |-
+        result_filename = alita_state.get('result_filename', [])
+
+        # Extract nested if needed
+        if isinstance(result_filename, dict) and 'result_filename' in result_filename:
+            result_filename = result_filename['result_filename']
+
+        # Convert to JSON string for output
+        import json
+        operation_result = json.dumps(result_filename)
+
+        {'operation_result': operation_result}
+    input:
+      - result_filename
     output:
       - operation_result
     structured_output: true
@@ -545,37 +650,15 @@ nodes:
       type: fixed
       value: |-
         error_message = alita_state.get('error_message', 'Unknown error occurred')
-        epic_id = alita_state.get('epic_id', 0)
-        
+
+        import json
         result = {
-            'operation': 'fetch_and_enrich_with_acs',
-            'status': 'error',
-            'epic_id': epic_id,
-            'error': error_message
-        }
-        
-        {'operation_result': result}
-    input:
-      - error_message
-      - epic_id
-    output:
-      - operation_result
-    structured_output: true
-    transition: ReplyComposer
-  - id: HandleError
-    type: code
-    code:
-      type: fixed
-      value: |-
-        error_message = alita_state.get('error_message', 'Invalid request format')
-        
-        result = {
-            'operation': 'fetch_and_enrich_with_acs',
             'status': 'error',
             'error': error_message
         }
-        
-        {'operation_result': result}
+        operation_result = json.dumps(result)
+
+        {'operation_result': operation_result}
     input:
       - error_message
     output:
@@ -594,26 +677,23 @@ nodes:
         type: fixed
         value: |-
           You are a communication specialist. Format the operation result for the user.
-          
+
           **For successful operations:**
           * Confirm epic was fetched and enriched with ACs
-          * Show both output file paths:
-            - hierarchy_json (raw hierarchy)
-            - enriched_json (with AC data)
-          * Display summary metrics (total ACs, total items)
+          * Display the filename list returned
           * Be concise and professional
-          
+
           **For errors:**
           * Display error message clearly
           * Suggest next steps or corrections
-          * Don't suggest further operations unless it's error recovery
       task:
         type: fstring
         value: |-
           Operation result:
           {operation_result}
-          
-          Format a clear message showing the results or error.
+
+          If this is a successful operation, display the filename list.
+          If this is an error, explain the issue and provide the correct input format: {{"id": 9, "expand": true, "output_name": "optional"}}.
     output: []
     structured_output: false
     transition: END
