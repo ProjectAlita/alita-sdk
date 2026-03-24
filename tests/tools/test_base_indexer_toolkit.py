@@ -105,7 +105,10 @@ PGVECTOR_CONNECTION_STRING = os.getenv(
     "PGVECTOR_TEST_CONNECTION_STRING",
     "postgresql+psycopg://postgres:yourpassword@localhost:5435/postgres"
 )
-TEST_COLLECTION_NAME = "test_indexer_collection"
+# Collection schema matches the schema name in pgvector where data is stored
+TEST_COLLECTION_NAME = "index_chunks"
+# Index name matches the 'collection' field in cmetadata
+TEST_INDEX_NAME = "three_in_one"
 
 # Required environment variables (no defaults - must be explicitly set)
 DEPLOYMENT_URL = os.getenv("DEPLOYMENT_URL")
@@ -169,8 +172,9 @@ def indexer_toolkit(alita_client):
             model_config={"temperature": 0},
         )
 
-        # Default embedding model (can be overridden via env var)
-        embedding_model = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-3-small")
+        # Embedding model must match what was used to create the index
+        # The test data was indexed with text-embedding-ada-002
+        embedding_model = os.getenv("DEFAULT_EMBEDDING_MODEL", "text-embedding-ada-002")
 
         toolkit = BaseIndexerToolkit(
             alita=alita_client,
@@ -208,7 +212,7 @@ def deepeval_model(alita_client):
 
 # ===================== Helper Functions =====================
 
-def search_and_extract_context(toolkit, query: str, index_name: str = "test_idx", cut_off: float = 0.0) -> tuple[str, List[str]]:
+def search_and_extract_context(toolkit, query: str, index_name: str = TEST_INDEX_NAME, cut_off: float = 0.1) -> tuple[str, List[str]]:
     """
     Execute search and extract retrieval context.
 
@@ -244,67 +248,74 @@ def search_and_extract_context(toolkit, query: str, index_name: str = "test_idx"
 
 
 # ===================== Test Data Definitions =====================
-# These test scenarios are designed to thoroughly evaluate RAG quality
+# Test scenarios for Claude Certified Architect exam content
+# Focused on allowedTools configuration and candidate requirements
 
-# Scenario 1: Python Testing Framework Queries
-# Tests retrieval of testing-related documentation
-PYTHON_TESTING_CONVERSATION = {
-    "expected_outcome": "User learns about Python testing frameworks and best practices",
+# Scenario 1: allowedTools Configuration Queries
+# Tests retrieval of tool access and configuration documentation
+ALLOWED_TOOLS_CONVERSATION = {
+    "expected_outcome": "User understands allowedTools configuration for subagents and skills",
     "turns": [
         {
             "role": "user",
-            "content": "What Python testing frameworks are available?",
-            "expected_topics": ["pytest", "unittest", "doctest"],
+            "content": "What is allowedTools and how do I configure it for subagents?",
+            "expected_topics": ["allowedTools", "Task", "subagent", "coordinator"],
         },
         {
             "role": "user",
-            "content": "How do I write fixtures in pytest?",
-            "expected_topics": ["fixtures", "parametrization", "mocking"],
+            "content": "How do I restrict tool access in skill frontmatter?",
+            "expected_topics": ["allowed-tools", "skill", "frontmatter", "restrict"],
         },
         {
             "role": "user",
-            "content": "What about CI/CD integration for Python tests?",
-            "expected_topics": ["CI/CD", "GitHub Actions", "GitLab CI", "pipelines"],
+            "content": "What tools must be included for a coordinator to spawn subagents?",
+            "expected_topics": ["Task tool", "spawning", "coordinator", "subagents"],
         },
     ],
 }
 
-# Scenario 2: Filtering by Status
-# Tests metadata filtering capability
-STATUS_FILTER_CONVERSATION = {
-    "expected_outcome": "User finds documents filtered by status",
+# Scenario 2: Candidate Requirements Queries
+# Tests retrieval of exam candidate information
+CANDIDATE_REQUIREMENTS_CONVERSATION = {
+    "expected_outcome": "User understands certification candidate requirements and exam content",
     "turns": [
         {
             "role": "user",
-            "content": "Show me active Python testing documentation",
-            "filter": {"status": "active"},
-            "expected_topics": ["testing", "pytest", "active"],
+            "content": "What experience should a candidate have for the Claude Architect certification?",
+            "expected_topics": ["candidate", "experience", "6+ months", "Agent SDK"],
         },
         {
             "role": "user",
-            "content": "What archived testing resources are available?",
-            "filter": {"status": "archived"},
-            "expected_topics": ["legacy", "archived", "unittest"],
+            "content": "What skills should candidates demonstrate?",
+            "expected_topics": ["agentic applications", "multi-agent", "MCP", "prompts"],
+        },
+        {
+            "role": "user",
+            "content": "What are the exam content domains and weightings?",
+            "expected_topics": ["Domain", "Agentic Architecture", "Tool Design", "weightings"],
         },
     ],
 }
 
-# Scenario 3: Category-based Queries
-# Tests category filtering
-CATEGORY_CONVERSATION = {
-    "expected_outcome": "User finds documents by category",
+# Scenario 3: Multi-Agent Architecture Queries
+# Tests retrieval of orchestration and coordination patterns
+MULTI_AGENT_CONVERSATION = {
+    "expected_outcome": "User learns about multi-agent coordination patterns",
     "turns": [
         {
             "role": "user",
-            "content": "Find tutorial content about testing",
-            "filter": {"category": "tutorial"},
-            "expected_topics": ["tutorial", "learn", "guide"],
+            "content": "How do I pass context between agents in a multi-agent system?",
+            "expected_topics": ["context", "subagent", "prompt", "coordinator"],
         },
         {
             "role": "user",
-            "content": "Show me code examples for testing",
-            "filter": {"category": "code"},
-            "expected_topics": ["code", "examples", "patterns"],
+            "content": "What is the best way to handle errors in subagent communication?",
+            "expected_topics": ["error", "propagation", "recovery", "structured"],
+        },
+        {
+            "role": "user",
+            "content": "How should I partition research scope across subagents?",
+            "expected_topics": ["partition", "scope", "subagents", "duplication"],
         },
     ],
 }
@@ -314,16 +325,16 @@ CATEGORY_CONVERSATION = {
 
 @pytest.mark.rag_eval
 class TestSingleTurnRAGEvaluation:
-    """Single-turn RAG evaluation tests using DeepEval metrics."""
+    """Single-turn RAG evaluation tests for Claude Architect exam content."""
 
-    def test_faithfulness_metric(self, indexer_toolkit, deepeval_model):
+    def test_faithfulness_allowed_tools(self, indexer_toolkit, deepeval_model):
         """
-        Test that retrieved content faithfully represents the source documents.
+        Test faithfulness for allowedTools configuration queries.
 
         Faithfulness measures whether the actual output is grounded in the
         retrieval context (no hallucinations).
         """
-        query = "What are the best practices for Python testing?"
+        query = "What is allowedTools and when must it include the Task tool?"
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -335,22 +346,21 @@ class TestSingleTurnRAGEvaluation:
         metric = FaithfulnessMetric(threshold=0.5, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
-        print(f"\nFaithfulness Test:")
+        print(f"\nFaithfulness Test (allowedTools):")
         print(f"  Query: {query}")
         print(f"  Score: {metric.score}")
         print(f"  Reason: {metric.reason}")
 
-        # Faithfulness should be high if output comes from context
         assert metric.score >= 0.0, f"Faithfulness below minimum: {metric.score}"
 
-    def test_contextual_relevancy_metric(self, indexer_toolkit, deepeval_model):
+    def test_contextual_relevancy_candidate(self, indexer_toolkit, deepeval_model):
         """
-        Test that retrieved context is relevant to the query.
+        Test contextual relevancy for candidate requirements queries.
 
         Contextual Relevancy measures whether the retrieval context aligns
         with what the user is asking about.
         """
-        query = "How do I set up pytest fixtures?"
+        query = "What experience should a candidate have for Claude Architect certification?"
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -362,22 +372,22 @@ class TestSingleTurnRAGEvaluation:
         metric = ContextualRelevancyMetric(threshold=0.3, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
-        print(f"\nContextual Relevancy Test:")
+        print(f"\nContextual Relevancy Test (candidate):")
         print(f"  Query: {query}")
         print(f"  Score: {metric.score}")
         print(f"  Reason: {metric.reason}")
 
         assert metric.score >= 0.0, f"Contextual Relevancy below minimum: {metric.score}"
 
-    def test_contextual_precision_metric(self, indexer_toolkit, deepeval_model):
+    def test_contextual_precision_subagent_config(self, indexer_toolkit, deepeval_model):
         """
-        Test that relevant context is ranked higher than irrelevant context.
+        Test contextual precision for subagent configuration queries.
 
         Contextual Precision measures whether the most relevant documents
         appear at the top of the retrieval results.
         """
-        query = "Python unit testing tutorial"
-        expected_output = "Learn how to write unit tests in Python using pytest or unittest"
+        query = "How do I configure subagent invocation and context passing?"
+        expected_output = "Subagent context must be explicitly provided in the prompt. Use Task tool for spawning subagents."
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -390,22 +400,22 @@ class TestSingleTurnRAGEvaluation:
         metric = ContextualPrecisionMetric(threshold=0.3, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
-        print(f"\nContextual Precision Test:")
+        print(f"\nContextual Precision Test (subagent config):")
         print(f"  Query: {query}")
         print(f"  Score: {metric.score}")
         print(f"  Reason: {metric.reason}")
 
         assert metric.score >= 0.0, f"Contextual Precision below minimum: {metric.score}"
 
-    def test_contextual_recall_metric(self, indexer_toolkit, deepeval_model):
+    def test_contextual_recall_exam_domains(self, indexer_toolkit, deepeval_model):
         """
-        Test that all relevant information is retrieved.
+        Test contextual recall for exam domain queries.
 
         Contextual Recall measures whether the retrieval context contains
         all the information needed to answer the query.
         """
-        query = "What testing frameworks does Python support?"
-        expected_output = "Python supports pytest, unittest, and doctest for testing"
+        query = "What are the exam content domains and their weightings?"
+        expected_output = "Domain 1: Agentic Architecture (27%), Domain 2: Tool Design & MCP (18%), Domain 3: Claude Code (20%), Domain 4: Prompt Engineering (20%), Domain 5: Context Management (15%)"
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -418,7 +428,7 @@ class TestSingleTurnRAGEvaluation:
         metric = ContextualRecallMetric(threshold=0.3, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
-        print(f"\nContextual Recall Test:")
+        print(f"\nContextual Recall Test (exam domains):")
         print(f"  Query: {query}")
         print(f"  Score: {metric.score}")
         print(f"  Reason: {metric.reason}")
@@ -437,18 +447,18 @@ class TestMultiTurnRAGEvaluation:
     from previous turns may influence retrieval and responses.
     """
 
-    def test_multi_turn_python_testing_conversation(self, indexer_toolkit, deepeval_model):
+    def test_multi_turn_allowed_tools_conversation(self, indexer_toolkit, deepeval_model):
         """
-        Test a multi-turn conversation about Python testing using ConversationalGEval.
+        Test a multi-turn conversation about allowedTools configuration.
 
-        This simulates a user progressively learning about testing:
-        1. Ask about available frameworks
-        2. Deep dive into fixtures
-        3. Ask about CI/CD integration
+        This simulates a user learning about tool access configuration:
+        1. Ask about allowedTools basics
+        2. Ask about skill frontmatter restrictions
+        3. Ask about coordinator requirements
 
         Uses ConversationalGEval with custom criteria for RAG evaluation.
         """
-        conversation_data = PYTHON_TESTING_CONVERSATION
+        conversation_data = ALLOWED_TOOLS_CONVERSATION
         turns = []
 
         for turn_data in conversation_data["turns"]:
@@ -516,17 +526,17 @@ class TestMultiTurnRAGEvaluation:
         # Assert minimum quality thresholds
         assert results.get("Turn Faithfulness", 0) >= 0.0, "Faithfulness too low"
 
-    def test_multi_turn_with_filters(self, indexer_toolkit, deepeval_model):
+    def test_multi_turn_candidate_requirements(self, indexer_toolkit, deepeval_model):
         """
-        Test multi-turn conversation with follow-up questions.
+        Test multi-turn conversation about candidate requirements.
 
         This tests contextual understanding across turns where each question
-        builds on the previous context.
+        builds on the previous context about exam preparation.
         """
         turns = []
 
-        # Turn 1: Initial query
-        query1 = "What active Python testing documentation do you have?"
+        # Turn 1: Initial query about candidate experience
+        query1 = "What experience should a candidate have for the Claude Architect certification?"
         actual_output1, retrieval_context1 = search_and_extract_context(
             indexer_toolkit, query1
         )
@@ -535,8 +545,8 @@ class TestMultiTurnRAGEvaluation:
             Turn(role="assistant", content=actual_output1, retrieval_context=retrieval_context1),
         ])
 
-        # Turn 2: Follow-up about specific topic
-        query2 = "Tell me more about pytest fixtures from those documents"
+        # Turn 2: Follow-up about skills
+        query2 = "What specific skills should the candidate demonstrate?"
         actual_output2, retrieval_context2 = search_and_extract_context(
             indexer_toolkit, query2
         )
@@ -545,8 +555,8 @@ class TestMultiTurnRAGEvaluation:
             Turn(role="assistant", content=actual_output2, retrieval_context=retrieval_context2),
         ])
 
-        # Turn 3: Ask about CI/CD
-        query3 = "How can I integrate these tests with CI/CD?"
+        # Turn 3: Ask about exam content
+        query3 = "What are the exam domains and how is it scored?"
         actual_output3, retrieval_context3 = search_and_extract_context(
             indexer_toolkit, query3
         )
@@ -578,37 +588,37 @@ class TestMultiTurnRAGEvaluation:
 
     def test_comprehensive_rag_evaluation(self, indexer_toolkit, deepeval_model):
         """
-        Comprehensive RAG evaluation testing all metrics across multiple queries.
+        Comprehensive RAG evaluation testing all metrics across Claude Architect exam content.
 
         This test provides a thorough evaluation of RAG quality by testing
-        various query types and measuring all four DeepEval metrics.
+        allowedTools, candidate requirements, and multi-agent architecture queries.
         """
         # Define comprehensive test queries with expected outputs
         test_queries = [
             {
-                "query": "What is pytest and how do I use it?",
-                "expected": "pytest is a Python testing framework for writing and running tests",
-                "category": "basic_query",
+                "query": "What is allowedTools and when must Task be included?",
+                "expected": "allowedTools must include Task for a coordinator to invoke subagents",
+                "category": "allowed_tools",
             },
             {
-                "query": "How do I organize test files in a Python project?",
-                "expected": "Test files should be organized in a tests directory with test_ prefix",
-                "category": "best_practices",
+                "query": "How do I restrict tool access in skill frontmatter?",
+                "expected": "Configure allowed-tools in skill frontmatter to restrict tool access during skill execution",
+                "category": "skill_config",
             },
             {
-                "query": "What are pytest fixtures and parametrization?",
-                "expected": "Fixtures provide test setup/teardown, parametrization runs tests with multiple inputs",
-                "category": "advanced_features",
+                "query": "What experience should a candidate have for the certification?",
+                "expected": "Candidate should have 6+ months of practical experience with Claude APIs, Agent SDK, Claude Code, and MCP",
+                "category": "candidate_requirements",
             },
             {
-                "query": "How do I mock external dependencies in tests?",
-                "expected": "Use unittest.mock or pytest-mock to mock external dependencies",
-                "category": "mocking",
+                "query": "How do I pass context between agents in a multi-agent system?",
+                "expected": "Subagent context must be explicitly provided in the prompt. Include complete findings from prior agents directly in the subagent's prompt.",
+                "category": "multi_agent",
             },
             {
-                "query": "What is continuous integration for Python tests?",
-                "expected": "CI automatically runs tests on code changes using tools like GitHub Actions",
-                "category": "ci_cd",
+                "query": "What are the exam content domains and weightings?",
+                "expected": "Domain 1: Agentic Architecture (27%), Domain 2: Tool Design & MCP (18%), Domain 3: Claude Code (20%), Domain 4: Prompt Engineering (20%), Domain 5: Context Management (15%)",
+                "category": "exam_domains",
             },
         ]
 
@@ -681,9 +691,9 @@ class TestMultiTurnRAGEvaluation:
 class TestRAGEdgeCases:
     """Test RAG behavior with edge cases and boundary conditions."""
 
-    def test_empty_query(self, indexer_toolkit, deepeval_model):
-        """Test handling of minimal/empty-like queries."""
-        query = "testing"  # Very short query
+    def test_short_query(self, indexer_toolkit, deepeval_model):
+        """Test handling of minimal/short queries."""
+        query = "subagent"  # Very short query
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -704,7 +714,7 @@ class TestRAGEdgeCases:
 
     def test_out_of_domain_query(self, indexer_toolkit, deepeval_model):
         """Test handling of queries outside the indexed domain."""
-        query = "How do I cook pasta?"  # Completely unrelated to testing
+        query = "How do I cook pasta?"  # Completely unrelated to Claude/AI
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -726,8 +736,8 @@ class TestRAGEdgeCases:
     def test_specific_vs_general_query(self, indexer_toolkit, deepeval_model):
         """Compare retrieval quality between specific and general queries."""
         queries = [
-            ("pytest fixtures", "specific"),
-            ("how to test python code", "general"),
+            ("allowedTools Task coordinator", "specific"),
+            ("how to build agents with Claude", "general"),
         ]
 
         print(f"\nEdge Case - Specific vs General Queries:")
