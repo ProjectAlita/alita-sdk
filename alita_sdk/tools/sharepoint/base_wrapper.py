@@ -231,5 +231,3 @@ class BaseSharepointWrapper(ABC):
     def onenote_delete_page(self, page_id: str) -> str:
         raise ToolException(self._ONENOTE_NOT_SUPPORTED)
 
-    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
-        raise ToolException(self._ONENOTE_NOT_SUPPORTED)

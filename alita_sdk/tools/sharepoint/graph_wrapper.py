@@ -22,6 +22,7 @@ import requests
 from langchain_core.tools import ToolException
 
 from .base_wrapper import BaseSharepointWrapper
+from .models import OnenotePageItems, OnenoteTextItem, OnenoteImageItem, OnenoteAttachmentItem
 
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 _SMALL_FILE_THRESHOLD = 4 * 1024 * 1024   # 4 MB — simple PUT
@@ -1537,17 +1538,18 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             capture_images: bool = True,
             include_attachments: bool = True,
             read_attachment_content: bool = False,
-    ) -> list:
-        """Read and parse a OneNote page into a structured list of typed items.
+    ) -> OnenotePageItems:
+        """Read and parse a OneNote page into a structured collection of typed items.
 
-        Returns a list of dicts, one per content element, in document order:
+        Returns an :class:`~models.OnenotePageItems` instance — an ordered,
+        iterable collection of typed item objects:
 
-        - ``{"type": "text", "content": "<plain text block>"}``
-        - ``{"type": "image", "description": "<LLM description or alt text>",
-             "src": "<canonical Graph API resource URL>", "alt": "<original alt>"}``
-        - ``{"type": "attachment", "name": "<filename>",
-             "download_url": "<canonical Graph API URL>",
-             "content": "<parsed text or None>"}``
+        - :class:`~models.OnenoteTextItem`       — plain text block
+        - :class:`~models.OnenoteImageItem`       — embedded image (LLM description + src URL)
+        - :class:`~models.OnenoteAttachmentItem`  — file attachment (name + download URL)
+
+        ``str(result)`` renders a human-readable plain-text summary separated
+        by ``-----`` dividers, suitable for passing directly to an LLM.
 
         Args:
             page_id: The ID of the OneNote page to read.
@@ -1556,17 +1558,42 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             read_attachment_content: Also download and parse each attachment inline.
 
         Returns:
-            List of typed item dicts in document order.
+            :class:`~models.OnenotePageItems` collection in document order.
         """
         if not page_id:
             raise ToolException("page_id is required")
         try:
-            return self._onenote_parse_page_items(
+            raw_items = self._onenote_parse_page_items(
                 page_id=page_id,
                 capture_images=capture_images,
                 include_attachments=include_attachments,
                 read_attachment_content=read_attachment_content,
             )
+            # Convert internal dicts → typed dataclass instances.
+            # raw_bytes is intentionally dropped here — it is an internal-only
+            # field for the indexing pipeline (_extend_data calls
+            # _onenote_parse_page_items directly to preserve it).
+            typed_items = []
+            for item in raw_items:
+                item_type = item.get("type")
+                if item_type == "text":
+                    typed_items.append(OnenoteTextItem(
+                        content=item.get("content", ""),
+                    ))
+                elif item_type == "image":
+                    typed_items.append(OnenoteImageItem(
+                        description=item.get("description", ""),
+                        src=item.get("src", ""),
+                        alt=item.get("alt", ""),
+                    ))
+                elif item_type == "attachment":
+                    typed_items.append(OnenoteAttachmentItem(
+                        name=item.get("name", ""),
+                        download_url=item.get("download_url", ""),
+                        content=item.get("content"),
+                    ))
+                # unknown future types are silently skipped
+            return OnenotePageItems(items=typed_items)
         except ToolException:
             raise
         except Exception as e:
@@ -1744,29 +1771,3 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                 f"Failed to delete OneNote page '{page_id}': {e}"
             ) from e
 
-    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
-        """Search for OneNote pages matching a full-text query on this site.
-
-        Returns a list of matching page metadata objects, each containing:
-        id, title, lastModifiedDateTime, createdDateTime, and webUrl.
-        """
-        if not query or not query.strip():
-            raise ToolException("query is required and cannot be empty")
-        try:
-            data = self._get(
-                f"{self._onenote_prefix}/pages",
-                params={
-                    "search": query.strip(),
-                    "$select": (
-                        "id,title,lastModifiedDateTime,createdDateTime,webUrl"
-                    ),
-                    "$top": min(limit, 100),
-                },
-            )
-            return data.get("value", [])
-        except ToolException:
-            raise
-        except Exception as e:
-            raise ToolException(
-                f"Failed to search OneNote pages with query '{query}': {e}"
-            ) from e
