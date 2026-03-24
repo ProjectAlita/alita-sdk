@@ -20,6 +20,7 @@ from pydantic import Field, PrivateAttr, create_model, model_validator, SecretSt
 from .base_wrapper import BaseSharepointWrapper
 from .graph_wrapper import SharepointGraphWrapper
 from .rest_wrapper import SharepointRestWrapper
+from .models import OnenotePageItems
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...runtime.utils.utils import IndexerKeywords
 
@@ -788,17 +789,17 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         capture_images: bool = True,
         include_attachments: bool = True,
         read_attachment_content: bool = False,
-    ) -> list:
-        """Read and parse a OneNote page into a structured list of typed items.
+    ) -> OnenotePageItems:
+        """Read and parse a OneNote page into a structured collection of typed items.
 
-        Returns a list of dicts, one per content element, in document order:
+        Returns an OnenotePageItems collection (iterable, indexable) containing:
 
-        - ``{"type": "text", "content": "<plain text block>"}``
-        - ``{"type": "image", "description": "<LLM description or alt text>",
-             "src": "<canonical Graph API resource URL>", "alt": "<original alt>"}``
-        - ``{"type": "attachment", "name": "<filename>",
-             "download_url": "<canonical Graph API URL>",
-             "content": "<parsed text or None>"}``
+        - OnenoteTextItem       — plain text block  (.content)
+        - OnenoteImageItem      — embedded image    (.description, .src, .alt)
+        - OnenoteAttachmentItem — file attachment   (.name, .download_url, .content)
+
+        str(result) renders a human-readable plain-text summary suitable for
+        passing directly to an LLM.
 
         Requires Graph API delegated access (token + scopes).
         """
@@ -1043,7 +1044,11 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                     cfg = getattr(self, '_onenote_cfg', {})
                     capture_images = cfg.get('capture_images', True)
                     if capture_images:
-                        items = self._backend.onenote_read_page_items(
+                        # Use the internal method directly so raw_bytes and the
+                        # original 'type' field are preserved for the indexing
+                        # pipeline.  The public onenote_read_page_items() strips
+                        # those fields before returning to LLM tool callers.
+                        items = self._backend._onenote_parse_page_items(
                             page_id=page_id,
                             capture_images=True,
                             include_attachments=False,
