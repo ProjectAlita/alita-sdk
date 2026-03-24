@@ -118,6 +118,30 @@ DEFAULT_LLM_MODEL = os.getenv("DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS", "gpt-4o-min
 # DeepEval metrics model (defaults to OpenAI model since Anthropic has auth issues with LiteLLM)
 DEEPEVAL_LLM_MODEL = os.getenv("DEEPEVAL_LLM_MODEL", "gpt-4o-mini")
 
+# ===================== DeepEval Threshold Constants =====================
+# Thresholds define the minimum acceptable score for each metric type.
+# metric.success = (metric.score >= threshold)
+#
+# Threshold guidelines:
+#   0.3-0.5: Exploratory/development testing (lenient)
+#   0.5-0.7: Integration testing (moderate)
+#   0.7-0.8: Production readiness (strict)
+#   0.8-1.0: High-stakes applications (very strict)
+
+# Single-turn metric thresholds
+THRESHOLD_FAITHFULNESS = 0.5          # Response grounded in context (no hallucinations)
+THRESHOLD_CONTEXTUAL_RELEVANCY = 0.3  # Retrieved context is relevant to query
+THRESHOLD_CONTEXTUAL_PRECISION = 0.3  # Most relevant docs ranked higher
+THRESHOLD_CONTEXTUAL_RECALL = 0.3     # Context contains info needed to answer
+
+# Multi-turn conversation thresholds
+THRESHOLD_TURN_FAITHFULNESS = 0.5     # Each turn grounded in its context
+THRESHOLD_TURN_RELEVANCY = 0.3        # Turn context relevant to conversation
+THRESHOLD_RESPONSE_QUALITY = 0.3      # Responses adequately address questions
+
+# Edge case thresholds (more lenient for boundary testing)
+THRESHOLD_EDGE_CASE = 0.0             # Just verify metric runs without error
+
 
 def _check_credentials_available() -> bool:
     """Check if all required credentials are available."""
@@ -343,15 +367,15 @@ class TestSingleTurnRAGEvaluation:
             retrieval_context=retrieval_context,
         )
 
-        metric = FaithfulnessMetric(threshold=0.5, model=deepeval_model, async_mode=False)
+        metric = FaithfulnessMetric(threshold=THRESHOLD_FAITHFULNESS, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
         print(f"\nFaithfulness Test (allowedTools):")
         print(f"  Query: {query}")
-        print(f"  Score: {metric.score}")
+        print(f"  Score: {metric.score} (threshold: {THRESHOLD_FAITHFULNESS})")
         print(f"  Reason: {metric.reason}")
 
-        assert metric.score >= 0.0, f"Faithfulness below minimum: {metric.score}"
+        assert metric.success, f"Faithfulness failed: {metric.score} < {THRESHOLD_FAITHFULNESS}. Reason: {metric.reason}"
 
     def test_contextual_relevancy_candidate(self, indexer_toolkit, deepeval_model):
         """
@@ -360,7 +384,7 @@ class TestSingleTurnRAGEvaluation:
         Contextual Relevancy measures whether the retrieval context aligns
         with what the user is asking about.
         """
-        query = "What experience should a candidate have for Claude Architect certification?"
+        query = "What qualifications should a candidate have for the Claude Architect certification?"
         actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
 
         test_case = LLMTestCase(
@@ -369,15 +393,15 @@ class TestSingleTurnRAGEvaluation:
             retrieval_context=retrieval_context,
         )
 
-        metric = ContextualRelevancyMetric(threshold=0.3, model=deepeval_model, async_mode=False)
+        metric = ContextualRelevancyMetric(threshold=THRESHOLD_CONTEXTUAL_RELEVANCY, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
         print(f"\nContextual Relevancy Test (candidate):")
         print(f"  Query: {query}")
-        print(f"  Score: {metric.score}")
+        print(f"  Score: {metric.score} (threshold: {THRESHOLD_CONTEXTUAL_RELEVANCY})")
         print(f"  Reason: {metric.reason}")
 
-        assert metric.score >= 0.0, f"Contextual Relevancy below minimum: {metric.score}"
+        assert metric.success, f"Contextual Relevancy failed: {metric.score} < {THRESHOLD_CONTEXTUAL_RELEVANCY}. Reason: {metric.reason}"
 
     def test_contextual_precision_subagent_config(self, indexer_toolkit, deepeval_model):
         """
@@ -397,15 +421,15 @@ class TestSingleTurnRAGEvaluation:
             retrieval_context=retrieval_context,
         )
 
-        metric = ContextualPrecisionMetric(threshold=0.3, model=deepeval_model, async_mode=False)
+        metric = ContextualPrecisionMetric(threshold=THRESHOLD_CONTEXTUAL_PRECISION, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
         print(f"\nContextual Precision Test (subagent config):")
         print(f"  Query: {query}")
-        print(f"  Score: {metric.score}")
+        print(f"  Score: {metric.score} (threshold: {THRESHOLD_CONTEXTUAL_PRECISION})")
         print(f"  Reason: {metric.reason}")
 
-        assert metric.score >= 0.0, f"Contextual Precision below minimum: {metric.score}"
+        assert metric.success, f"Contextual Precision failed: {metric.score} < {THRESHOLD_CONTEXTUAL_PRECISION}. Reason: {metric.reason}"
 
     def test_contextual_recall_exam_domains(self, indexer_toolkit, deepeval_model):
         """
@@ -425,15 +449,15 @@ class TestSingleTurnRAGEvaluation:
             retrieval_context=retrieval_context,
         )
 
-        metric = ContextualRecallMetric(threshold=0.3, model=deepeval_model, async_mode=False)
+        metric = ContextualRecallMetric(threshold=THRESHOLD_CONTEXTUAL_RECALL, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
         print(f"\nContextual Recall Test (exam domains):")
         print(f"  Query: {query}")
-        print(f"  Score: {metric.score}")
+        print(f"  Score: {metric.score} (threshold: {THRESHOLD_CONTEXTUAL_RECALL})")
         print(f"  Reason: {metric.reason}")
 
-        assert metric.score >= 0.0, f"Contextual Recall below minimum: {metric.score}"
+        assert metric.success, f"Contextual Recall failed: {metric.score} < {THRESHOLD_CONTEXTUAL_RECALL}. Reason: {metric.reason}"
 
 
 # ===================== Multi-Turn Conversational RAG Tests =====================
@@ -491,7 +515,7 @@ class TestMultiTurnRAGEvaluation:
                 criteria="Evaluate whether each assistant response is factually grounded in its retrieval context. "
                          "The response should not contain information not present in the retrieved documents.",
                 evaluation_params=[TurnParams.CONTENT, TurnParams.RETRIEVAL_CONTEXT],
-                threshold=0.5,
+                threshold=THRESHOLD_TURN_FAITHFULNESS,
                 model=deepeval_model,
                 async_mode=False,
             ),
@@ -500,7 +524,7 @@ class TestMultiTurnRAGEvaluation:
                 criteria="Evaluate whether the retrieved context for each turn is relevant to the conversation. "
                          "The retrieval context should contain information that helps answer the user's question.",
                 evaluation_params=[TurnParams.CONTENT, TurnParams.RETRIEVAL_CONTEXT],
-                threshold=0.3,
+                threshold=THRESHOLD_TURN_RELEVANCY,
                 model=deepeval_model,
                 async_mode=False,
             ),
@@ -509,22 +533,26 @@ class TestMultiTurnRAGEvaluation:
                 criteria="Evaluate whether the assistant's responses adequately address the user's questions "
                          "using information from the retrieval context. Check for completeness and accuracy.",
                 evaluation_params=[TurnParams.CONTENT, TurnParams.RETRIEVAL_CONTEXT],
-                threshold=0.3,
+                threshold=THRESHOLD_RESPONSE_QUALITY,
                 model=deepeval_model,
                 async_mode=False,
             ),
         ]
 
         results = {}
+        failures = []
         for metric in rag_metrics:
             metric.measure(convo_test_case)
-            results[metric.name] = metric.score
-            print(f"  {metric.name}: {metric.score:.2f}")
+            results[metric.name] = {"score": metric.score, "success": metric.success, "threshold": metric.threshold}
+            status = "PASS" if metric.success else "FAIL"
+            print(f"  {metric.name}: {metric.score:.2f} (threshold: {metric.threshold}) [{status}]")
             if hasattr(metric, 'reason') and metric.reason:
                 print(f"    Reason: {metric.reason[:100]}...")
+            if not metric.success:
+                failures.append(f"{metric.name}: {metric.score} < {metric.threshold}")
 
-        # Assert minimum quality thresholds
-        assert results.get("Turn Faithfulness", 0) >= 0.0, "Faithfulness too low"
+        # Assert all metrics pass their thresholds
+        assert not failures, f"Multi-turn metrics failed: {'; '.join(failures)}"
 
     def test_multi_turn_candidate_requirements(self, indexer_toolkit, deepeval_model):
         """
@@ -573,18 +601,19 @@ class TestMultiTurnRAGEvaluation:
             criteria="Evaluate whether assistant responses are grounded in the retrieval context "
                      "and do not hallucinate information not present in the retrieved documents.",
             evaluation_params=[TurnParams.CONTENT, TurnParams.RETRIEVAL_CONTEXT],
-            threshold=0.3,
+            threshold=THRESHOLD_TURN_FAITHFULNESS,
             model=deepeval_model,
             async_mode=False,
         )
         metric.measure(convo_test_case)
 
+        status = "PASS" if metric.success else "FAIL"
         print(f"\nMulti-Turn with Follow-ups:")
-        print(f"  Faithfulness Score: {metric.score:.2f}")
+        print(f"  Faithfulness Score: {metric.score:.2f} (threshold: {THRESHOLD_TURN_FAITHFULNESS}) [{status}]")
         if hasattr(metric, 'reason') and metric.reason:
             print(f"  Reason: {metric.reason[:150]}...")
 
-        assert metric.score >= 0.0
+        assert metric.success, f"Conversation Faithfulness failed: {metric.score} < {THRESHOLD_TURN_FAITHFULNESS}. Reason: {metric.reason}"
 
     def test_comprehensive_rag_evaluation(self, indexer_toolkit, deepeval_model):
         """
@@ -642,30 +671,33 @@ class TestMultiTurnRAGEvaluation:
                 retrieval_context=retrieval_context,
             )
 
-            # Evaluate with all metrics
+            # Evaluate with all metrics using constants
             metrics = {
-                "Faithfulness": FaithfulnessMetric(threshold=0.3, model=deepeval_model, async_mode=False),
-                "Relevancy": ContextualRelevancyMetric(threshold=0.2, model=deepeval_model, async_mode=False),
-                "Precision": ContextualPrecisionMetric(threshold=0.2, model=deepeval_model, async_mode=False),
-                "Recall": ContextualRecallMetric(threshold=0.2, model=deepeval_model, async_mode=False),
+                "Faithfulness": FaithfulnessMetric(threshold=THRESHOLD_FAITHFULNESS, model=deepeval_model, async_mode=False),
+                "Relevancy": ContextualRelevancyMetric(threshold=THRESHOLD_CONTEXTUAL_RELEVANCY, model=deepeval_model, async_mode=False),
+                "Precision": ContextualPrecisionMetric(threshold=THRESHOLD_CONTEXTUAL_PRECISION, model=deepeval_model, async_mode=False),
+                "Recall": ContextualRecallMetric(threshold=THRESHOLD_CONTEXTUAL_RECALL, model=deepeval_model, async_mode=False),
             }
 
             scores = {}
+            successes = {}
             for name, metric in metrics.items():
                 metric.measure(test_case)
                 scores[name] = metric.score
+                successes[name] = metric.success
 
             all_results.append({
                 "query": query,
                 "category": category,
                 "scores": scores,
+                "successes": successes,
                 "context_count": len(retrieval_context),
             })
 
             print(f"\n[{category.upper()}] {query[:50]}...")
             print(f"  Context chunks retrieved: {len(retrieval_context)}")
             for name, score in scores.items():
-                status = "PASS" if score >= 0.3 else "LOW"
+                status = "PASS" if successes[name] else "FAIL"
                 print(f"  {name}: {score:.2f} [{status}]")
 
         # Summary statistics
@@ -673,16 +705,21 @@ class TestMultiTurnRAGEvaluation:
         print("SUMMARY")
         print(f"{'='*70}")
 
+        metric_names = ["Faithfulness", "Relevancy", "Precision", "Recall"]
         avg_scores = {
             metric: sum(r["scores"][metric] for r in all_results) / len(all_results)
-            for metric in ["Faithfulness", "Relevancy", "Precision", "Recall"]
+            for metric in metric_names
+        }
+        pass_rates = {
+            metric: sum(1 for r in all_results if r["successes"][metric]) / len(all_results)
+            for metric in metric_names
         }
 
-        for metric, avg in avg_scores.items():
-            print(f"  Average {metric}: {avg:.2f}")
+        for metric in metric_names:
+            print(f"  {metric}: avg={avg_scores[metric]:.2f}, pass_rate={pass_rates[metric]*100:.0f}%")
 
-        # At minimum, faithfulness should be reasonable
-        assert avg_scores["Faithfulness"] >= 0.0, "Average faithfulness too low"
+        # Assert minimum pass rate for faithfulness (most critical metric)
+        assert pass_rates["Faithfulness"] >= 0.5, f"Faithfulness pass rate too low: {pass_rates['Faithfulness']*100:.0f}%"
 
 
 # ===================== Edge Case Tests =====================
@@ -702,15 +739,17 @@ class TestRAGEdgeCases:
             retrieval_context=retrieval_context,
         )
 
-        metric = FaithfulnessMetric(threshold=0.0, model=deepeval_model, async_mode=False)
+        metric = FaithfulnessMetric(threshold=THRESHOLD_EDGE_CASE, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
         print(f"\nEdge Case - Short Query:")
         print(f"  Query: '{query}'")
-        print(f"  Score: {metric.score}")
+        print(f"  Score: {metric.score} (threshold: {THRESHOLD_EDGE_CASE})")
 
         # Should still return some results
         assert len(retrieval_context) > 0, "Should retrieve some context even for short queries"
+        # Metric should run successfully (score exists)
+        assert metric.score is not None, "Metric should produce a score"
 
     def test_out_of_domain_query(self, indexer_toolkit, deepeval_model):
         """Test handling of queries outside the indexed domain."""
@@ -723,15 +762,18 @@ class TestRAGEdgeCases:
             retrieval_context=retrieval_context,
         )
 
-        metric = ContextualRelevancyMetric(threshold=0.0, model=deepeval_model, async_mode=False)
+        metric = ContextualRelevancyMetric(threshold=THRESHOLD_EDGE_CASE, model=deepeval_model, async_mode=False)
         metric.measure(test_case)
 
         print(f"\nEdge Case - Out of Domain Query:")
         print(f"  Query: '{query}'")
-        print(f"  Relevancy Score: {metric.score}")
+        print(f"  Relevancy Score: {metric.score} (threshold: {THRESHOLD_EDGE_CASE})")
 
         # Relevancy should be low for out-of-domain queries
         # This validates that the metric correctly identifies irrelevant results
+        assert metric.score is not None, "Metric should produce a score"
+        # Out-of-domain queries should have low relevancy (below normal threshold)
+        assert metric.score < THRESHOLD_CONTEXTUAL_RELEVANCY, f"Out-of-domain query should have low relevancy, got {metric.score}"
 
     def test_specific_vs_general_query(self, indexer_toolkit, deepeval_model):
         """Compare retrieval quality between specific and general queries."""
@@ -751,7 +793,8 @@ class TestRAGEdgeCases:
                 retrieval_context=retrieval_context,
             )
 
-            metric = ContextualRelevancyMetric(threshold=0.0, model=deepeval_model, async_mode=False)
+            metric = ContextualRelevancyMetric(threshold=THRESHOLD_EDGE_CASE, model=deepeval_model, async_mode=False)
             metric.measure(test_case)
 
-            print(f"  [{query_type.upper()}] '{query}': {metric.score:.2f}")
+            status = "PASS" if metric.score >= THRESHOLD_CONTEXTUAL_RELEVANCY else "LOW"
+            print(f"  [{query_type.upper()}] '{query}': {metric.score:.2f} [{status}]")
