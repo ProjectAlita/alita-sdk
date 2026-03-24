@@ -1889,3 +1889,46 @@ def test_hitl_resume_context_discarded_when_bare_name_foreign():
     assert len(client.invoke_calls) >= 1
     assert isinstance(result['messages'][-1], AIMessage)
     assert result['messages'][-1].content == client.final_message
+
+
+def test_hitl_resume_context_fallback_matches_prefixed_tool_name():
+    """When tool.name carries a runtime prefix (e.g. github___create_issue)
+    the fallback path must still match the normalized base name from the
+    resume context so the synthetic tool call is not incorrectly discarded."""
+    prefixed_tool = StructuredTool.from_function(
+        func=lambda title, repo: f'created {title} in {repo}',
+        name='github___create_issue',
+        description='Create a GitHub issue (prefixed name).',
+        metadata={'toolkit_type': 'github', 'toolkit_name': 'github', 'tool_name': 'create_issue'},
+    )
+    client = FakeLLMClient('Issue created.')
+    node = LLMNode(
+        client=client,
+        available_tools=[prefixed_tool],
+        tool_names=['github___create_issue'],
+        lazy_tools_mode=False,
+        input_mapping={},
+        output_variables=['messages'],
+    )
+
+    # Resume context uses the normalized base name (no prefix), no toolkit_name
+    result = node.invoke(
+        {'messages': [HumanMessage(content='Create an issue.')]},
+        config={
+            'configurable': {
+                '_hitl_resume_context': {
+                    'action': 'approve',
+                    'tool_name': 'create_issue',
+                    'tool_args': {'title': 'Bug', 'repo': 'org/repo'},
+                    'tool_call_id': 'hitl_call_prefixed',
+                }
+            }
+        },
+    )
+
+    # The resume context should be honoured despite the prefix mismatch
+    tool_msgs = [m for m in result['messages'] if isinstance(m, ToolMessage)]
+    assert tool_msgs, (
+        'Expected synthetic tool execution — normalized base name should match '
+        'the prefixed tool name in the fallback path'
+    )

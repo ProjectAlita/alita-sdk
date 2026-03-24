@@ -995,8 +995,10 @@ class LLMNode(BaseTool):
                     )
                     hitl_ctx = None
             else:
-                # Fallback: no toolkit info — use bare tool name check.
-                own_tool_names = {t.name for t in (self.available_tools or [])}
+                # Fallback: no toolkit info — use normalized base names so
+                # that prefixed/aliased names (e.g. github___tool) still
+                # match the base name from the HITL interrupt payload.
+                own_tool_names = {normalize_tool_name(t.name) for t in (self.available_tools or [])}
                 if ctx_tool not in own_tool_names:
                     logger.info(
                         "[HITL] Ignoring stale _hitl_resume_context for tool '%s' "
