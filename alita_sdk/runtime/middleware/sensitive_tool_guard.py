@@ -253,12 +253,17 @@ class SensitiveToolGuardMiddleware(Middleware):
         # execution batch.  The context variable is activated by the
         # LLM node *after* the first iteration so replay interrupts
         # consume their checkpoint values correctly.
+        # Uses qualified identity (toolkit_name.tool_name) so that approving
+        # e.g. jira.create_issue does NOT auto-approve github.create_issue.
+        from ..toolkits.security import qualified_tool_identity
         tool_name = sensitive_tool_context['tool_name']
+        toolkit_name = sensitive_tool_context.get('toolkit_name')
+        qualified = qualified_tool_identity(tool_name, toolkit_name)
         approved = _HITL_APPROVED_TOOLS.get(frozenset())
-        if tool_name in approved:
+        if qualified in approved:
             logger.info(
                 "[HITL] Auto-approving '%s' (already authorized in this batch)",
-                tool_name,
+                qualified,
             )
             return {'action': 'approve', 'value': ''}
 
