@@ -310,11 +310,6 @@ OnenoteDeletePageInput = create_model(
     page_id=(str, Field(description="The ID of the OneNote page to delete.")),
 )
 
-OnenoteSearchPagesInput = create_model(
-    "OnenoteSearchPagesInput",
-    query=(str, Field(description="Full-text search query to search across all OneNote pages on this site.")),
-    limit=(Optional[int], Field(default=50, gt=0, description="Maximum number of results to return.")),
-)
 
 OnenoteListAttachmentsInput = create_model(
     "OnenoteListAttachmentsInput",
@@ -744,16 +739,6 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         self._sync_backend_context()
         return self._backend.onenote_delete_page(page_id)
 
-    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
-        """Search for OneNote pages matching a full-text query on this site.
-
-        Searches across all pages in all notebooks on the SharePoint site.
-        Returns a list of matching page metadata objects, each containing:
-        id, title, lastModifiedDateTime, createdDateTime, and webUrl.
-        Requires Graph API delegated access (token + scopes).
-        """
-        self._sync_backend_context()
-        return self._backend.onenote_search_pages(query, limit)
 
     def onenote_list_attachments(self, page_id: str) -> list:
         """List all file attachments on a OneNote page.
@@ -1356,12 +1341,6 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 "description": self.onenote_delete_page.__doc__,
                 "args_schema": OnenoteDeletePageInput,
                 "ref": self.onenote_delete_page,
-            },
-            {
-                "name": "onenote_search_pages",
-                "description": self.onenote_search_pages.__doc__,
-                "args_schema": OnenoteSearchPagesInput,
-                "ref": self.onenote_search_pages,
             },
             {
                 "name": "onenote_list_attachments",

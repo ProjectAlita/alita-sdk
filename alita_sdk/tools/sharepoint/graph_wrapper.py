@@ -1744,29 +1744,3 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
                 f"Failed to delete OneNote page '{page_id}': {e}"
             ) from e
 
-    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
-        """Search for OneNote pages matching a full-text query on this site.
-
-        Returns a list of matching page metadata objects, each containing:
-        id, title, lastModifiedDateTime, createdDateTime, and webUrl.
-        """
-        if not query or not query.strip():
-            raise ToolException("query is required and cannot be empty")
-        try:
-            data = self._get(
-                f"{self._onenote_prefix}/pages",
-                params={
-                    "search": query.strip(),
-                    "$select": (
-                        "id,title,lastModifiedDateTime,createdDateTime,webUrl"
-                    ),
-                    "$top": min(limit, 100),
-                },
-            )
-            return data.get("value", [])
-        except ToolException:
-            raise
-        except Exception as e:
-            raise ToolException(
-                f"Failed to search OneNote pages with query '{query}': {e}"
-            ) from e
