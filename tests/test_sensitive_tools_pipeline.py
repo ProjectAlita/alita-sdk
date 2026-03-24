@@ -192,7 +192,9 @@ class TestApiTrustModel:
                 "policy_message": "Approval required",
                 "tool_args": {},
             }
-            result = SensitiveToolGuardMiddleware._review_sensitive_tool_call(ctx)
+            guard = SensitiveToolGuardMiddleware.__new__(SensitiveToolGuardMiddleware)
+            guard._auto_approve = False
+            result = guard._review_sensitive_tool_call(ctx)
             assert result["action"] == "approve"
         finally:
             reset_hitl_approved_tools(token)
