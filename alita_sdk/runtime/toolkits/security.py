@@ -60,6 +60,21 @@ def normalize_tool_name(tool_name: Optional[str]) -> str:
     return aliases[-1] if aliases else ''
 
 
+def qualified_tool_identity(tool_name: Optional[str], toolkit_name: Optional[str] = None) -> str:
+    """Return a qualified tool identity for disambiguation.
+
+    When *toolkit_name* is available the result is ``toolkit_name.base_name``
+    so that ``jira.create_issue`` and ``github.create_issue`` are treated as
+    different actions.  Falls back to the bare base name when *toolkit_name*
+    is missing.
+    """
+    base = normalize_tool_name(tool_name)
+    if not base:
+        return ''
+    prefix = str(toolkit_name or '').strip().lower()
+    return f'{prefix}.{base}' if prefix else base
+
+
 def _normalize_tools_mapping(tool_map: Optional[Dict[str, List[str]]]) -> Dict[str, List[str]]:
     return {
         str(key).strip().lower(): [str(item).strip().lower() for item in (values or []) if str(item).strip()]
