@@ -69,6 +69,7 @@ nodes:
       type: fixed
       value: |-
         import json
+        import re
 
         input_str = alita_state.get('input', '').strip()
 
@@ -83,17 +84,26 @@ nodes:
             }
         else:
             # Step 2: Try to parse JSON
+            parse_failed = False
             try:
                 input_data = json.loads(input_str)
             except json.JSONDecodeError:
-                result = {
-                    "validation_passed": False,
-                    "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"expand\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
-                    "epic_id": 0,
-                    "expand": True,
-                    "output_name": ""
-                }
-            else:
+                # Try to fix Python-style booleans (True/False) to JSON-style (true/false)
+                fixed_input = re.sub(r':\s*True\b', ': true', input_str)
+                fixed_input = re.sub(r':\s*False\b', ': false', fixed_input)
+                try:
+                    input_data = json.loads(fixed_input)
+                except json.JSONDecodeError:
+                    parse_failed = True
+                    result = {
+                        "validation_passed": False,
+                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"expand\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
+                        "epic_id": 0,
+                        "expand": True,
+                        "output_name": ""
+                    }
+            
+            if not parse_failed:
                 # Step 3: Validate JSON structure and types
                 if not isinstance(input_data, dict):
                     result = {
@@ -291,9 +301,14 @@ nodes:
       type: fixed
       value: |-
         epic_id = alita_state.get('epic_id')
+        expand = alita_state.get('expand', True)
 
         # Build WIQL query for direct children (including description field)
-        current_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] = {epic_id}"
+        # Only needed if expand is True
+        if expand:
+            current_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] = {epic_id}"
+        else:
+            current_query = ""
 
         result = {
             "current_query": current_query,
@@ -305,6 +320,7 @@ nodes:
         result
     input:
       - epic_id
+      - expand
     output:
       - current_query
       - all_item_ids
@@ -312,7 +328,21 @@ nodes:
       - current_parent_ids
       - artifact_filepath
     structured_output: true
-    transition: FetchLevel
+    transition: ExpandRouter
+  - id: ExpandRouter
+    type: router
+    condition: |
+      {% if expand %}
+        FetchLevel
+      {% else %}
+        CleanHierarchyData
+      {% endif %}
+    default_output: CleanHierarchyData
+    input:
+      - expand
+    routes:
+      - FetchLevel
+      - CleanHierarchyData
   - id: FetchLevel
     type: toolkit
     input:
@@ -973,7 +1003,7 @@ nodes:
           Operation result:
           {operation_result}
 
-          If this is a successful operation, display the filename list.
+          If this is a successful operation, output only the filename list.
           If this is an error, explain the issue and provide the correct input format: {{"id": 9, "expand": true, "output_name": "optional"}}..
     output: []
     structured_output: false
