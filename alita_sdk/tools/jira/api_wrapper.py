@@ -55,7 +55,7 @@ JiraSearch = create_model(
 JiraCreateIssue = create_model(
     "JiraCreateIssueModel",
     issue_json=(str, Field(
-        description=("JSON string to create a Jira issue. Must contain a 'fields' object with at minimum: "
+        description=("Pure JSON string to create a Jira issue. Must contain a 'fields' object with at minimum: "
                      "'project' (key), 'summary', 'issuetype' (name), and optionally 'description', 'priority', etc.\n"
                      "For 'description' field: use Atlassian Document Format (ADF) as the preferred format, "
                      "e.g. {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", "
@@ -65,7 +65,7 @@ JiraCreateIssue = create_model(
                      "\"description\": {\"type\": \"doc\", \"version\": 1, \"content\": [{\"type\": \"paragraph\", "
                      "\"content\": [{\"type\": \"text\", \"text\": \"Description text\"}]}]}, "
                      "\"issuetype\": {\"name\": \"Task\"}, \"priority\": {\"name\": \"Major\"}}}\n"
-                     "*IMPORTANT*: All JSON keys must be double-quoted."))))
+                     "*IMPORTANT*: All JSON keys must be double-quoted and it should not have any '```' at very beginning or end."))))
 
 
 JiraUpdateIssue = create_model(
