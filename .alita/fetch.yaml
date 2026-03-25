@@ -474,21 +474,38 @@ nodes:
         if isinstance(all_fetched_items, dict) and 'all_fetched_items' in all_fetched_items:
             all_fetched_items = all_fetched_items['all_fetched_items']
 
+        def remove_links_recursively(obj):
+            """Recursively remove _links fields from nested objects."""
+            if isinstance(obj, dict):
+                # Remove _links from current level
+                if '_links' in obj:
+                    del obj['_links']
+                # Recurse into nested dicts
+                for key, value in obj.items():
+                    if isinstance(value, dict):
+                        remove_links_recursively(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                remove_links_recursively(item)
+            return obj
+        
         # Remove _links field from epic_data (ADO internal field)
-        if isinstance(epic_data, dict) and '_links' in epic_data:
-            del epic_data['_links']
+        if isinstance(epic_data, dict):
+            remove_links_recursively(epic_data)
         
         # Remove _links field from all fetched items (ADO internal field)
         for item in all_fetched_items:
-            if isinstance(item, dict) and '_links' in item:
-                del item['_links']
+            if isinstance(item, dict):
+                remove_links_recursively(item)
 
         def strip_html(text):
             """Strip HTML tags and normalise whitespace from a description field."""
             if not text:
                 return ''
-            text = _html.unescape(text)          # &amp; → &, &nbsp; → space, etc.
+            text = _html.unescape(text)          # &amp; → &, &nbsp; → \xa0, etc.
             text = re.sub(r'<[^>]+>', ' ', text) # remove every HTML tag
+            text = text.replace('\xa0', ' ')     # convert non-breaking spaces to regular spaces
             text = re.sub(r'[ \t]+', ' ', text)  # collapse horizontal whitespace
             text = re.sub(r'\n{3,}', '\n\n', text)  # collapse excess blank lines
             return text.strip()
@@ -840,6 +857,9 @@ nodes:
     code:
       type: fixed
       value: |-
+        import re
+        import html as _html
+        
         item_cache = alita_state.get('item_cache', {})
         fetched_items = alita_state.get('fetched_items', [])
         
@@ -851,6 +871,17 @@ nodes:
         if not isinstance(fetched_items, list):
             fetched_items = []
         
+        def strip_html(text):
+            """Strip HTML tags and normalise whitespace from a description field."""
+            if not text:
+                return ''
+            text = _html.unescape(text)          # &amp; → &, &nbsp; → \xa0, etc.
+            text = re.sub(r'<[^>]+>', ' ', text) # remove every HTML tag
+            text = text.replace('\xa0', ' ')     # convert non-breaking spaces to regular spaces
+            text = re.sub(r'[ \t]+', ' ', text)  # collapse horizontal whitespace
+            text = re.sub(r'\n{3,}', '\n\n', text)  # collapse excess blank lines
+            return text.strip()
+        
         # Merge fetched items into cache
         for item in fetched_items:
             item_id = item.get('id') or item.get('System.Id')
@@ -861,7 +892,7 @@ nodes:
                     'title': item.get('System.Title', 'Untitled'),
                     'state': item.get('System.State', 'Unknown'),
                     'type': item.get('System.WorkItemType', 'Item'),
-                    'description': item.get('System.Description', ''),
+                    'description': strip_html(item.get('System.Description', '')),
                     'url': item.get('url', '')
                 }
         
