@@ -361,8 +361,21 @@ nodes:
     output:
       - operation_result
     template: '{"operation": "fetch_hierarchy", "status": "error", "item_id": {{ epic_id }}, "error": "{{ error_message | replace(''"'', ''\\"'') }}"}'
-    transition: ReplyComposer
+    transition: OutputResult
     variables_to_clean: []
+  - id: OutputResult
+    type: code
+    code:
+      type: fixed
+      value: |-
+        # Return operation_result as the final response
+        operation_result = alita_state.get('operation_result', '')
+        operation_result
+    input:
+      - operation_result
+    output: []
+    structured_output: false
+    transition: END
   - id: InitializeFetch
     type: code
     code:
@@ -1467,5 +1480,4 @@ nodes:
     output:
       - operation_result
     structured_output: true
-    transition: END
-  # Note: operation_result is explicitly declared as output for agent-to-agent communication
+    transition: OutputResult

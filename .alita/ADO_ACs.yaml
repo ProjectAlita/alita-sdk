@@ -20,7 +20,7 @@ state:
   error_message:
     type: string
     value: ''
-  expand:
+  include_dependencies:
     type: bool
     value: true
   extracted_acs:
@@ -70,15 +70,15 @@ nodes:
         if isinstance(input_str, dict):
             input_data = input_str
             # Skip to validation
-            expand = input_data.get('expand', True)
+            include_dependencies = input_data.get('include_dependencies', True)
             output_name = input_data.get('output_name', '')
             
             if 'id' not in input_data:
                 result = {
                     "validation_passed": False,
-                    "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"expand\": true}",
+                    "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"include_dependencies\": true}",
                     "epic_id": 0,
-                    "expand": True,
+                    "include_dependencies": True,
                     "output_name": ""
                 }
             else:
@@ -89,7 +89,7 @@ nodes:
                             "validation_passed": False,
                             "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                             "epic_id": 0,
-                            "expand": expand,
+                            "include_dependencies": include_dependencies,
                             "output_name": output_name
                         }
                     else:
@@ -104,7 +104,7 @@ nodes:
                             "validation_passed": True,
                             "error_message": "",
                             "epic_id": epic_id,
-                            "expand": expand,
+                            "include_dependencies": include_dependencies,
                             "output_name": output_name
                         }
                 except (ValueError, TypeError):
@@ -112,9 +112,10 @@ nodes:
                         "validation_passed": False,
                         "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                         "epic_id": 0,
-                        "expand": expand,
+                        "include_dependencies": include_dependencies,
                         "output_name": output_name
                     }
+            result
         else:
             # Input is a string, parse as JSON
             input_str = str(input_str).strip()
@@ -123,9 +124,9 @@ nodes:
             if not input_str:
                 result = {
                     "validation_passed": False,
-                    "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"expand\": true}",
+                    "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"include_dependencies\": true}",
                     "epic_id": 0,
-                    "expand": True,
+                    "include_dependencies": True,
                     "output_name": ""
                 }
             else:
@@ -135,9 +136,9 @@ nodes:
                 except json.JSONDecodeError:
                     result = {
                         "validation_passed": False,
-                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"expand\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
+                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"include_dependencies\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
                         "epic_id": 0,
-                        "expand": True,
+                        "include_dependencies": True,
                         "output_name": ""
                     }
                 else:
@@ -145,38 +146,38 @@ nodes:
                     if not isinstance(input_data, dict):
                         result = {
                             "validation_passed": False,
-                            "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"expand\": true}",
+                            "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"include_dependencies\": true}",
                             "epic_id": 0,
-                            "expand": True,
+                            "include_dependencies": True,
                             "output_name": ""
                         }
                     elif 'id' not in input_data:
                         result = {
                             "validation_passed": False,
-                            "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"expand\": true}",
+                            "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"include_dependencies\": true}",
                             "epic_id": 0,
-                            "expand": input_data.get('expand', True),
+                            "include_dependencies": input_data.get('include_dependencies', True),
                             "output_name": input_data.get('output_name', '')
                         }
                     else:
-                        # Step 4: Validate expand and output_name types if provided
-                        expand = input_data.get('expand', True)
+                        # Step 4: Validate include_dependencies and output_name types if provided
+                        include_dependencies = input_data.get('include_dependencies', True)
                         output_name = input_data.get('output_name', '')
                         
-                        if 'expand' in input_data and not isinstance(expand, bool):
+                        if 'include_dependencies' in input_data and not isinstance(include_dependencies, (bool, int)):
                             result = {
                                 "validation_passed": False,
-                                "error_message": "Field 'expand' must be a boolean (true or false). Expected: {\"id\": 9, \"expand\": true}",
+                                "error_message": "Field 'include_dependencies' must be a boolean or integer. Expected: {\"id\": 9, \"include_dependencies\": true}",
                                 "epic_id": 0,
-                                "expand": True,
+                                "include_dependencies": True,
                                 "output_name": ""
                             }
                         elif 'output_name' in input_data and not isinstance(output_name, str):
                             result = {
                                 "validation_passed": False,
-                                "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"expand\": true, \"output_name\": \"my_run\"}",
+                                "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"include_dependencies\": true, \"output_name\": \"my_run\"}",
                                 "epic_id": 0,
-                                "expand": True,
+                                "include_dependencies": True,
                                 "output_name": ""
                             }
                         else:
@@ -188,7 +189,7 @@ nodes:
                                         "validation_passed": False,
                                         "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                                         "epic_id": 0,
-                                        "expand": expand,
+                                        "include_dependencies": include_dependencies,
                                         "output_name": output_name
                                     }
                                 else:
@@ -203,7 +204,7 @@ nodes:
                                         "validation_passed": True,
                                         "error_message": "",
                                         "epic_id": epic_id,
-                                        "expand": expand,
+                                        "include_dependencies": include_dependencies,
                                         "output_name": output_name
                                     }
                             except (ValueError, TypeError):
@@ -211,7 +212,7 @@ nodes:
                                     "validation_passed": False,
                                     "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                                     "epic_id": 0,
-                                    "expand": expand,
+                                    "include_dependencies": include_dependencies,
                                     "output_name": output_name
                                 }
 
@@ -222,7 +223,7 @@ nodes:
       - validation_passed
       - error_message
       - epic_id
-      - expand
+      - include_dependencies
       - output_name
     structured_output: true
     transition: ValidationRouter
@@ -266,7 +267,7 @@ nodes:
     type: agent
     input:
       - epic_id
-      - expand
+      - include_dependencies
       - output_name
     input_mapping:
       chat_history:
@@ -275,7 +276,7 @@ nodes:
         value: []
       task:
         type: fstring
-        value: '{"id": {epic_id}, "expand": {expand}, "output_name": "{output_name}"}'
+        value: '{"id": {epic_id}, "include_dependencies": {include_dependencies}, "output_name": "{output_name}"}'
     output:
       - operation_result
     structured_output: false
@@ -288,86 +289,33 @@ nodes:
       value: |-
         import json
 
-        # With structured_output: false, need to check all possible response locations
-        # Try operation_result first
-        operation_result = alita_state.get('operation_result', None)
-        
-        # If empty, check for full state response (common with structured_output: false)
-        # The agent might return the full state dict directly
-        if not operation_result or operation_result == '':
-            # Look through all state variables for the response
-            for key in alita_state.keys():
-                val = alita_state.get(key)
-                # Check if this looks like an agent response
-                if isinstance(val, dict) and 'operation_result' in val:
-                    operation_result = val['operation_result']
-                    break
-                # Check if it's a direct operation_result value
-                if key == 'operation_result' and val:
-                    operation_result = val
-                    break
-        
-        # Agent responses might be nested - try to extract
-        if isinstance(operation_result, dict):
-            # Check for nested structure from agent response
-            if 'operation_result' in operation_result:
-                operation_result = operation_result['operation_result']
-            elif 'result' in operation_result and isinstance(operation_result['result'], dict):
-                if 'operation_result' in operation_result['result']:
-                    operation_result = operation_result['result']['operation_result']
+        # Fetch pipeline returns operation_result as JSON string:
+        # Success: ["filename.json"]
+        # Error: {"operation": "...", "status": "error", "error": "message"}
+        operation_result = alita_state.get('operation_result', '')
 
-        # Parse the operation_result to get the filename list
-        result_filename = []
-        parse_error = None
+        validation_passed = False
+        hierarchy_filename = ""
+        error_message = ""
 
-        try:
-            # Handle empty or missing operation_result
-            if not operation_result:
-                # Debug: show what we actually have in state
-                debug_info = {}
-                for k in alita_state.keys():
-                    v = alita_state.get(k)
-                    debug_info[k] = f"{type(v).__name__}:{str(v)[:50]}"
-                parse_error = f"Empty operation_result. State contents: {debug_info}"
-            elif isinstance(operation_result, str):
-                # Try to parse as JSON
-                parsed = json.loads(operation_result)
-                # Check if it's an error response
-                if isinstance(parsed, dict) and 'error' in parsed:
-                    parse_error = f"Hierarchy fetcher returned error: {parsed.get('error', 'Unknown error')}"
-                elif isinstance(parsed, list):
-                    result_filename = parsed
-                else:
-                    parse_error = f"Unexpected response format: {type(parsed).__name__}"
-            elif isinstance(operation_result, list):
-                result_filename = operation_result
-            elif isinstance(operation_result, dict):
-                # Check if it's an error response
-                if 'error' in operation_result:
-                    parse_error = f"Hierarchy fetcher returned error: {operation_result.get('error', 'Unknown error')}"
-                else:
-                    parse_error = f"Unexpected dict response (expected list): {operation_result}"
-            else:
-                parse_error = f"Invalid response type: {type(operation_result).__name__}"
-        except json.JSONDecodeError as e:
-            parse_error = f"Failed to parse JSON response '{operation_result}': {str(e)}"
-        except Exception as e:
-            parse_error = f"Unexpected error parsing response: {str(e)}"
-
-        # Validate we got a filename
-        if parse_error:
-            validation_passed = False
-            error_message = parse_error
-            hierarchy_filename = ""
-        elif not result_filename or not isinstance(result_filename, list) or len(result_filename) == 0:
-            validation_passed = False
-            error_message = f"Hierarchy fetcher did not return a valid filename. Received: {operation_result}"
-            hierarchy_filename = ""
+        if not operation_result:
+            error_message = "Empty response from hierarchy fetcher"
         else:
-            # Get first filename from list
-            hierarchy_filename = result_filename[0]
-            validation_passed = True
-            error_message = ""
+            try:
+                parsed = json.loads(operation_result)
+                
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    # Success case - extract filename
+                    hierarchy_filename = parsed[0]
+                    validation_passed = True
+                elif isinstance(parsed, dict) and 'error' in parsed:
+                    # Error case - extract error message
+                    error_message = f"Hierarchy fetcher error: {parsed.get('error', 'Unknown error')}"
+                else:
+                    error_message = f"Unexpected response format: {operation_result}"
+            except json.JSONDecodeError as e:
+                # Not JSON - treat as error message
+                error_message = f"Failed to parse response: {operation_result}"
 
         {
             'validation_passed': validation_passed,
@@ -959,7 +907,7 @@ nodes:
     output:
       - operation_result
     structured_output: true
-    transition: ReplyComposer
+    transition: END
   - id: FormatErrorResult
     type: code
     code:
@@ -980,36 +928,4 @@ nodes:
     output:
       - operation_result
     structured_output: true
-    transition: ReplyComposer
-  - id: ReplyComposer
-    type: llm
-    input:
-      - operation_result
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |-
-          You are a communication specialist. Format the operation result for the user.
-
-          **For successful operations:**
-          * Confirm epic was fetched and enriched with ACs
-          * Display the filename list returned
-          * Be concise and professional
-
-          **For errors:**
-          * Display error message clearly
-          * Suggest next steps or corrections
-      task:
-        type: fstring
-        value: |-
-          Operation result:
-          {operation_result}
-
-          If this is a successful operation, display the filename list.
-          If this is an error, explain the issue and provide the correct input format: {{"id": 9, "expand": true, "output_name": "optional"}}.
-    output: []
-    structured_output: false
     transition: END
