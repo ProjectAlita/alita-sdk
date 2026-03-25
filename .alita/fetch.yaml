@@ -472,19 +472,80 @@ nodes:
             text = re.sub(r'\n{3,}', '\n\n', text)  # collapse excess blank lines
             return text.strip()
 
-        # Initialize hierarchy with the epic (including description)
+        def extract_urls(text):
+            """Extract and categorize URLs from text (including from HTML before stripping)."""
+            if not text:
+                return {
+                    'links_wikis': [],
+                    'links_items': [],
+                    'links_other': []
+                }
+            
+            urls = []
+            
+            # First extract URLs from HTML href attributes before stripping HTML
+            html_links = re.findall(r'<a\s+(?:[^>]*?\s+)?href=["\']([^"\']+)["\']', text, re.IGNORECASE)
+            urls.extend(html_links)
+            
+            # Then extract plain text URLs (http, https, ftp)
+            # Pattern matches: http://..., https://..., ftp://...
+            url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+'
+            text_urls = re.findall(url_pattern, text)
+            urls.extend(text_urls)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_urls = []
+            for url in urls:
+                if url not in seen:
+                    seen.add(url)
+                    unique_urls.append(url)
+            
+            # Categorize URLs
+            links_wikis = []
+            links_items = []
+            links_other = []
+            
+            for url in unique_urls:
+                if '/_wiki/' in url:
+                    links_wikis.append(url)
+                elif 'workitem=' in url or '/_workitems/' in url:
+                    links_items.append(url)
+                else:
+                    links_other.append(url)
+            
+            return {
+                'links_wikis': links_wikis,
+                'links_items': links_items,
+                'links_other': links_other
+            }
+
+        # Initialize hierarchy with the epic (including description and categorized links)
+        epic_description = epic_data.get('System.Description', '')
+        epic_links = extract_urls(epic_description)
+        
+        # Build epic structure, excluding empty link lists
+        epic_dict = {
+            'id': epic_id,
+            'title': epic_data.get('System.Title', 'Untitled'),
+            'state': epic_data.get('System.State', 'Unknown'),
+            'type': epic_data.get('System.WorkItemType', 'Epic'),
+            'url': epic_data.get('url', ''),
+            'description': strip_html(epic_description),
+            'parent_id': None,
+            'children_ids': [],
+            'level': 0
+        }
+        # Only add link categories if they contain URLs
+        if epic_links['links_wikis']:
+            epic_dict['links_wikis'] = epic_links['links_wikis']
+        if epic_links['links_items']:
+            epic_dict['links_items'] = epic_links['links_items']
+        if epic_links['links_other']:
+            epic_dict['links_other'] = epic_links['links_other']
+        
         hierarchy = {
-            'epic': {
-                'id': epic_id,
-                'title': epic_data.get('System.Title', 'Untitled'),
-                'state': epic_data.get('System.State', 'Unknown'),
-                'type': epic_data.get('System.WorkItemType', 'Epic'),
-                'url': epic_data.get('url', ''),
-                'description': strip_html(epic_data.get('System.Description', '')),
-                'parent_id': None,
-                'children_ids': [],
-                'level': 0
-            },
+            'epic': epic_dict,
             'items': {},
             'metadata': {
                 'total_items': 0,
@@ -524,7 +585,12 @@ nodes:
             item_id_str = str(item_id)
             # Use mapped parent or default to epic
             parent_id = parent_map.get(item_id, epic_id)
-            # Store complete item data (all fields for readiness analysis, including description)
+            
+            # Extract description and categorized links
+            item_description = item.get('System.Description', '')
+            item_links = extract_urls(item_description)
+            
+            # Store complete item data (all fields for readiness analysis, including description and categorized links)
             clean_item = {
                 'id': item_id,
                 'title': item.get('System.Title', 'Untitled'),
@@ -533,7 +599,7 @@ nodes:
                 'parent_id': parent_id,
                 'children_ids': [],
                 'level': 0,  # Will be calculated
-                'description': strip_html(item.get('System.Description', '')),
+                'description': strip_html(item_description),
                 # Additional fields from search results
                 'assigned_to': item.get('System.AssignedTo', 'N/A'),
                 'reason': item.get('System.Reason', ''),
@@ -542,6 +608,14 @@ nodes:
                 'work_item_type': item.get('System.WorkItemType', ''),
                 'url': item.get('url', '')
             }
+            # Only add link categories if they contain URLs
+            if item_links['links_wikis']:
+                clean_item['links_wikis'] = item_links['links_wikis']
+            if item_links['links_items']:
+                clean_item['links_items'] = item_links['links_items']
+            if item_links['links_other']:
+                clean_item['links_other'] = item_links['links_other']
+            
             hierarchy['items'][item_id_str] = clean_item
 
         # Calculate levels and populate children_ids
