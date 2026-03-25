@@ -1690,6 +1690,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                             "for thread %s (next=%s)",
                             thread_id, checkpoint_state.next,
                         )
+                        self.update_state(config, input)
                         result = super().invoke(None, config=config, *args, **kwargs)
                     else:
                         result = super().invoke(input, config=config, *args, **kwargs)
@@ -1711,6 +1712,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                             "(next=%s)",
                             thread_id, checkpoint_state.next,
                         )
+                        self.update_state(config, input)
                         result = super().invoke(None, config=config, *args, **kwargs)
                     else:
                         # Previous execution was interrupted (killed/stopped/crashed)
