@@ -734,6 +734,7 @@ nodes:
                 'title': feature.get('title', 'Untitled'),
                 'state': feature.get('state', 'Unknown'),
                 'type': feature.get('type', 'Item'),
+                'description': feature.get('description', ''),
                 'url': feature.get('url', '')
             }
         
@@ -746,6 +747,7 @@ nodes:
                     'title': dep.get('title', 'Untitled'),
                     'state': dep.get('state', 'Unknown'),
                     'type': dep.get('type', 'Item'),
+                    'description': dep.get('description', ''),
                     'url': dep.get('url', '')
                 }
         
@@ -790,7 +792,7 @@ nodes:
         # Build WIQL query to fetch missing items
         if missing_ids:
             ids_str = ','.join(map(str, missing_ids))
-            fetch_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType] FROM WorkItems WHERE [System.Id] IN ({ids_str})"
+            fetch_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Description] FROM WorkItems WHERE [System.Id] IN ({ids_str})"
         else:
             fetch_query = ""
         
@@ -818,6 +820,7 @@ nodes:
           - System.Title
           - System.State
           - System.WorkItemType
+          - System.Description
       limit:
         type: fixed
         value: 200
@@ -858,6 +861,7 @@ nodes:
                     'title': item.get('System.Title', 'Untitled'),
                     'state': item.get('System.State', 'Unknown'),
                     'type': item.get('System.WorkItemType', 'Item'),
+                    'description': item.get('System.Description', ''),
                     'url': item.get('url', '')
                 }
         
@@ -892,6 +896,19 @@ nodes:
         if not isinstance(item_cache, dict):
             item_cache = {}
         
+        # CRITICAL FIX: Normalize cache keys to integers
+        # JSON serialization converts int keys to strings, so we need to convert them back
+        normalized_cache = {}
+        for key, value in item_cache.items():
+            try:
+                # Convert string keys back to integers
+                int_key = int(key)
+                normalized_cache[int_key] = value
+            except (ValueError, TypeError):
+                # If conversion fails, skip this entry
+                pass
+        item_cache = normalized_cache
+        
         feature = hierarchy_data.get('feature', {})
         dependencies = hierarchy_data.get('dependencies', {})
         
@@ -900,7 +917,7 @@ nodes:
             for link in feature['links']:
                 if link.get('type') == 'item':
                     url = link.get('url', '')
-                    # Extract ID from URL
+                    # Extract ID from URL - handle trailing slashes
                     match = re.search(r'workitem=(\d+)', url, re.IGNORECASE)
                     if not match:
                         match = re.search(r'/_workitems/edit/(\d+)', url, re.IGNORECASE)
