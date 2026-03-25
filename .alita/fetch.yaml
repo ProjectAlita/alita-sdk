@@ -219,12 +219,13 @@ nodes:
                                     "output_name": output_name
                                 }
                             else:
-                                # All validations passed - generate output_name if not provided
-                                import random
-                                import string
-                                
+                                # All validations passed
+                                # Generate output_name if not provided: {id}_feature
+                                # If provided by user: {id}_feature_{output_name}
                                 if not output_name or not output_name.strip():
-                                    output_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
+                                    output_name = f"{epic_id}_feature"
+                                else:
+                                    output_name = f"{epic_id}_feature_{output_name}"
                                 
                                 result = {
                                     "validation_passed": True,
@@ -1331,17 +1332,18 @@ nodes:
     code:
       type: fixed
       value: |-
-        epic_id = alita_state.get('epic_id', 0)
         output_name = alita_state.get('output_name', 'unknown')
 
-        # New naming pattern: {id}_feature_{output_name}.json
-        filename = f"{epic_id}_feature_{output_name}.json"
+        # Filename pattern: {output_name}.json
+        # output_name format:
+        # - Not provided by user: {id}_feature (e.g., 9_feature)
+        # - Provided by user: {id}_feature_{custom_name} (e.g., 9_feature_sprint5)
+        filename = f"{output_name}.json"
 
         {
             "artifact_filepath": filename
         }
     input:
-      - epic_id
       - output_name
     output:
       - artifact_filepath
