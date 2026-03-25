@@ -1,17 +1,9 @@
-Fetches Azure DevOps work item hierarchy and enriches with Acceptance Criteria (AC) data. Returns the filename in a list format.
-
-**Input:**
-```json
-{"id": 9, "expand": true, "output_name": "my_run"}
-```
-
-**Fields:**
-- `id` (integer, required): Work item ID. Example: `9`, `42`, `123`
-- `expand` (boolean, required): Hierarchy expansion. `true` = include descendants, `false` = epic only
-- `output_name` (string, optional): Custom filename identifier. Auto-generated if not provided
-
-**Output:** `["9_acs_my_run.json"]`
-
-**Filename:** Format: `{id}_acs_{output_name}.json` or `{id}_acs.json`
-
-**File Created:** A JSON file with hierarchy enriched with extracted ACs, AC coverage mappings and relationships. The `expand` flag controls child inclusion.
+Fetches Azure DevOps work item hierarchy with readiness analysis and tree visualization. Returns JSON + TXT filenames.
+**Input:** `{"id": 9, "include_dependencies": true, "include_links": true}`
+**Parameters:**
+- `id` (int, required): Feature/Epic work item ID
+- `include_dependencies` (bool|int, default=true): Depth control. `false`=feature only, `true`=all levels, `1-N`=max level count
+- `include_links` (bool, default=true): Extracts URLs from descriptions to categories: Figma, wiki, item, other.
+**Output:** `["9_feature.json", "9_feature.txt"]`
+**JSON Structure:** Feature + dependencies, readiness (completion %, status: AT_RISK/IN_PROGRESS/READY/COMPLETE, blockers, type breakdown), enriched links
+**TXT Format:** Hierarchical tree, statuses.
