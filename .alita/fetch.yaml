@@ -23,9 +23,12 @@ state:
   error_message:
     type: string
     value: ''
-  expand:
-    type: bool
-    value: true
+  max_depth:
+    type: int
+    value: 100
+  current_depth:
+    type: int
+    value: 0
   fetch_query:
     type: string
     value: ''
@@ -89,9 +92,9 @@ nodes:
         if not input_str:
             result = {
                 "validation_passed": False,
-                "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"expand\": true}",
+                "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"include_dependencies\": true}",
                 "epic_id": 0,
-                "expand": True,
+                "max_depth": 100,
                 "output_name": ""
             }
         else:
@@ -109,9 +112,9 @@ nodes:
                     parse_failed = True
                     result = {
                         "validation_passed": False,
-                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"expand\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
+                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"include_dependencies\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
                         "epic_id": 0,
-                        "expand": True,
+                        "max_depth": 100,
                         "output_name": ""
                     }
             
@@ -120,38 +123,65 @@ nodes:
                 if not isinstance(input_data, dict):
                     result = {
                         "validation_passed": False,
-                        "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"expand\": true}",
+                        "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"include_dependencies\": true}",
                         "epic_id": 0,
-                        "expand": True,
+                        "max_depth": 100,
                         "output_name": ""
                     }
                 elif 'id' not in input_data:
+                    # Transform include_dependencies to max_depth early for error cases
+                    include_deps = input_data.get('include_dependencies', True)
+                    if isinstance(include_deps, bool):
+                        max_depth = 100 if include_deps else 0
+                    elif isinstance(include_deps, int):
+                        max_depth = max(0, include_deps)
+                    else:
+                        max_depth = 100
                     result = {
                         "validation_passed": False,
-                        "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"expand\": true}",
+                        "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"include_dependencies\": true}",
                         "epic_id": 0,
-                        "expand": input_data.get('expand', True),
+                        "max_depth": max_depth,
                         "output_name": input_data.get('output_name', '')
                     }
                 else:
-                    # Step 4: Validate expand and output_name types if provided
-                    expand = input_data.get('expand', True)
+                    # Step 4: Validate include_dependencies and output_name types if provided
+                    include_deps = input_data.get('include_dependencies', True)
                     output_name = input_data.get('output_name', '')
                     
-                    if 'expand' in input_data and not isinstance(expand, bool):
+                    # Transform include_dependencies to max_depth
+                    if isinstance(include_deps, bool):
+                        max_depth = 100 if include_deps else 0
+                    elif isinstance(include_deps, int):
+                        if include_deps < 0:
+                            result = {
+                                "validation_passed": False,
+                                "error_message": "Field 'include_dependencies' must be >= 0 when using int. Use false for 0, true for unlimited, or positive int for specific depth.",
+                                "epic_id": 0,
+                                "max_depth": 100,
+                                "output_name": ""
+                            }
+                            max_depth = None  # Mark as invalid
+                        else:
+                            max_depth = include_deps
+                    else:
                         result = {
                             "validation_passed": False,
-                            "error_message": "Field 'expand' must be a boolean (true or false). Expected: {\"id\": 9, \"expand\": true}",
+                            "error_message": "Field 'include_dependencies' must be a boolean or integer. Use false for no dependencies, true for all, or int for max depth.",
                             "epic_id": 0,
-                            "expand": True,
+                            "max_depth": 100,
                             "output_name": ""
                         }
+                        max_depth = None  # Mark as invalid
+                    
+                    if max_depth is None:
+                        pass  # Error already set above
                     elif 'output_name' in input_data and not isinstance(output_name, str):
                         result = {
                             "validation_passed": False,
-                            "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"expand\": true, \"output_name\": \"my_run\"}",
+                            "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"include_dependencies\": true, \"output_name\": \"my_run\"}",
                             "epic_id": 0,
-                            "expand": True,
+                            "max_depth": max_depth,
                             "output_name": ""
                         }
                     else:
@@ -163,7 +193,7 @@ nodes:
                                     "validation_passed": False,
                                     "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                                     "epic_id": 0,
-                                    "expand": expand,
+                                    "max_depth": max_depth,
                                     "output_name": output_name
                                 }
                             else:
@@ -178,7 +208,7 @@ nodes:
                                     "validation_passed": True,
                                     "error_message": "",
                                     "epic_id": epic_id,
-                                    "expand": expand,
+                                    "max_depth": max_depth,
                                     "output_name": output_name
                                 }
                         except (ValueError, TypeError):
@@ -186,7 +216,7 @@ nodes:
                                 "validation_passed": False,
                                 "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                                 "epic_id": 0,
-                                "expand": expand,
+                                "max_depth": max_depth if max_depth is not None else 100,
                                 "output_name": output_name
                             }
 
@@ -197,7 +227,7 @@ nodes:
       - validation_passed
       - error_message
       - epic_id
-      - expand
+      - max_depth
       - output_name
     structured_output: true
     transition: ValidationRouter
@@ -313,33 +343,59 @@ nodes:
       type: fixed
       value: |-
         epic_id = alita_state.get('epic_id')
+        max_depth = alita_state.get('max_depth', 100)
 
-        # Build WIQL query for direct children (including description field)
-        current_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] = {epic_id}"
+        # Only build query for children if max_depth > 0
+        # max_depth = 0 means feature only, no dependencies
+        if max_depth > 0:
+            # Build WIQL query for direct children (including description field)
+            current_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] = {epic_id}"
+        else:
+            # Skip dependency fetching - feature only
+            current_query = ""
 
         result = {
             "current_query": current_query,
             "all_item_ids": [],
             "all_fetched_items": [],
-            "current_parent_ids": [epic_id],  # Track which parent IDs we're querying for
+            "current_parent_ids": [epic_id] if max_depth > 0 else [],  # Track which parent IDs we're querying for
+            "current_depth": 0,  # Start at depth 0 (feature level)
             "artifact_filepath": ""  # Clear filepath for new feature - will be auto-generated
         }
         result
     input:
       - epic_id
+      - max_depth
     output:
       - current_query
       - all_item_ids
       - all_fetched_items
       - current_parent_ids
+      - current_depth
       - artifact_filepath
     structured_output: true
-    transition: FetchLevel
+    transition: CheckShouldFetch
+  - id: CheckShouldFetch
+    type: router
+    condition: |
+      {% if current_query %}
+        FetchLevel
+      {% else %}
+        CleanHierarchyData
+      {% endif %}
+    default_output: CleanHierarchyData
+    input:
+      - current_query
+    routes:
+      - FetchLevel
+      - CleanHierarchyData
   - id: FetchLevel
     type: toolkit
     input:
       - current_query
       - current_parent_ids
+      - max_depth
+      - current_depth
     input_mapping:
       fields:
         type: fixed
@@ -411,8 +467,18 @@ nodes:
                 all_item_ids.append(item_id)
                 all_fetched_items.append(item)
 
+        # Get max_depth and current_depth from state
+        max_depth = alita_state.get('max_depth', 100)
+        current_depth = alita_state.get('current_depth', 0)
+        
+        # Increment depth for next level
+        next_depth = current_depth + 1
+        
         # Build query for next level (children of current level), including description field
-        if child_ids:
+        # Check if we should fetch more based on depth limit
+        # next_depth represents the iteration counter, items fetched will be at depth next_depth+1
+        # So if max_depth=1, we want to fetch items at depth 1 only, which means next_depth must be < 1
+        if child_ids and next_depth < max_depth:
             ids_str = ','.join(map(str, child_ids))
             next_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] IN ({ids_str})"
             next_parent_ids = child_ids  # Next level will be children of these IDs
@@ -427,7 +493,8 @@ nodes:
             "all_item_ids": all_item_ids,
             "all_fetched_items": all_fetched_items,
             "has_more_levels": has_more,
-            "current_parent_ids": next_parent_ids
+            "current_parent_ids": next_parent_ids,
+            "current_depth": next_depth
         }
         result
     input:
@@ -435,12 +502,15 @@ nodes:
       - all_item_ids
       - all_fetched_items
       - current_parent_ids
+      - max_depth
+      - current_depth
     output:
       - current_query
       - all_item_ids
       - all_fetched_items
       - has_more_levels
       - current_parent_ids
+      - current_depth
     structured_output: true
     transition: CheckMoreRouter
   - id: CheckMoreRouter
