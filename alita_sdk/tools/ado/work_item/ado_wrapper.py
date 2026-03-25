@@ -65,7 +65,7 @@ ADOGetWorkItem = create_model(
     parse_attachments=(Optional[bool], Field(description="Value that defines is attachment should be parsed.", default=False)),
     image_description_prompt=(Optional[str],
                      Field(description="Prompt which is used for image description", default=None)),
-
+    process_images=(Optional[bool], Field(default=True, description="Whether to process images in work item fields and attachments. Set to False to skip image description processing and return raw content.")),
 )
 
 ADOLinkWorkItem = create_model(
@@ -473,7 +473,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         return parse_file_content(file_content=file_content, file_name=file_name,
                                             llm=self.llm, prompt=image_description_prompt)
 
-    def get_work_item(self, id: int, fields: Optional[list[str]] = None, as_of: Optional[str] = None, expand: Optional[str] = None, parse_attachments=False, image_description_prompt=None):
+    def get_work_item(self, id: int, fields: Optional[list[str]] = None, as_of: Optional[str] = None, expand: Optional[str] = None, parse_attachments=False, image_description_prompt=None, process_images: bool = True):
         """Get a single work item by ID."""
         try:
             # Validate that the Azure DevOps client is initialized
@@ -512,7 +512,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                         images = soup.find_all('img')
                         for img in images:
                             src = img.get('src')
-                            if src:
+                            if src and process_images:
                                 description = self.parse_attachment_by_url(src, image_description_prompt=image_description_prompt)
                                 img['image-description'] = description
                         parsed_item[field_name] = str(soup)
@@ -523,7 +523,10 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                         file_name = relation.get('attributes', {}).get('name')
                         if file_name:
                             try:
-                                relation['content'] = self.parse_attachment_by_url(relation['url'], file_name, image_description_prompt=image_description_prompt)
+                                if process_images:
+                                    relation['content'] = self.parse_attachment_by_url(relation['url'], file_name, image_description_prompt=image_description_prompt)
+                                else:
+                                    relation['content'] = self.parse_attachment_by_url(relation['url'], file_name, image_description_prompt=None)
                             except Exception as att_e:
                                 logger.warning(f"Failed to parse attachment {file_name}: {att_e}")
 
