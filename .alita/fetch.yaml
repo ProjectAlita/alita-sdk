@@ -26,6 +26,12 @@ state:
   expand:
     type: bool
     value: true
+  fetch_query:
+    type: string
+    value: ''
+  fetched_items:
+    type: list
+    value: []
   has_more_epics:
     type: bool
     value: false
@@ -40,12 +46,18 @@ state:
     value: ''
   input:
     type: string
+  item_cache:
+    type: dict
+    value: {}
   level_items:
     type: list
     value: []
   md_filepath:
     type: string
     value: ''
+  missing_ids:
+    type: list
+    value: []
   operation_result:
     type: string
     value: ''
@@ -661,6 +673,269 @@ nodes:
     output:
       - hierarchy_data
     structured_output: false
+    transition: EnrichItemLinks
+  - id: EnrichItemLinks
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        
+        # Extract nested if needed
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        
+        feature = hierarchy_data.get('feature', {})
+        dependencies = hierarchy_data.get('dependencies', {})
+        
+        # Step 1: Collect all item-type links and extract unique item IDs
+        item_link_ids = set()
+        
+        # Collect from feature
+        if 'links' in feature:
+            for link in feature['links']:
+                if link.get('type') == 'item':
+                    url = link.get('url', '')
+                    # Extract ID from URL patterns:
+                    # Pattern 1: workitem=123
+                    match = re.search(r'workitem=(\d+)', url, re.IGNORECASE)
+                    if match:
+                        item_link_ids.add(int(match.group(1)))
+                    else:
+                        # Pattern 2: /_workitems/edit/123
+                        match = re.search(r'/_workitems/edit/(\d+)', url, re.IGNORECASE)
+                        if match:
+                            item_link_ids.add(int(match.group(1)))
+        
+        # Collect from dependencies
+        for dep_id, dep in dependencies.items():
+            if 'links' in dep:
+                for link in dep['links']:
+                    if link.get('type') == 'item':
+                        url = link.get('url', '')
+                        match = re.search(r'workitem=(\d+)', url, re.IGNORECASE)
+                        if match:
+                            item_link_ids.add(int(match.group(1)))
+                        else:
+                            match = re.search(r'/_workitems/edit/(\d+)', url, re.IGNORECASE)
+                            if match:
+                                item_link_ids.add(int(match.group(1)))
+        
+        # Step 2: Build cache from already-fetched data
+        item_cache = {}
+        
+        # Add feature to cache with integer key
+        feature_id = feature.get('id')
+        if feature_id:
+            item_cache[int(feature_id)] = {
+                'id': int(feature_id),
+                'title': feature.get('title', 'Untitled'),
+                'state': feature.get('state', 'Unknown'),
+                'type': feature.get('type', 'Item'),
+                'url': feature.get('url', '')
+            }
+        
+        # Add all dependencies to cache with integer keys
+        for dep_id, dep in dependencies.items():
+            dep_int_id = dep.get('id')
+            if dep_int_id:
+                item_cache[int(dep_int_id)] = {
+                    'id': int(dep_int_id),
+                    'title': dep.get('title', 'Untitled'),
+                    'state': dep.get('state', 'Unknown'),
+                    'type': dep.get('type', 'Item'),
+                    'url': dep.get('url', '')
+                }
+        
+        # Step 3: Identify missing item IDs (not in cache)
+        missing_ids = [item_id for item_id in item_link_ids if item_id not in item_cache]
+        
+        {
+            'hierarchy_data': hierarchy_data,
+            'item_cache': item_cache,
+            'missing_ids': missing_ids
+        }
+    input:
+      - hierarchy_data
+    output:
+      - hierarchy_data
+      - item_cache
+      - missing_ids
+    structured_output: true
+    transition: CheckNeedFetchLinkedItems
+  - id: CheckNeedFetchLinkedItems
+    type: router
+    condition: |
+      {% if missing_ids and missing_ids|length > 0 %}
+        FetchLinkedItems
+      {% else %}
+        UpdateItemLinkContent
+      {% endif %}
+    default_output: UpdateItemLinkContent
+    input:
+      - missing_ids
+    routes:
+      - FetchLinkedItems
+      - UpdateItemLinkContent
+  - id: FetchLinkedItems
+    type: code
+    code:
+      type: fixed
+      value: |-
+        missing_ids = alita_state.get('missing_ids', [])
+        item_cache = alita_state.get('item_cache', {})
+        
+        # Build WIQL query to fetch missing items
+        if missing_ids:
+            ids_str = ','.join(map(str, missing_ids))
+            fetch_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType] FROM WorkItems WHERE [System.Id] IN ({ids_str})"
+        else:
+            fetch_query = ""
+        
+        {
+            'fetch_query': fetch_query,
+            'item_cache': item_cache
+        }
+    input:
+      - missing_ids
+      - item_cache
+    output:
+      - fetch_query
+      - item_cache
+    structured_output: true
+    transition: ExecuteFetchLinkedItems
+  - id: ExecuteFetchLinkedItems
+    type: toolkit
+    input:
+      - fetch_query
+    input_mapping:
+      fields:
+        type: fixed
+        value:
+          - System.Id
+          - System.Title
+          - System.State
+          - System.WorkItemType
+      limit:
+        type: fixed
+        value: 200
+      query:
+        type: variable
+        value: fetch_query
+    on_error:
+      transition: UpdateItemLinkContent
+    output:
+      - fetched_items
+    structured_output: true
+    tool: search_work_items
+    toolkit_name: LFAADOBoardReader
+    transition: MergeLinkedItems
+  - id: MergeLinkedItems
+    type: code
+    code:
+      type: fixed
+      value: |-
+        item_cache = alita_state.get('item_cache', {})
+        fetched_items = alita_state.get('fetched_items', [])
+        
+        # Extract nested if needed
+        if isinstance(fetched_items, dict) and 'fetched_items' in fetched_items:
+            fetched_items = fetched_items['fetched_items']
+        
+        # Handle string response or None
+        if not isinstance(fetched_items, list):
+            fetched_items = []
+        
+        # Merge fetched items into cache
+        for item in fetched_items:
+            item_id = item.get('id') or item.get('System.Id')
+            if item_id:
+                # Ensure integer key
+                item_cache[int(item_id)] = {
+                    'id': int(item_id),
+                    'title': item.get('System.Title', 'Untitled'),
+                    'state': item.get('System.State', 'Unknown'),
+                    'type': item.get('System.WorkItemType', 'Item'),
+                    'url': item.get('url', '')
+                }
+        
+        {
+            'item_cache': item_cache
+        }
+    input:
+      - item_cache
+      - fetched_items
+    output:
+      - item_cache
+    structured_output: true
+    transition: UpdateItemLinkContent
+  - id: UpdateItemLinkContent
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        item_cache = alita_state.get('item_cache', {})
+        
+        # Extract nested if needed
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        if isinstance(item_cache, dict) and 'item_cache' in item_cache:
+            item_cache = item_cache['item_cache']
+        
+        # Ensure item_cache is a valid dict
+        if not isinstance(item_cache, dict):
+            item_cache = {}
+        
+        feature = hierarchy_data.get('feature', {})
+        dependencies = hierarchy_data.get('dependencies', {})
+        
+        # Update feature links
+        if 'links' in feature:
+            for link in feature['links']:
+                if link.get('type') == 'item':
+                    url = link.get('url', '')
+                    # Extract ID from URL
+                    match = re.search(r'workitem=(\d+)', url, re.IGNORECASE)
+                    if not match:
+                        match = re.search(r'/_workitems/edit/(\d+)', url, re.IGNORECASE)
+                    
+                    if match:
+                        item_id = int(match.group(1))
+                        if item_id in item_cache:
+                            # Populate content with item data (compact JSON)
+                            link['content'] = json.dumps(item_cache[item_id], separators=(',', ':'))
+        
+        # Update dependency links
+        for dep_id, dep in dependencies.items():
+            if 'links' in dep:
+                for link in dep['links']:
+                    if link.get('type') == 'item':
+                        url = link.get('url', '')
+                        match = re.search(r'workitem=(\d+)', url, re.IGNORECASE)
+                        if not match:
+                            match = re.search(r'/_workitems/edit/(\d+)', url, re.IGNORECASE)
+                        
+                        if match:
+                            item_id = int(match.group(1))
+                            if item_id in item_cache:
+                                # Populate content with item data (compact JSON)
+                                link['content'] = json.dumps(item_cache[item_id], separators=(',', ':'))
+        
+        {
+            'hierarchy_data': hierarchy_data
+        }
+    input:
+      - hierarchy_data
+      - item_cache
+    output:
+      - hierarchy_data
+    structured_output: true
     transition: CalculateReadiness
   - id: CalculateReadiness
     type: code
