@@ -29,6 +29,9 @@ state:
   current_depth:
     type: int
     value: 0
+  include_links:
+    type: bool
+    value: true
   fetch_query:
     type: string
     value: ''
@@ -92,9 +95,10 @@ nodes:
         if not input_str:
             result = {
                 "validation_passed": False,
-                "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"include_dependencies\": true}",
+                "error_message": "Input is required. Please provide JSON: {\"id\": 9, \"include_dependencies\": true, \"include_links\": true}",
                 "epic_id": 0,
                 "max_depth": 100,
+                "include_links": True,
                 "output_name": ""
             }
         else:
@@ -112,9 +116,10 @@ nodes:
                     parse_failed = True
                     result = {
                         "validation_passed": False,
-                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"include_dependencies\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
+                        "error_message": f"Input is not parsable json. Expected format: {{\"id\": 9, \"include_dependencies\": true, \"include_links\": true, \"output_name\": \"optional\"}}\nReceived input: \"{input_str}\"",
                         "epic_id": 0,
                         "max_depth": 100,
+                        "include_links": True,
                         "output_name": ""
                     }
             
@@ -123,9 +128,10 @@ nodes:
                 if not isinstance(input_data, dict):
                     result = {
                         "validation_passed": False,
-                        "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"include_dependencies\": true}",
+                        "error_message": "Input must be a JSON object. Expected: {\"id\": 9, \"include_dependencies\": true, \"include_links\": true}",
                         "epic_id": 0,
                         "max_depth": 100,
+                        "include_links": True,
                         "output_name": ""
                     }
                 elif 'id' not in input_data:
@@ -139,14 +145,16 @@ nodes:
                         max_depth = 100
                     result = {
                         "validation_passed": False,
-                        "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"include_dependencies\": true}",
+                        "error_message": "Missing required field 'id'. Expected: {\"id\": 9, \"include_dependencies\": true, \"include_links\": true}",
                         "epic_id": 0,
                         "max_depth": max_depth,
+                        "include_links": input_data.get('include_links', True),
                         "output_name": input_data.get('output_name', '')
                     }
                 else:
-                    # Step 4: Validate include_dependencies and output_name types if provided
+                    # Step 4: Validate include_dependencies, include_links, and output_name types if provided
                     include_deps = input_data.get('include_dependencies', True)
+                    include_links = input_data.get('include_links', True)
                     output_name = input_data.get('output_name', '')
                     
                     # Transform include_dependencies to max_depth
@@ -159,6 +167,7 @@ nodes:
                                 "error_message": "Field 'include_dependencies' must be >= 0 when using int. Use false for 0, true for unlimited, or positive int for specific depth.",
                                 "epic_id": 0,
                                 "max_depth": 100,
+                                "include_links": True,
                                 "output_name": ""
                             }
                             max_depth = None  # Mark as invalid
@@ -170,18 +179,30 @@ nodes:
                             "error_message": "Field 'include_dependencies' must be a boolean or integer. Use false for no dependencies, true for all, or int for max depth.",
                             "epic_id": 0,
                             "max_depth": 100,
+                            "include_links": True,
                             "output_name": ""
                         }
                         max_depth = None  # Mark as invalid
                     
-                    if max_depth is None:
+                    # Validate include_links type
+                    if max_depth is not None and 'include_links' in input_data and not isinstance(include_links, bool):
+                        result = {
+                            "validation_passed": False,
+                            "error_message": "Field 'include_links' must be a boolean (true or false).",
+                            "epic_id": 0,
+                            "max_depth": max_depth,
+                            "include_links": True,
+                            "output_name": ""
+                        }
+                    elif max_depth is None:
                         pass  # Error already set above
                     elif 'output_name' in input_data and not isinstance(output_name, str):
                         result = {
                             "validation_passed": False,
-                            "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"include_dependencies\": true, \"output_name\": \"my_run\"}",
+                            "error_message": "Field 'output_name' must be a string. Expected: {\"id\": 9, \"include_dependencies\": true, \"include_links\": true, \"output_name\": \"my_run\"}",
                             "epic_id": 0,
                             "max_depth": max_depth,
+                            "include_links": include_links,
                             "output_name": ""
                         }
                     else:
@@ -194,6 +215,7 @@ nodes:
                                     "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                                     "epic_id": 0,
                                     "max_depth": max_depth,
+                                    "include_links": include_links,
                                     "output_name": output_name
                                 }
                             else:
@@ -209,6 +231,7 @@ nodes:
                                     "error_message": "",
                                     "epic_id": epic_id,
                                     "max_depth": max_depth,
+                                    "include_links": include_links,
                                     "output_name": output_name
                                 }
                         except (ValueError, TypeError):
@@ -217,6 +240,7 @@ nodes:
                                 "error_message": f"Invalid work item ID: {input_data['id']}. ID must be a positive integer.",
                                 "epic_id": 0,
                                 "max_depth": max_depth if max_depth is not None else 100,
+                                "include_links": include_links,
                                 "output_name": output_name
                             }
 
@@ -228,6 +252,7 @@ nodes:
       - error_message
       - epic_id
       - max_depth
+      - include_links
       - output_name
     structured_output: true
     transition: ValidationRouter
@@ -580,9 +605,9 @@ nodes:
             text = re.sub(r'\n{3,}', '\n\n', text)  # collapse excess blank lines
             return text.strip()
 
-        def extract_urls(text):
+        def extract_urls(text, should_extract):
             """Extract and categorize URLs from text (including from HTML before stripping)."""
-            if not text:
+            if not text or not should_extract:
                 return []
             
             urls = []
@@ -626,9 +651,12 @@ nodes:
             
             return links
 
+        # Get include_links setting from state
+        include_links = alita_state.get('include_links', True)
+        
         # Initialize hierarchy with the feature (top-level item with description and links)
         feature_description = epic_data.get('System.Description', '')
-        feature_links = extract_urls(feature_description)
+        feature_links = extract_urls(feature_description, include_links)
         
         # Build feature structure, excluding empty links list
         feature_dict = {
@@ -690,7 +718,7 @@ nodes:
             
             # Extract description and links
             item_description = item.get('System.Description', '')
-            item_links = extract_urls(item_description)
+            item_links = extract_urls(item_description, include_links)
             
             # Store complete item data (all fields for readiness analysis, including description and links)
             clean_item = {
@@ -757,10 +785,25 @@ nodes:
       - epic_data
       - epic_id
       - all_fetched_items
+      - include_links
     output:
       - hierarchy_data
     structured_output: false
-    transition: EnrichItemLinks
+    transition: CheckShouldEnrichLinks
+  - id: CheckShouldEnrichLinks
+    type: router
+    condition: |
+      {% if include_links %}
+        EnrichItemLinks
+      {% else %}
+        CalculateReadiness
+      {% endif %}
+    default_output: CalculateReadiness
+    input:
+      - include_links
+    routes:
+      - EnrichItemLinks
+      - CalculateReadiness
   - id: EnrichItemLinks
     type: code
     code:
