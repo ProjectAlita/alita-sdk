@@ -37,7 +37,8 @@ GetPageByPathInput = create_model(
     wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_name=(str, Field(description="Wiki page path")),
     image_description_prompt=(Optional[str],
-                              Field(description="Prompt which is used for image description", default=None))
+                              Field(description="Prompt which is used for image description", default=None)),
+    process_images=(Optional[bool], Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing."))
 )
 
 GetPageByIdInput = create_model(
@@ -45,7 +46,8 @@ GetPageByIdInput = create_model(
     wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_id=(int, Field(description="Wiki page ID")),
     image_description_prompt=(Optional[str],
-                              Field(description="Prompt which is used for image description", default=None))
+                              Field(description="Prompt which is used for image description", default=None)),
+    process_images=(Optional[bool], Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing."))
 )
 
 
@@ -56,6 +58,7 @@ class GetPageInput(BaseModel):
     page_id: Optional[int] = Field(default=None, description="Wiki page ID")
     include_content: Optional[bool] = Field(default=False, description="Whether to include page content in the response. If True, content will be processed for image descriptions.")
     image_description_prompt: Optional[str] = Field(default=None, description="Prompt which is used for image description when include_content is True")
+    process_images: Optional[bool] = Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing.")
     recursion_level: Optional[str] = Field(default="oneLevel", description="Level of recursion to retrieve sub-pages. Options: 'none' (no subpages), 'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.")
 
     @model_validator(mode='before')
@@ -291,31 +294,35 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error during the attempt to extract wiki: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki: {str(e)}")
 
-    def get_wiki_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
+    def get_wiki_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None, process_images: bool = True):
         """Extract ADO wiki page content."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
-            return self._process_images(self._client.get_page(project=self.project, wiki_identifier=wiki_id, path=page_name,
-                                         include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            content = self._client.get_page(project=self.project, wiki_identifier=wiki_id, path=page_name,
+                                            include_content=True).page.content
+            if process_images:
+                return self._process_images(content, image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            return content
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
-    def get_wiki_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None):
+    def get_wiki_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None, process_images: bool = True):
         """Extract ADO wiki page content."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
-            return self._process_images(self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id,
-                                                include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            content = self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id,
+                                                   include_content=True).page.content
+            if process_images:
+                return self._process_images(content, image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            return content
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
     def get_wiki_page(self, wiki_identified: Optional[str] = None, page_path: Optional[str] = None, page_id: Optional[int] = None,
                       include_content: bool = False, image_description_prompt: Optional[str] = None,
-                      recursion_level: str = "oneLevel"):
+                      process_images: bool = True, recursion_level: str = "oneLevel"):
         """Get wiki page metadata and optionally content.
 
         Retrieves comprehensive metadata for a wiki page including eTag, id, path, git_item_path,
@@ -328,6 +335,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             page_id: Wiki page ID. Optional if page_path is provided. Takes precedence over page_path.
             include_content: Whether to include page content in response. Defaults to False (metadata only).
             image_description_prompt: Optional prompt for image description when include_content is True.
+            process_images: Whether to process/describe images found in page content. Set to False to skip
+                           image processing and return raw content. Defaults to True.
             recursion_level: Level of recursion to retrieve sub-pages. Options: 'none' (no subpages),
                            'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.
 
@@ -374,7 +383,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             )
 
             # Process images in content if requested
-            if include_content and result.get('page', {}).get('content'):
+            if include_content and process_images and result.get('page', {}).get('content'):
                 processed_content = self._process_images(
                     result['page']['content'],
                     image_description_prompt=image_description_prompt,
