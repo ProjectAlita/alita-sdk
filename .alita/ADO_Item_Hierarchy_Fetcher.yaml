@@ -35,6 +35,9 @@ state:
   hierarchy_data:
     type: dict
     value: {}
+  hierarchy_json_str:
+    type: string
+    value: ''
   hierarchy_markdown:
     type: string
     value: ''
@@ -293,7 +296,7 @@ nodes:
     output:
       - operation_result
     template: '{"operation": "fetch_hierarchy", "status": "error", "item_id": {{ epic_id }}, "error": "{{ error_message | replace(''"'', ''\\"'') }}"}'
-    transition: ReplyComposer
+    transition: END
     variables_to_clean: []
   - id: InitializeFetch
     type: code
@@ -488,7 +491,10 @@ nodes:
                 return ''
             text = _html.unescape(text)          # &amp; → &, &nbsp; → space, etc.
             text = re.sub(r'<[^>]+>', ' ', text) # remove every HTML tag
-            text = re.sub(r'[ \t]+', ' ', text)  # collapse horizontal whitespace
+            # Remove ALL control characters (0x00-0x1F) except newline (keep \n for readability)
+            # This ensures JSON serialization won't fail
+            text = re.sub(r'[\x00-\x09\x0b-\x1f\x7f]', '', text)
+            text = re.sub(r'[ \t]+', ' ', text)  # collapse horizontal whitespace  
             text = re.sub(r'\n{3,}', '\n\n', text)  # collapse excess blank lines
             return text.strip()
 
@@ -599,15 +605,14 @@ nodes:
         max_level = max([item['level'] for item in hierarchy['items'].values()], default=0)
         hierarchy['metadata']['max_level'] = max_level
 
-        result = {"hierarchy_data": hierarchy}
-        result
+        {"hierarchy_data": hierarchy}
     input:
       - epic_data
       - epic_id
       - all_fetched_items
     output:
       - hierarchy_data
-    structured_output: false
+    structured_output: true
     transition: CalculateReadiness
   - id: CalculateReadiness
     type: code
@@ -820,22 +825,25 @@ nodes:
         hierarchy_markdown = "\n".join(md_lines)
 
         {
-            'hierarchy_markdown': hierarchy_markdown
+            'hierarchy_markdown': hierarchy_markdown,
+            'hierarchy_data': hierarchy_data
         }
     input:
       - hierarchy_data
     output:
       - hierarchy_markdown
+      - hierarchy_data
     structured_output: true
     transition: RouteSaving
   - id: RouteSaving
     type: router
-    condition: '{% if artifact_filepath %}SaveHierarchyData{% endif %}'
+    condition: '{% if artifact_filepath %}SerializeHierarchyData{% endif %}'
     default_output: SetDefaults
     input:
       - artifact_filepath
+      - hierarchy_data
     routes:
-      - SaveHierarchyData
+      - SerializeHierarchyData
       - SetDefaults
   - id: SetDefaults
     type: code
@@ -844,32 +852,97 @@ nodes:
       value: |-
         epic_id = alita_state.get('epic_id', 0)
         output_name = alita_state.get('output_name', 'unknown')
+        hierarchy_data = alita_state.get('hierarchy_data', {})
 
         # New naming pattern: {id}_feature_{output_name}.json
         filename = f"{epic_id}_feature_{output_name}.json"
 
         {
-            "artifact_filepath": filename
+            "artifact_filepath": filename,
+            "hierarchy_data": hierarchy_data
         }
     input:
       - epic_id
       - output_name
+      - hierarchy_data
     output:
       - artifact_filepath
+      - hierarchy_data
+    structured_output: true
+    transition: SerializeHierarchyData
+  - id: SerializeHierarchyData
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        
+        # Debug: Log what we received
+        data_type = type(hierarchy_data).__name__
+        has_data = bool(hierarchy_data)
+        
+        # Extract nested if needed (defensive unwrapping)
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        
+        # Validate we have data to serialize
+        if not hierarchy_data or not isinstance(hierarchy_data, dict):
+            # This should not happen - raise error instead of silently creating empty file
+            error_msg = f"No hierarchy data to serialize! Type: {data_type}, Has data: {has_data}"
+            raise ValueError(error_msg)
+        
+        # Check if we have epic data at minimum
+        if 'epic' not in hierarchy_data:
+            raise ValueError(f"Hierarchy data missing 'epic' key. Keys: {list(hierarchy_data.keys())}")
+        
+        # CRITICAL: Remove ALL control characters from string values before JSON serialization
+        # This prevents S3/artifact round-trip issues with newlines and other control chars
+        def sanitize_strings(obj):
+            """Recursively replace all control characters in strings with spaces."""
+            if isinstance(obj, dict):
+                return {k: sanitize_strings(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize_strings(item) for item in obj]
+            elif isinstance(obj, str):
+                # Replace all control characters (0x00-0x1F, 0x7F) with space
+                import re
+                return re.sub(r'[\x00-\x1f\x7f]', ' ', obj)
+            else:
+                return obj
+        
+        # Sanitize all strings in hierarchy_data
+        hierarchy_data = sanitize_strings(hierarchy_data)
+        
+        # Serialize with compact formatting (no indentation) to avoid any whitespace issues
+        # ensure_ascii=True ensures all non-ASCII chars are escaped
+        # separators removes extra whitespace after separators
+        hierarchy_json_str = json.dumps(hierarchy_data, ensure_ascii=True, separators=(',', ':'))
+        
+        # Verify we actually produced content
+        if not hierarchy_json_str or len(hierarchy_json_str) < 10:
+            raise ValueError(f"JSON serialization produced empty or invalid output: {hierarchy_json_str[:100]}")
+        
+        {'hierarchy_json_str': hierarchy_json_str}
+    input:
+      - hierarchy_data
+    output:
+      - hierarchy_json_str
     structured_output: true
     transition: SaveHierarchyData
   - id: SaveHierarchyData
     type: toolkit
     input:
-      - hierarchy_data
+      - hierarchy_json_str
       - artifact_filepath
     input_mapping:
       bucket_name:
         type: fixed
         value: null
       filedata:
-        type: fstring
-        value: '{hierarchy_data}'
+        type: variable
+        value: hierarchy_json_str
       filename:
         type: variable
         value: artifact_filepath
@@ -976,35 +1049,5 @@ nodes:
     output:
       - operation_result
     structured_output: true
-    transition: ReplyComposer
-  - id: ReplyComposer
-    type: llm
-    input:
-      - operation_result
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |-
-          You are a communication specialist tasked to formulate final output to user based on performed activity.
-
-          * Be friendly and professional
-          * Formulate final output clearly
-          * For successful operations: 
-            - Display the result as a JSON list containing the filename
-            - Format: ["9_feature_my_run.json"]
-          * For errors: Provide clear explanation and suggest correct input format
-          * Don't suggest further operations unless it's error recovery guidance
-      task:
-        type: fstring
-        value: |-
-          Operation result:
-          {operation_result}
-
-          If this is a successful operation, output only the filename list.
-          If this is an error, explain the issue and provide the correct input format: {{"id": 9, "expand": true, "output_name": "optional"}}..
-    output: []
-    structured_output: false
     transition: END
+  # Note: operation_result is explicitly declared as output for agent-to-agent communication

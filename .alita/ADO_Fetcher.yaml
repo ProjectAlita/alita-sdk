@@ -8,6 +8,12 @@ state:
   enriched_hierarchy_data:
     type: dict
     value: {}
+  enriched_json_str:
+    type: string
+    value: ''
+  epic_description:
+    type: string
+    value: ''
   epic_id:
     type: int
     value: 0
@@ -26,8 +32,17 @@ state:
   hierarchy_filename:
     type: string
     value: ''
+  hierarchy_json:
+    type: string
+    value: ''
+  hierarchy_structure:
+    type: string
+    value: ''
   input:
     type: string
+  items_description:
+    type: string
+    value: ''
   operation_result:
     type: string
     value: ''
@@ -259,13 +274,14 @@ nodes:
         value: []
       task:
         type: fstring
-        value: '{"id": {epic_id}, "expand": true, "output_name": "{output_name}"}'
+        value: '{"id": {epic_id}, "expand": {expand}, "output_name": "{output_name}"}'
     output:
       - operation_result
     output_mapping:
       operation_result:
         type: variable
         value: operation_result
+    structured_output: true
     tool: ADO_Item_Hierarchy_Fetcher
     transition: LoadHierarchyFromFetcher
   - id: LoadHierarchyFromFetcher
@@ -279,20 +295,43 @@ nodes:
         operation_result = alita_state.get('operation_result', '')
 
         # Parse the operation_result to get the filename list
+        result_filename = []
+        parse_error = None
+        
         try:
             if isinstance(operation_result, str):
-                result_filename = json.loads(operation_result)
+                # Try to parse as JSON
+                parsed = json.loads(operation_result)
+                # Check if it's an error response
+                if isinstance(parsed, dict) and 'error' in parsed:
+                    parse_error = f"Hierarchy fetcher returned error: {parsed.get('error', 'Unknown error')}"
+                elif isinstance(parsed, list):
+                    result_filename = parsed
+                else:
+                    parse_error = f"Unexpected response format: {type(parsed).__name__}"
             elif isinstance(operation_result, list):
                 result_filename = operation_result
+            elif isinstance(operation_result, dict):
+                # Check if it's an error response
+                if 'error' in operation_result:
+                    parse_error = f"Hierarchy fetcher returned error: {operation_result.get('error', 'Unknown error')}"
+                else:
+                    parse_error = f"Unexpected dict response (expected list): {operation_result}"
             else:
-                result_filename = []
-        except:
-            result_filename = []
+                parse_error = f"Invalid response type: {type(operation_result).__name__}"
+        except json.JSONDecodeError as e:
+            parse_error = f"Failed to parse JSON response: {str(e)}"
+        except Exception as e:
+            parse_error = f"Unexpected error parsing response: {str(e)}"
 
         # Validate we got a filename
-        if not result_filename or not isinstance(result_filename, list) or len(result_filename) == 0:
+        if parse_error:
             validation_passed = False
-            error_message = "Hierarchy fetcher did not return a valid filename"
+            error_message = parse_error
+            hierarchy_filename = ""
+        elif not result_filename or not isinstance(result_filename, list) or len(result_filename) == 0:
+            validation_passed = False
+            error_message = f"Hierarchy fetcher did not return a valid filename. Received: {operation_result}"
             hierarchy_filename = ""
         else:
             # Get first filename from list
@@ -346,10 +385,167 @@ nodes:
     structured_output: true
     tool: readFile
     toolkit_name: epic_artifacts
+    transition: ParseHierarchyData
+  - id: ParseHierarchyData
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        import ast
+
+        hierarchy_data = alita_state.get('hierarchy_data', '{}')
+        
+        # Debug logging
+        data_type = type(hierarchy_data).__name__
+        data_preview = str(hierarchy_data)[:200] if hierarchy_data else 'None'
+        
+        # Advanced debugging: check for control characters
+        if isinstance(hierarchy_data, str):
+            # Check first 500 chars for any actual control characters (not escape sequences)
+            sample = hierarchy_data[:500]
+            control_chars_found = []
+            for i, char in enumerate(sample):
+                if ord(char) < 32 and char not in ('\n', '\r', '\t'):
+                    control_chars_found.append(f"pos {i}: 0x{ord(char):02x}")
+            
+            # Also check for literal newlines in suspicious positions (inside JSON strings)
+            # Count quotes to detect if we're inside a string value
+            in_string = False
+            newline_positions = []
+            for i, char in enumerate(sample):
+                if char == '"' and (i == 0 or sample[i-1] != '\\'):
+                    in_string = not in_string
+                if char == '\n' and in_string:
+                    newline_positions.append(i)
+            
+            debug_info = f"Control chars: {control_chars_found if control_chars_found else 'none'}. Newlines in strings at positions: {newline_positions if newline_positions else 'none'}"
+        else:
+            debug_info = "Not a string"
+        
+        validation_passed = True
+        error_message = ''
+
+        # Handle nested structures from toolkit response
+        if isinstance(hierarchy_data, dict):
+            # Check for 'result' wrapper first (common toolkit response format)
+            if 'result' in hierarchy_data:
+                hierarchy_data = hierarchy_data['result']
+            # Check if it's wrapped in another dict
+            if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+                hierarchy_data = hierarchy_data['hierarchy_data']
+            # Check if the dict contains a string value that needs parsing
+            elif isinstance(hierarchy_data, dict) and len(hierarchy_data) == 1 and isinstance(list(hierarchy_data.values())[0], str):
+                # Might be wrapped like {'data': '{"epic": {...}}'} 
+                hierarchy_data = list(hierarchy_data.values())[0]
+
+        # Parse string to dict if needed
+        if isinstance(hierarchy_data, str):
+            # Try JSON first
+            try:
+                hierarchy_data = json.loads(hierarchy_data)
+            except json.JSONDecodeError as e:
+                # Fallback: try Python literal eval (handles {'key': 'value'} format)
+                try:
+                    hierarchy_data = ast.literal_eval(hierarchy_data)
+                except (ValueError, SyntaxError) as e2:
+                    # Both parsers failed
+                    validation_passed = False
+                    error_message = f"Failed to parse hierarchy data. JSON error: {str(e)}. Python literal_eval error: {str(e2)}. Data type: {data_type}, Preview: {data_preview}"
+                    hierarchy_data = {'epic': {}, 'items': {}, 'metadata': {}}
+        
+        # Ensure we have a valid dict with expected structure (only if no error yet)
+        if validation_passed and not isinstance(hierarchy_data, dict):
+            validation_passed = False
+            error_message = f"Hierarchy data is not a dict after parsing. Type: {type(hierarchy_data).__name__}, Preview: {str(hierarchy_data)[:200]}"
+            hierarchy_data = {'epic': {}, 'items': {}, 'metadata': {}}
+        
+        if validation_passed and 'epic' not in hierarchy_data:
+            validation_passed = False
+            error_message = f"Hierarchy data missing 'epic' key. Keys present: {list(hierarchy_data.keys())}, Original data type: {data_type}"
+            hierarchy_data = {'epic': {}, 'items': {}, 'metadata': {}}
+        
+        # Build result dict
+        {
+            'validation_passed': validation_passed,
+            'error_message': error_message,
+            'hierarchy_data': hierarchy_data
+        }
+    input:
+      - hierarchy_data
+    output:
+      - validation_passed
+      - error_message
+      - hierarchy_data
+    structured_output: true
+    transition: ParseHierarchyRouter
+  - id: ParseHierarchyRouter
+    type: router
+    condition: |
+      {% if validation_passed %}
+        PrepareACExtraction
+      {% else %}
+        FormatErrorResult
+      {% endif %}
+    default_output: FormatErrorResult
+    input:
+      - validation_passed
+      - hierarchy_data
+    routes:
+      - PrepareACExtraction
+      - FormatErrorResult
+  - id: PrepareACExtraction
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        
+        # Extract epic info for template
+        epic = hierarchy_data.get('epic', {})
+        epic_id = epic.get('id', 0)
+        epic_description = epic.get('description', '')
+        
+        # Build items description for template
+        items = hierarchy_data.get('items', {})
+        items_text = []
+        for item_id, item in items.items():
+            item_type = item.get('type', 'Task')
+            item_title = item.get('title', 'Untitled')
+            item_desc = item.get('description', '')
+            items_text.append(f"- Item ID {item_id} ({item_type}): {item_title}\n  Description: {item_desc}")
+        
+        items_description = '\n'.join(items_text) if items_text else 'No child items found.'
+        
+        # Also pass through the full hierarchy_data for next nodes
+        hierarchy_json = json.dumps(hierarchy_data)
+        
+        {
+            'epic_id': epic_id,
+            'epic_description': epic_description,
+            'items_description': items_description,
+            'hierarchy_json': hierarchy_json,
+            'hierarchy_data': hierarchy_data
+        }
+    input:
+      - hierarchy_data
+    output:
+      - epic_id
+      - epic_description
+      - items_description
+      - hierarchy_json
+      - hierarchy_data
+    structured_output: true
     transition: ExtractAcceptanceCriteria
   - id: ExtractAcceptanceCriteria
     type: llm
     input:
+      - epic_id
+      - epic_description
+      - items_description
+      - hierarchy_json
       - hierarchy_data
     input_mapping:
       chat_history:
@@ -384,16 +580,14 @@ nodes:
         value: |
           Extract acceptance criteria from all work items in this hierarchy.
 
-          Epic (ID {hierarchy_data[epic][id]}):
-          Description: {hierarchy_data[epic].get('description', '')}
+          Epic (ID {epic_id}):
+          Description: {epic_description}
 
-          {% if hierarchy_data[items] %}
           Child Items:
-          {% for item_id, item in hierarchy_data[items].items() %}
-          - Item ID {item_id} ({item[type]}): {item[title]}
-            Description: {item.get('description', '')}
-          {% endfor %}
-          {% endif %}
+          {items_description}
+
+          Full hierarchy data (for reference):
+          {hierarchy_json}
 
           Return JSON with this structure:
           {{
@@ -408,10 +602,77 @@ nodes:
     output:
       - extracted_acs
     structured_output: true
+    transition: PrepareCoverageMapping
+  - id: PrepareCoverageMapping
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        extracted_acs = alita_state.get('extracted_acs', {})
+        
+        # Extract nested if needed
+        if isinstance(extracted_acs, dict) and 'extracted_acs' in extracted_acs:
+            extracted_acs = extracted_acs['extracted_acs']
+        
+        acs_by_item = extracted_acs.get('acs_by_item', {})
+        
+        # Build hierarchy structure text for template
+        hierarchy_text = []
+        items = hierarchy_data.get('items', {})
+        
+        if items:
+            for item_id, item in items.items():
+                children_ids = item.get('children_ids', [])
+                if len(children_ids) > 0:
+                    # This is a parent with children
+                    item_type = item.get('type', 'Task')
+                    item_title = item.get('title', 'Untitled')
+                    hierarchy_text.append(f"\nParent ID {item_id} ({item_type}): {item_title}")
+                    hierarchy_text.append("Parent ACs:")
+                    
+                    if item_id in acs_by_item:
+                        for idx, ac in enumerate(acs_by_item[item_id], 1):
+                            ac_text = ac.get('text', '')
+                            ac_status = ac.get('status', 'unknown')
+                            hierarchy_text.append(f"  AC-{idx}: {ac_text} [{ac_status}]")
+                    else:
+                        hierarchy_text.append("  (No ACs found)")
+                    
+                    hierarchy_text.append("\nChildren:")
+                    for child_id in children_ids:
+                        child = items.get(str(child_id), {})
+                        child_title = child.get('title', 'Untitled')
+                        child_desc = child.get('description', '')[:200]
+                        child_ac_count = len(acs_by_item.get(str(child_id), []))
+                        hierarchy_text.append(f"  - Child ID {child_id}: {child_title}")
+                        hierarchy_text.append(f"    Child Description: {child_desc}...")
+                        hierarchy_text.append(f"    Child ACs: {child_ac_count if child_ac_count > 0 else 'None'} found")
+        else:
+            hierarchy_text.append("No child items found in hierarchy.")
+        
+        hierarchy_structure = '\n'.join(hierarchy_text)
+        
+        {
+            'hierarchy_structure': hierarchy_structure,
+            'hierarchy_data': hierarchy_data,
+            'extracted_acs': extracted_acs
+        }
+    input:
+      - hierarchy_data
+      - extracted_acs
+    output:
+      - hierarchy_structure
+      - hierarchy_data
+      - extracted_acs
+    structured_output: true
     transition: MatchChildrenToParentACs
   - id: MatchChildrenToParentACs
     type: llm
     input:
+      - hierarchy_structure
       - hierarchy_data
       - extracted_acs
     input_mapping:
@@ -441,31 +702,8 @@ nodes:
         value: |
           Map child work items to parent ACs they cover.
 
-          {% if hierarchy_data[items] %}
           Hierarchy structure (children by parent):
-          {% for item_id, item in hierarchy_data[items].items() %}
-          {% if item.get('children_ids', [])|length > 0 %}
-          Parent ID {item_id} ({item[type]}): {item[title]}
-          Parent ACs:
-          {% if item_id in extracted_acs.get('acs_by_item', {}) %}
-          {% for idx, ac in enumerate(extracted_acs['acs_by_item'][item_id], 1) %}
-            AC-{idx}: {ac[text]} [{ac[status]}]
-          {% endfor %}
-          {% else %}
-          (No ACs found)
-          {% endif %}
-
-          Children:
-          {% for child_id in item.get('children_ids', []) %}
-            - Child ID {child_id}: {hierarchy_data[items][str(child_id)][title]}
-              Child Description: {hierarchy_data[items][str(child_id)].get('description', '')[:200]}...
-              Child ACs: {% if str(child_id) in extracted_acs.get('acs_by_item', {}) %}{{ extracted_acs['acs_by_item'][str(child_id)]|length }} found{% else %}None{% endif %}
-          {% endfor %}
-          {% endif %}
-          {% endfor %}
-          {% else %}
-          No child items found in hierarchy.
-          {% endif %}
+          {hierarchy_structure}
 
           Return JSON:
           {{
@@ -581,19 +819,67 @@ nodes:
     output:
       - enriched_hierarchy_data
     structured_output: true
+    transition: SerializeEnrichedData
+  - id: SerializeEnrichedData
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        import re
+        
+        enriched_hierarchy_data = alita_state.get('enriched_hierarchy_data', {})
+        
+        # Extract nested if needed
+        if isinstance(enriched_hierarchy_data, dict) and 'enriched_hierarchy_data' in enriched_hierarchy_data:
+            enriched_hierarchy_data = enriched_hierarchy_data['enriched_hierarchy_data']
+        
+        # Validate we have data
+        if not enriched_hierarchy_data or not isinstance(enriched_hierarchy_data, dict):
+            raise ValueError(f"No enriched hierarchy data to serialize!")
+        
+        # Sanitize all strings recursively to remove control characters
+        def sanitize_strings(obj):
+            """Recursively replace all control characters in strings with spaces."""
+            if isinstance(obj, dict):
+                return {k: sanitize_strings(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [sanitize_strings(item) for item in obj]
+            elif isinstance(obj, str):
+                # Replace all control characters (0x00-0x1F, 0x7F) with space
+                return re.sub(r'[\x00-\x1f\x7f]', ' ', obj)
+            else:
+                return obj
+        
+        # Sanitize all strings
+        enriched_hierarchy_data = sanitize_strings(enriched_hierarchy_data)
+        
+        # Serialize with compact formatting
+        enriched_json_str = json.dumps(enriched_hierarchy_data, ensure_ascii=True, separators=(',', ':'))
+        
+        # Verify we produced content
+        if not enriched_json_str or len(enriched_json_str) < 10:
+            raise ValueError(f"JSON serialization produced empty output!")
+        
+        {'enriched_json_str': enriched_json_str}
+    input:
+      - enriched_hierarchy_data
+    output:
+      - enriched_json_str
+    structured_output: true
     transition: SaveEnrichedHierarchy
   - id: SaveEnrichedHierarchy
     type: toolkit
     input:
-      - enriched_hierarchy_data
+      - enriched_json_str
       - artifact_filepath
     input_mapping:
       bucket_name:
         type: fixed
         value: null
       filedata:
-        type: fstring
-        value: '{enriched_hierarchy_data}'
+        type: variable
+        value: enriched_json_str
       filename:
         type: variable
         value: artifact_filepath
