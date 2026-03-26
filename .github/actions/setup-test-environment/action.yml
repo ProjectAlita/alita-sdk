@@ -1,5 +1,5 @@
 name: 'Setup Test Environment'
-description: 'Configure Python path, Deno sandbox, canonical paths, and optionally set environment secrets'
+description: 'Configure Python path, sandbox paths, and optionally set environment secrets'
 inputs:
   deployment-url:
     description: 'ELITEA deployment URL (optional - skip if already set in container env)'
@@ -38,10 +38,6 @@ runs:
       shell: bash
       run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
 
-    - name: Configure Deno for sandbox execution
-      shell: bash
-      run: echo '{"nodeModulesDir":"none"}' > "$GITHUB_WORKSPACE/deno.json"
-
     - name: Resolve sandbox paths to canonical locations
       shell: bash
       run: |
@@ -53,7 +49,8 @@ runs:
           SANDBOX_BASE_REAL="${REAL_WORKSPACE}"
         fi
         
-        DENO_DIR_REAL="/app"
+        # Set DENO_DIR to node_modules under sandbox base for proper Deno package resolution
+        DENO_DIR_REAL="${SANDBOX_BASE_REAL}/node_modules"
 
         echo "SANDBOX_BASE=$SANDBOX_BASE_REAL" >> "$GITHUB_ENV"
         echo "DENO_DIR=$DENO_DIR_REAL" >> "$GITHUB_ENV"
@@ -61,7 +58,6 @@ runs:
         export SANDBOX_BASE="$SANDBOX_BASE_REAL"
         export DENO_DIR="$DENO_DIR_REAL"
 
-        mkdir -p "$SANDBOX_BASE_REAL/.alita/tests/test_pipelines/node_modules"
         mkdir -p "$DENO_DIR_REAL"
 
         echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
