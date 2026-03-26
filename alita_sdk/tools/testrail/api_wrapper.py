@@ -479,7 +479,12 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
                         These are the preconditions for a test case
                 """
         test_cases = json.loads(add_test_cases_data)
-        return [self.add_case(test_case['section_id'], test_case['title'], json.dumps(test_case.get('case_properties', {}))) for test_case in test_cases]
+        results = []
+        for test_case in test_cases:
+            results.append(
+                self.add_case(test_case['section_id'], test_case['title'], json.dumps(test_case.get('case_properties', {})))
+            )
+        return results
 
     def add_case(self, section_id: str, title: str, case_properties: str = "{}"):
         """Adds new test case into Testrail per defined parameters.
@@ -512,7 +517,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         except (json.JSONDecodeError, ValueError) as e:
             raise ToolException(f"Invalid JSON in case_properties: {e}")
         except StatusCodeError as e:
-            return ToolException(f"Unable to add new testcase {e}")
+            raise ToolException(f"Unable to add new testcase {e}")
         return f"New test case has been created: id - {created_case['id']} at '{created_case['created_on']}'"
 
     def get_case(self, testcase_id: str):
@@ -520,7 +525,7 @@ class TestrailAPIWrapper(NonCodeIndexerToolkit):
         try:
             extracted_case = self._client.cases.get_case(testcase_id)
         except StatusCodeError as e:
-            return ToolException(f"Unable to extract testcase {e}")
+            raise ToolException(f"Unable to extract testcase {e}")
         return f"Extracted test case:\n{str(extracted_case)}"
 
     def get_cases(
