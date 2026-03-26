@@ -22,7 +22,6 @@ env:
 jobs:
   configure-matrix:
     runs-on: ubuntu-latest
-    if: github.actor != 'eln1nxl'
     outputs:
       test_matrix: ${{ steps.set-matrix.outputs.test_matrix }}
       has-tests: ${{ steps.set-matrix.outputs.has-tests }}
@@ -175,7 +174,6 @@ jobs:
 
   unit-tests:
     runs-on: ubuntu-latest
-    if: github.actor != 'eln1nxl'
     permissions:
       contents: read
       packages: read
