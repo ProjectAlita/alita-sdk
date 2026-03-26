@@ -2169,30 +2169,34 @@ class GitHubClient(BaseModel):
         try:
             user = self.github_api.get_user()
 
+            created_at = getattr(user, "created_at", None)
+            updated_at = getattr(user, "updated_at", None)
             user_data = {
-                "login": user.login,
-                "id": user.id,
-                "name": user.name,
-                "email": user.email,
-                "bio": user.bio,
-                "company": user.company,
-                "location": user.location,
-                "blog": user.blog,
-                "twitter_username": user.twitter_username,
-                "public_repos": user.public_repos,
-                "public_gists": user.public_gists,
-                "followers": user.followers,
-                "following": user.following,
-                "created_at": user.created_at.isoformat() if user.created_at else None,
-                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
-                "html_url": user.html_url,
-                "avatar_url": user.avatar_url,
-                "type": user.type,
-                "hireable": user.hireable,
-                "private_gists": user.private_gists,
-                "total_private_repos": user.total_private_repos,
-                "owned_private_repos": user.owned_private_repos,
+                "login": getattr(user, "login", None),
+                "id": getattr(user, "id", None),
+                "name": getattr(user, "name", None),
+                "email": getattr(user, "email", None),
+                "bio": getattr(user, "bio", None),
+                "company": getattr(user, "company", None),
+                "location": getattr(user, "location", None),
+                "blog": getattr(user, "blog", None),
+                "twitter_username": getattr(user, "twitter_username", None),
+                "public_repos": getattr(user, "public_repos", None),
+                "public_gists": getattr(user, "public_gists", None),
+                "followers": getattr(user, "followers", None),
+                "following": getattr(user, "following", None),
+                "created_at": created_at.isoformat() if created_at else None,
+                "updated_at": updated_at.isoformat() if updated_at else None,
+                "html_url": getattr(user, "html_url", None),
+                "avatar_url": getattr(user, "avatar_url", None),
+                "type": getattr(user, "type", None),
+                "hireable": getattr(user, "hireable", None),
+                "private_gists": getattr(user, "private_gists", None),
+                "total_private_repos": getattr(user, "total_private_repos", None),
+                "owned_private_repos": getattr(user, "owned_private_repos", None),
             }
+            # Remove keys where value could not be retrieved (None due to missing attribute)
+            user_data = {k: v for k, v in user_data.items() if v is not None}
             import json
             return json.dumps(user_data, indent=2)
         except Exception as e:
