@@ -108,24 +108,32 @@ nodes:
     toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: extract_page_id
   - id: extract_page_id
-    type: code
-    code:
-      type: fixed
-      value: |
-        import re
-        result = alita_state.get('create_result', '')
-        if isinstance(result, dict):
-            page_id = str(result.get("id", result.get("page_id", "")))
-        else:
-            result_str = str(result)
-            match = re.search(r"'id':\s*'?(\d+)'?", result_str)
-            if not match:
-                match = re.search(r'"id":\s*"?(\d+)"?', result_str)
-            page_id = match.group(1) if match else ""
-        {"page_id": page_id}
+    type: llm
+    input:
+      - create_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a data extractor. Return only the requested JSON. No markdown, no explanation.
+      task:
+        type: fstring
+        value: |
+          Extract the numeric page ID from the following Confluence create_page tool output.
+
+          Tool Output: {create_result}
+
+          The output contains a Details dict with an 'id' field (a numeric string like '261062657').
+          Return ONLY this JSON (no markdown, no extra text):
+          {{"page_id": "<numeric_id_string>"}}
+    model: gpt-4o
     output:
       - page_id
     structured_output: true
+    structured_output_dict:
+      page_id: str
     transition: update_page
   - id: update_page
     type: toolkit
@@ -168,32 +176,43 @@ nodes:
     toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: validate_update
   - id: validate_update
-    type: code
-    code:
-      type: fixed
-      value: |
-        update_result = alita_state.get('update_result', '')
-        read_result = alita_state.get('read_result', '')
-        page_id = alita_state.get('page_id', '')
-        updated_body = alita_state.get('updated_body', '')
-        update_str = str(update_result).lower()
-        read_str = str(read_result).lower()
-        update_successful = "updated successfully" in update_str or "success" in update_str
-        page_id_in_result = str(page_id) in str(update_result)
-        content_updated = any(word in read_str for word in str(updated_body).lower().split() if len(word) > 4)
-        has_labels = "label" in update_str or "automation" in update_str or "updated" in update_str
-        test_results = {
-            "validation_results": {
-                "update_successful": update_successful,
-                "page_id_in_result": page_id_in_result,
-                "content_updated": content_updated,
-                "has_labels": has_labels
-            }
-        }
-        {"test_results": test_results}
+    type: llm
+    input:
+      - update_result
+      - read_result
+      - page_id
+      - updated_body
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: You are a quality assurance validator. Return only the requested JSON. No markdown, no explanation.
+      task:
+        type: fstring
+        value: |
+          Analyze the update and read results for a Confluence page update test. Keep response under 200 tokens.
+
+          Update Result: {update_result}
+          Read Result: {read_result}
+          Page ID: {page_id}
+          Expected Updated Body: {updated_body}
+
+          Checks:
+          1. update_successful: update result contains "updated successfully" or "success"
+          2. page_id_in_result: page_id value appears in update result
+          3. content_updated: read result contains words from the expected updated body
+          4. has_labels: update result mentions "label", "automation", or "updated"
+
+          Return ONLY this JSON (no markdown, no extra text):
+          {{"validation_results": {{"update_successful": boolean, "page_id_in_result": boolean, "content_updated": boolean, "has_labels": boolean}}}}
+    model: gpt-4o
     output:
       - test_results
     structured_output: true
+    structured_output_dict:
+      test_results: dict
     transition: delete_page
   - id: process_results
     type: llm
