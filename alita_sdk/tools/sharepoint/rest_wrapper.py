@@ -258,6 +258,11 @@ class SharepointRestWrapper(BaseSharepointWrapper):
             site_segments = [s for s in self.site_url.strip('/').split('/') if s][-2:]
             full_path_prefix = '/'.join(site_segments)
 
+            # Track REST access failures per library so we can fall back to Graph
+            # API when all libraries fail (e.g. under App-Only access restrictions).
+            lib_access_failures = 0
+            lib_attempted = 0
+
             for lib in all_libraries:
                 library_type = decode_sharepoint_string(lib.properties["EntityTypeName"])
                 library_title = lib.properties.get("Title", "")
@@ -285,6 +290,7 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                         else:
                             target_folder_url = f"{library_type}/{folder_name}"
 
+                lib_attempted += 1
                 try:
                     files = (
                         self._client.web
@@ -295,6 +301,7 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                     logging.warning(
                         "Skipping library '%s' — REST access failed: %s",
                         library_type, lib_e)
+                    lib_access_failures += 1
                     continue
 
                 for file in files:
@@ -315,7 +322,30 @@ class SharepointRestWrapper(BaseSharepointWrapper):
                         'Link': file.properties['LinkingUrl'],
                         'id': file.properties['UniqueId'],
                     })
+
+            # If REST returned no results AND all (or all attempted) library accesses
+            # failed, fall back to the Graph API helper.  This handles the common
+            # App-Only scenario where the office365 client can enumerate lists but
+            # cannot recursively fetch files via get_files(True).
+            if not result and lib_attempted > 0 and lib_access_failures == lib_attempted:
+                logging.info(
+                    "All %d REST library access(es) failed; falling back to Graph API.",
+                    lib_access_failures)
+                try:
+                    return self._graph_helper().get_files_list(
+                        self.site_url, folder_name, limit_files,
+                        include_extensions=include_extensions,
+                        skip_extensions=skip_extensions,
+                        form_name=form_name)
+                except Exception as graph_e:
+                    logging.error("Graph API fallback also failed: %s", graph_e)
+                    raise ToolException(
+                        f"Can not get files via REST or Graph API. "
+                        f"Please, double check folder name and read permissions: {graph_e}")
+
             return result
+        except ToolException:
+            raise
         except Exception as e:
             try:
                 files = self._graph_helper().get_files_list(
