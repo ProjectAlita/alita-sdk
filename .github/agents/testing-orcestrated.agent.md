@@ -3,7 +3,8 @@ name: Test Failure Resolution
 description: Orchestrated test failure analysis and resolution cycle
 argument-hint: Analyze test failures and coordinate resolution through specialized agents
 model: Claude Haiku 4.5 (copilot)
-tools: ['search', 'atlassian/atlassian-mcp-server/search', 'agent', 'digitarald.agent-memory/memory', 'todo']
+tools: [vscode/memory,agent,todo]
+agents: ["Test Failure Detector","Test Fixer","Fix Impact Analyzer","Bug Reporter"]
 handoffs:
   - label: Review Results
     agent: agent
@@ -17,7 +18,7 @@ You orchestrate a complete test failure resolution cycle by invoking specialized
 
 ## Orchestrated Resolution Cycle
 
-This agent drives a full test failure resolution workflow by invoking each subagent via #tool:runSubagent (MUST be with `subagentType`) in strict order:
+This agent drives a full test failure resolution workflow by invoking each subagent via #tool:agent n strict order:
 
 1. **subagentType=`Test Failure Detector`**: Diagnose test failures, perform RCA, identify root causes
 2. **subagentType=`Test Fixer`**: Generate targeted fix proposals based on RCA

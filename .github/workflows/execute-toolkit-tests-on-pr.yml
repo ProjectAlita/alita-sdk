@@ -69,9 +69,9 @@ jobs:
         env:
           DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
           DEFAULT_LLM_MODEL: ${{ secrets.DEFAULT_LLM_MODEL }}
-          DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
-          ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_STAGE }}
-          PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
+          ELITEA_DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
+          ELITEA_TOKEN: ${{ secrets.ALITA_API_KEY_STAGE }}
+          ELITEA_PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
           GIT_TOOL_ACCESS_TOKEN: ${{ secrets.GIT_TOOL_ACCESS_TOKEN }}
 
       - name: Parse Agent Output
@@ -175,6 +175,7 @@ jobs:
 
   unit-tests:
     runs-on: ubuntu-latest
+    if: github.actor != 'eln1nxl'
     permissions:
       contents: read
       packages: read

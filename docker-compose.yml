@@ -6,9 +6,9 @@ services:
     container_name: alita-sdk-dev
     environment:
       - GIT_TOOL_ACCESS_TOKEN=${GIT_TOOL_ACCESS_TOKEN:-}
-      - DEPLOYMENT_URL=${DEPLOYMENT_URL:-}
-      - API_KEY=${ALITA_API_KEY:-}
-      - PROJECT_ID=${PROJECT_ID:-}
+      - ELITEA_DEPLOYMENT_URL=${ELITEA_DEPLOYMENT_URL:-}
+      - ELITEA_TOKEN=${ELITEA_TOKEN:-}
+      - ELITEA_PROJECT_ID=${ELITEA_PROJECT_ID:-}
       - TEST_CASES_DIR=${TEST_CASES_DIR:-github}
       - DOCKER_COMMAND=${DOCKER_COMMAND:-}
       - CONFLUENCE_API_KEY=${CONFLUENCE_API_KEY:-}

@@ -4,6 +4,13 @@ run-name: "Loader Tests on Demand (${{ inputs.run_mode }})"
 on:
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Target environment for tests'
+        required: true
+        type: choice
+        default: 'local'
+        options:
+          - local
       run_mode:
         description: 'How to run tests: matrix (suite-based), mark (-m expression), nodeid (single pytest node)'
         required: true
@@ -233,55 +240,27 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
       env:
-        SANDBOX_BASE: ${{ github.workspace }}
-        DENO_DIR: /app/
-        PYTHONPATH: /app
-        PYTHONDONTWRITEBYTECODE: "1"
-        PYTHONUNBUFFERED: "1"
-        DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
-        ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_STAGE }}
-        PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
         DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Make alita-sdk source available
-        # Match reusable runner behavior so imports resolve to checked-out code
-        # rather than only what is baked into the container image.
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
-
-      - name: Configure Deno for sandbox execution
-        # In CI the CWD when tests run is a subdirectory of $GITHUB_WORKSPACE,
-        # so Deno's --node-modules-dir=auto would try to create/read node_modules
-        # there — outside allow_read/allow_write in the sandbox. Writing
-        # deno.json with nodeModulesDir=none disables local node_modules entirely;
-        # Deno uses only the global DENO_DIR=/app/ cache (pre-installed in image),
-        # which IS within allow_read/allow_write — matching Docker behaviour.
-        shell: bash
-        run: echo '{"nodeModulesDir":"none"}' > "$GITHUB_WORKSPACE/deno.json"
-
-      - name: Resolve sandbox paths to canonical locations
-        # /__w in GitHub Actions is often a symlink to /home/runner/work.
-        # Deno permission checks use resolved paths, so export canonical paths
-        # for sandbox permissions to avoid NotCapable read mismatches.
-        shell: bash
+      - name: Resolve environment secrets
         run: |
-          REAL_WORKSPACE="$(realpath "$GITHUB_WORKSPACE")"
-          SANDBOX_BASE_REAL="$REAL_WORKSPACE"
-          DENO_DIR_REAL="/app"
+          if [ "${{ inputs.environment }}" = "local" ]; then
+            ENV_UPPER="STAGE"
+          else
+            ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+          fi
+          echo "ENV_UPPER=${ENV_UPPER}" >> $GITHUB_ENV
 
-          echo "SANDBOX_BASE=$SANDBOX_BASE_REAL" >> "$GITHUB_ENV"
-          echo "DENO_DIR=$DENO_DIR_REAL" >> "$GITHUB_ENV"
-
-          mkdir -p "$SANDBOX_BASE_REAL/.alita/tests/test_pipelines/node_modules"
-          mkdir -p "$DENO_DIR_REAL"
-
-          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-          echo "REAL_WORKSPACE=$REAL_WORKSPACE"
-          echo "SANDBOX_BASE=$SANDBOX_BASE_REAL"
-          echo "DENO_DIR=$DENO_DIR_REAL"
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-environment
+        with:
+          deployment-url: ${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER)] }}
+          api-token: ${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER)] }}
+          project-id: ${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER)] }}
 
       - name: Set ReportPortal launch name
         shell: bash

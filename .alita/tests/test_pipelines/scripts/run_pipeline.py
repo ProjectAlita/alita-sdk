@@ -73,7 +73,7 @@ class PipelineResult:
 
 def get_auth_headers(include_content_type: bool = False) -> dict:
     """Get authentication headers from environment."""
-    token = load_from_env("AUTH_TOKEN") or load_from_env("ELITEA_TOKEN") or load_from_env("API_KEY")
+    token = load_token_from_env()
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -119,8 +119,15 @@ def load_nodes_with_continue_on_error(pipeline_name: str, logger: Optional[TestL
                     if not data or not isinstance(data, dict):
                         continue
                     
-                    # Check if this is the right test file
-                    if data.get("name") != pipeline_name:
+                    # Check if this is the right test file.
+                    # Pipeline names on the platform may carry a session prefix (e.g.
+                    # "296c5eff_GH20 - Create Pull Request") that the YAML doesn't have.
+                    # Match if the YAML name is a suffix of the pipeline name (case-insensitive).
+                    # Guard against empty yaml_name — str.endswith("") is always True.
+                    yaml_name = data.get("name", "")
+                    if not yaml_name:
+                        continue
+                    if yaml_name != pipeline_name and not pipeline_name.endswith(yaml_name):
                         continue
                     
                     # Found the right file - extract nodes with continue_on_error
@@ -257,15 +264,55 @@ def process_pipeline_result(
     """
     # Check for error in response (only if error is non-null)
     if isinstance(result_data, dict) and result_data.get("error"):
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            version_id=version_id,
-            execution_time=execution_time,
-            output=result_data,
-            error=str(result_data.get("error"))
-        )
+        error_str = str(result_data.get("error"))
+
+        # Determine whether the hard crash came from a node with continue_on_error: true.
+        # LangGraph embeds the node name in the error as:
+        #   "During task with name '<node_id>' and id '...'"
+        import re as _re
+        _nodes_coe = load_nodes_with_continue_on_error(pipeline_name, logger)
+        _match = _re.search(r"During task with name '([^']+)'", error_str)
+        _crashing_node = _match.group(1) if _match else None
+        _crash_in_coe_node = bool(_crashing_node and _crashing_node in _nodes_coe)
+
+        if _crash_in_coe_node:
+            # The crash happened in a cleanup/optional node that is allowed to fail.
+            # The actual validation (test_passed) ran BEFORE this node and its result
+            # was in chat_history — but the platform wipes chat_history on a hard crash,
+            # so we cannot recover it.
+            # Keep test_passed=None (indeterminate) rather than forcing False, so the
+            # caller knows the test result is unknown — not that the test failed.
+            if logger:
+                logger.debug(
+                    f"Hard crash from continue_on_error node '{_crashing_node}' — "
+                    f"pipeline terminated before END. Test result is indeterminate "
+                    f"(chat_history cleared by platform). Fix the test to prevent None "
+                    f"input reaching this node."
+                )
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                output=result_data,
+                test_passed=None,   # indeterminate — crash was in cleanup, not test logic
+                error=error_str
+            )
+        else:
+            # Crash in a core test node — definitively a failure.
+            if logger and _crashing_node:
+                logger.debug(f"Hard crash from core node '{_crashing_node}' — marking test_passed=False.")
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                output=result_data,
+                test_passed=False,
+                error=error_str
+            )
 
     # Extract test_passed from result
     test_passed = None
@@ -1150,8 +1197,8 @@ def main():
         parser.error("Either pipeline_id or --name is required")
 
     # Load configuration
-    base_url = args.base_url or load_from_env("BASE_URL") or load_from_env("DEPLOYMENT_URL") or "http://192.168.68.115"
-    project_id = args.project_id or int(load_from_env("PROJECT_ID") or "2")
+    base_url = args.base_url or load_base_url_from_env() or "http://192.168.68.115"
+    project_id = args.project_id or load_project_id_from_env() or 2
     headers = get_auth_headers()
 
     if "Authorization" not in headers:

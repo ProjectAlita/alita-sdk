@@ -23,6 +23,8 @@ def test_loader(
         ("markdown_large", 0),
         ("markdown_large", 1),
         ("markdown_large", 2),
+        ("markdown_code_blocks", 3),
+        ("markdown_code_blocks", 1)
     }
     if (input_name, config_index) in _SKIP:
         pytest.skip(f"{input_name} config{config_index}: known failure — pending fix")

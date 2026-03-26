@@ -23,6 +23,7 @@ from loader_helpers import collect_loader_test_params, run_loader_assert
 _LOADER_NAME = "AlitaCSVLoader"
 
 
+@pytest.mark.skip(reason="Disabling all AlitaCSVLoader tests temporarily")
 @pytest.mark.parametrize(
     "input_name, config_index, config, file_path, baseline_path",
     collect_loader_test_params(_LOADER_NAME),

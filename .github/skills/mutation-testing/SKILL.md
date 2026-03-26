@@ -9,39 +9,59 @@ This skill covers setting up and running mutation testing with **cosmic-ray** ag
 
 ---
 
+## CRITICAL: What This Skill Does and Does NOT Do
+
+**This skill's purpose is to:**
+1. Run mutation tests
+2. Report surviving mutants and bugs surfaced by failing tests
+3. **Suggest** fixes with a clear description of the change needed
+
+**This skill must NEVER:**
+- Modify source code (the module under test) without explicit developer confirmation
+- "Fix" failing tests by changing the source to match test assertions
+- Apply any code change to resolve a test failure without being asked
+
+**When tests fail during the baseline run:**
+- Document each failure with its root cause
+- Describe the suggested fix
+- **Stop and ask the developer** whether to apply each fix before proceeding
+
+> Example correct response: "Tests X, Y, Z fail. They are BUG DETECTOR tests exposing [description]. Suggested fix: [change]. Do you want me to apply it?"
+
+---
+
 ## When to Use This Skill
 
 - Evaluating whether a test suite truly validates logic (not just executes code)
-- After achieving high branch coverage but wanting stronger confidence
+- When you want to verify that tests don't just execute code but actually validate logic
 - Before declaring a test suite "complete" for a security-critical module
 - When asked to "check mutation testing", "run mutations", or "verify test quality"
 
 ---
 
-## Concept: Coverage vs Mutations
+## Concept: What Mutation Testing Measures
 
-| | Branch Coverage | Mutation Testing |
-|---|---|---|
-| What it measures | Code was **executed** | Logic was **verified** |
-| Catches missing `assert` | No | Yes |
-| Catches wrong assertion | No | Yes |
-| Speed | ~seconds (single run) | Minutes (one run per mutation) |
-| Tool | `coverage run --branch` | `cosmic-ray` |
+| | Mutation Testing |
+|---|---|
+| What it measures | Logic was **verified** |
+| Catches missing `assert` | Yes |
+| Catches wrong assertion | Yes |
+| Speed | Minutes (one run per mutation) |
+| Tool | `cosmic-ray` |
 
-**Use coverage first** (fast, find unexecuted paths), **then mutations** (find weak assertions in covered paths).
+Mutation testing answers: *"If I break a line of logic, do the tests catch it?"* It goes beyond checking if code was executed — it verifies that the tests actually assert something meaningful.
 
 ---
 
 ## Prerequisites
 
 ### Platform Check
-- `mutmut` does **not** work on Windows natively — use `cosmic-ray` instead
 - `cosmic-ray` v8.4.4+ works on Windows as the **coordinator**, but workers must run in Linux Docker containers
 
 ### Install
 ```bash
 source venv/Scripts/activate
-pip install cosmic-ray coverage
+pip install cosmic-ray
 ```
 
 ### One-Time Windows Fix (REQUIRED before first run)
@@ -69,99 +89,28 @@ to:
 
 ---
 
-## Step 1: Quick Smoke Check (Branch Coverage)
+## Step 1: Mutation Testing Setup
 
-Run this first — it finishes in one test-suite duration and exposes all unexecuted paths.
+### 1a. Dockerfile for Workers
 
-```bash
-source venv/Scripts/activate
-python -m coverage run --branch --source=alita_sdk \
-  -m pytest <test_file> -q --no-header --no-cov
-python -m coverage report \
-  --include="*/path/to/source1.py,*/path/to/source2.py" -m
-```
+See `Dockerfile.mutation-worker` in the project root. Each worker container has its **own independent copy** of the source code — this prevents file-locking conflicts when multiple workers mutate files simultaneously.
 
-> **Do NOT use `pytest --cov=`** — it triggers circular import errors on import of alita_sdk. Always use `coverage run` wrapper instead.
+### 1b. Docker Compose for Workers
 
-### Read the report
+See `docker-compose.mutation.yml` in the project root. It defines three workers exposed on `localhost:8001-8003`.
 
-```
-Name                          Stmts   Miss Branch BrPart  Cover   Missing
--------------------------------------------------------------------------
-alita_sdk/.../security.py      156     71     56      9    50%   84-91, 113-134, ...
-```
+### 1c. cosmic-ray Config (one per source module)
 
-- **Miss**: lines never executed
-- **BrPart**: branches partially covered (e.g. only `if` taken, never `else`)
-- **Missing**: exact lines/ranges to target with new tests
-
----
-
-## Step 2: Mutation Testing Setup
-
-### 2a. Dockerfile for Workers
-
-Create `Dockerfile.mutation-worker` in the project root:
-
-```dockerfile
-FROM ghcr.io/projectalita/alita-sdk:pyodide
-
-WORKDIR /app
-RUN pip install --no-cache-dir cosmic-ray
-
-COPY alita_sdk/ ./alita_sdk/
-COPY tests/ ./tests/
-COPY pyproject.toml ./
-
-EXPOSE 8080
-CMD ["cosmic-ray", "--verbosity", "INFO", "http-worker", "--port", "8080"]
-```
-
-> Each worker container has its **own independent copy** of the source code. This prevents file-locking conflicts when multiple workers mutate files simultaneously.
-
-### 2b. Docker Compose for Workers
-
-Create `docker-compose.mutation.yml`:
-
-```yaml
-services:
-  mutation-worker-1:
-    build:
-      context: .
-      dockerfile: Dockerfile.mutation-worker
-    container_name: cr-worker-1
-    ports:
-      - "8001:8080"
-
-  mutation-worker-2:
-    build:
-      context: .
-      dockerfile: Dockerfile.mutation-worker
-    container_name: cr-worker-2
-    ports:
-      - "8002:8080"
-
-  mutation-worker-3:
-    build:
-      context: .
-      dockerfile: Dockerfile.mutation-worker
-    container_name: cr-worker-3
-    ports:
-      - "8003:8080"
-```
-
-### 2c. cosmic-ray Config (one per source module)
-
-Create `cosmic-ray-<module>.toml`:
+Create `cosmic-ray-<module>.toml` (not committed to git — create per module as needed):
 
 ```toml
 [cosmic-ray]
-module-path = "alita_sdk/runtime/middleware/sensitive_tool_guard.py"
+module-path = "alita_sdk/path/to/module.py"
 timeout = 90.0
 excluded-modules = []
 
 # test-command runs on the Windows coordinator host (not inside Docker workers)
-test-command = "python -m pytest tests/runtime/test_sensitive_tool_masking.py -x -q --no-header --tb=no"
+test-command = "python -m pytest tests/path/to/test_module.py -x -q --no-header --tb=no"
 
 [cosmic-ray.distributor]
 name = "http"
@@ -180,7 +129,7 @@ worker-urls = [
 
 ---
 
-## Step 3: Build and Start Workers
+## Step 2: Build and Start Workers
 
 ```bash
 docker compose -f docker-compose.mutation.yml up --build -d
@@ -197,7 +146,7 @@ curl http://localhost:8003
 
 ---
 
-## Step 4: Initialize Session and Prune Operators
+## Step 3: Initialize Session and Prune Operators
 
 ```bash
 source venv/Scripts/activate
@@ -242,7 +191,7 @@ conn.close()
 
 ---
 
-## Step 5: Run Mutations (Windows host coordinator)
+## Step 4: Run Mutations (Windows host coordinator)
 
 With the `http.py` patch applied (see Prerequisites), run the coordinator directly on the Windows host. It sends forward-slash paths over HTTP, so Linux Docker workers resolve them correctly.
 
@@ -262,7 +211,7 @@ cosmic-ray exec cosmic-ray-<module>.toml cr-<module>.sqlite
 
 ---
 
-## Step 6: Check Progress
+## Step 5: Check Progress
 
 ```python
 import sqlite3
@@ -285,7 +234,7 @@ Expected healthy output:
 
 ---
 
-## Step 7: View Results
+## Step 6: View Results
 
 ```bash
 source venv/Scripts/activate
@@ -311,14 +260,48 @@ surviving mutants: 3 (5.77%)   ← gaps to investigate
 
 ---
 
-## Interpreting Results vs Coverage
+## Interpreting Results
 
-| Coverage | Mutation score | Meaning |
-|---|---|---|
-| Low (< 60%) | Any | Tests don't reach the code — write coverage tests first |
-| High (> 80%) | High (many survived) | Tests run the code but don't assert correctly |
-| High (> 80%) | Low (few survived) | Tests are strong for covered code |
-| Any | 100% killed | Covered code is well-tested — focus on uncovered branches |
+| Mutation score | Meaning |
+|---|---|
+| Many survived | Tests run the code but don’t assert correctly |
+| Few survived | Tests are strong for covered code |
+| 100% killed | Covered code is well-tested |
+
+---
+
+## Survivor Analysis Protocol
+
+**When a mutation survives, NEVER write a test purely to kill it.**
+
+A surviving mutation is a question: *"Does this logic change matter?"* Your job is to answer that question — not just make it go away.
+
+### Required workflow for each survivor
+
+1. **Identify what changed** — what logic was mutated (e.g. `False` → `True`, `>` → `>=`, `and` → `or`).
+2. **Understand the intent** — read the docstring, function name, and surrounding code. What *should* happen here?
+3. **Decide:**
+
+| Situation | Action |
+|---|---|
+| Intent is clear, current code is **correct** | Write a test asserting the correct behaviour (test passes, mutation is now killed legitimately) |
+| Intent is clear, current code is **wrong** | Write a test asserting the correct behaviour (test **fails** on purpose — file a bug report, do NOT "fix" the test to match the wrong code) |
+| Intent is **unclear** | Do NOT write a test. Report the ambiguity to the developer and wait for a decision. |
+
+### The mutation-score chasing trap
+
+Writing tests that assert the *current broken behaviour* purely to boost kill rate is **worse than leaving mutations alive**:
+
+- It encodes bugs as expected behaviour.
+- It gives false confidence ("96% kill rate!") while actively hiding defects.
+- It makes genuine bug fixes break the test suite, making tests adversarial to developers.
+
+### Red flags — stop and report if you catch yourself:
+
+- [ ] Writing a test and immediately checking whether it kills the surviving mutation (score-first thinking).
+- [ ] Asserting a value you are not certain is the *intended correct* value.
+- [ ] Changing a test assertion from "what should be true" to "what currently happens".
+- [ ] Getting a higher kill rate but the test feels semantically wrong.
 
 ---
 
@@ -358,70 +341,26 @@ docker compose -f docker-compose.mutation.yml up -d
 # Verify: curl http://localhost:8002  → 405 = healthy
 # Verify: curl http://localhost:8003  → 405 = healthy
 
-# 2. Smoke check (branch coverage — fast sanity check)
+# 2. Initialize mutation session
 source venv/Scripts/activate
-python -m coverage run --branch --source=alita_sdk \
-  -m pytest tests/runtime/test_my_module.py -q --no-header --no-cov
-python -m coverage report --include="*/path/to/my_module.py" -m
-
-# 3. Initialize mutation session
 cosmic-ray init cosmic-ray-my-module.toml cr-my-module.sqlite
 
-# 4. Prune to logic operators only (run prune script from Step 4)
+# 3. Prune to logic operators only (run prune script from Step 3)
 
-# 5. Baseline — verify tests pass before mutating
+# 4. Baseline — verify tests pass before mutating
 cosmic-ray --verbosity=ERROR baseline cosmic-ray-my-module.toml
 
-# 6. Execute mutations (coordinator runs on Windows host)
+# 5. Execute mutations (coordinator runs on Windows host)
 cosmic-ray exec cosmic-ray-my-module.toml cr-my-module.sqlite
 
-# 7. Report
+# 6. Report
 cr-report cr-my-module.sqlite --show-pending 2>&1 | tail -4
 cr-html   cr-my-module.sqlite > report-my-module.html
 
-# 8. Shut down workers
+# 7. Shut down workers
 docker compose -f docker-compose.mutation.yml down
 ```
 
 > **Why Docker workers?** Each worker container has an independent copy of the source code. When cosmic-ray mutates a file, it writes the mutant directly to disk — if multiple workers shared a single copy, they would overwrite each other's mutations. Docker containers provide isolated `/app` directories so workers can mutate concurrently without conflicts.
 
 > **Why NOT `cr-http-workers`** (the official parallel wrapper)? It clones the git repo per worker using a `file://` URL. On Windows, Git Bash percent-encodes backslashes in the path (`%5C`), which breaks the clone. Docker workers are the simpler and reliable alternative.
-
----
-
-## Alternative: mutmut (Coverage-Guided, Docker)
-
-mutmut provides PIT-like coverage-guided test selection — it only runs tests that cover the mutated line, ordered by speed. This is fundamentally different from cosmic-ray which runs the full test command for every mutation.
-
-> **Use mutmut v2** (`pip install "mutmut<3"`). mutmut v3 has a `PermissionError` on `/proc` when running in Docker containers as PID 1. v2 is stable and supports all CLI flags documented below.
-
-### Quick Start
-
-```bash
-# Build (one-time)
-docker build -f Dockerfile.mutmut -t alita-mutmut .
-
-# Run (results volume-mounted to host)
-docker run --rm -v "$(pwd)/mutmut-results:/app/mutmut-results" alita-mutmut
-
-# View results
-cat mutmut-results/mutmut-results.txt
-```
-
-### Comparison: cosmic-ray vs mutmut
-
-| Aspect | cosmic-ray | mutmut |
-|---|---|---|
-| Architecture | 3 Docker workers + coordinator | Single container |
-| Test selection | Runs full pytest command per mutation | Coverage-guided (only relevant tests) |
-| Operator control | Manual pruning via SQLite | All operators, no pruning needed |
-| Windows support | Needs path patches + Docker coordinator | Runs in Docker only |
-| Resumable | No (re-init required) | Yes (remembers completed work) |
-| Config | Separate TOML + SQLite | `[tool.mutmut]` in pyproject.toml |
-| Output | SQLite DB + HTML via `cr-html` | HTML report + text summary |
-| Setup complexity | High (Dockerfile, compose, patches) | Low (1 Dockerfile, 1 script) |
-
-### When to use which
-
-- **cosmic-ray**: When you need fine-grained operator control (e.g., only boolean/comparison mutations) or want to parallelize across multiple workers for large modules
-- **mutmut**: For most cases — simpler setup, smarter test selection, resumable runs

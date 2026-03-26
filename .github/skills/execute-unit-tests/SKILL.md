@@ -1,5 +1,5 @@
 ---
-name: "unit-test-executor"
+name: "execute-unit-tests"
 description: "Interpret user prompts and run only the relevant pytest unit tests"
 ---
 

@@ -80,7 +80,7 @@ def _get_llm_for_tests():
     - DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: Model name
     - DEPLOYMENT_URL: Alita deployment URL
     - PROJECT_ID: Project ID
-    - ALITA_API_KEY: API key
+    - ELITEA_TOKEN: API key
     """
     model_name = os.getenv('DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS')
     if not model_name:
@@ -89,7 +89,7 @@ def _get_llm_for_tests():
     # Check if required client credentials are available
     deployment_url = os.getenv('DEPLOYMENT_URL')
     project_id = os.getenv('PROJECT_ID')
-    api_key = os.getenv('ALITA_API_KEY')
+    api_key = os.getenv('ELITEA_TOKEN')
     
     if not all([deployment_url, project_id, api_key]):
         _rp_log(f"Warning: Cannot create LLM - missing credentials (DEPLOYMENT_URL, PROJECT_ID, or ALITA_API_KEY)")
