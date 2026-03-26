@@ -59,11 +59,14 @@ class GetPageInput(BaseModel):
     include_content: Optional[bool] = Field(default=False, description="Whether to include page content in the response. If True, content will be processed for image descriptions.")
     image_description_prompt: Optional[str] = Field(default=None, description="Prompt which is used for image description when include_content is True")
     process_images: Optional[bool] = Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing.")
-    recursion_level: Optional[str] = Field(default="oneLevel",
-                                           description="Controls how many levels of sub-pages are retrieved along with the main page. "
-                                                       "Options: 'none' (No subpages retrieved - only the requested page metadata), "
-                                                       "'oneLevel' (Direct children only - immediate sub-pages) [default], "
-                                                       "'full' (All descendants - entire page hierarchy).")
+    recursion_level: Optional[Literal['none', 'oneLevel', 'oneLevelPlusNestedEmptyFolders', 'full']] = Field(
+        default="oneLevel",
+        description="Controls how many levels of sub-pages are retrieved along with the main page. "
+                    "Options: 'none' (No subpages retrieved - only the requested page metadata), "
+                    "'oneLevel' (Direct children only - immediate sub-pages) [default], "
+                    "'oneLevelPlusNestedEmptyFolders' (Direct children plus recursive chains of nested child folders that only contain a single folder), "
+                    "'full' (All descendants - entire page hierarchy)."
+    )
 
     @model_validator(mode='before')
     @classmethod
@@ -338,7 +341,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
 
     def get_wiki_page(self, wiki_identified: Optional[str] = None, page_path: Optional[str] = None, page_id: Optional[int] = None,
                       include_content: bool = False, image_description_prompt: Optional[str] = None,
-                      process_images: bool = True, recursion_level: str = "oneLevel"):
+                      process_images: bool = True, recursion_level: Literal['none', 'oneLevel', 'oneLevelPlusNestedEmptyFolders', 'full'] = "oneLevel"):
         """Get wiki page metadata and optionally content.
 
         Retrieves comprehensive metadata for a wiki page including eTag, id, path, git_item_path,
@@ -354,7 +357,9 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             process_images: Whether to process/describe images found in page content. Set to False to skip
                            image processing and return raw content. Defaults to True.
             recursion_level: Level of recursion to retrieve sub-pages. Options: 'none' (no subpages),
-                           'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.
+                           'oneLevel' (direct children only), 'oneLevelPlusNestedEmptyFolders' (direct children
+                           plus recursive chains of nested child folders that only contain a single folder),
+                           'full' (all descendants). Defaults to 'oneLevel'.
 
         Returns:
             Dictionary containing eTag and comprehensive page metadata including id, path, git_item_path,
