@@ -13,6 +13,7 @@ Run:
 from typing import Generator, List
 from unittest.mock import patch
 
+import pytest
 from langchain_core.documents import Document
 
 from alita_sdk.tools.chunkers.sematic.markdown_chunker import (
