@@ -115,7 +115,30 @@ class ArgsSchema(Enum):
                     "Branch to be used for read file operation."
                 )
             ),
-        )
+        ),
+        offset=(
+            Optional[int],
+            Field(
+                default=None,
+                ge=1,
+                description=(
+                    "Starting line number (1-indexed, inclusive). "
+                    "When provided, reading starts from this line. "
+                    "Use together with 'limit' to read a specific range."
+                )
+            ),
+        ),
+        limit=(
+            Optional[int],
+            Field(
+                default=None,
+                ge=1,
+                description=(
+                    "Maximum number of lines to return from the offset. "
+                    "If not provided, returns all lines from offset to end of file."
+                )
+            ),
+        ),
     )
     CreateFile = create_model(
         "CreateFile",
@@ -273,6 +296,11 @@ class ReposApiWrapper(CodeIndexerToolkit):
     # Reuse common file helpers from BaseCodeToolApiWrapper
     _excluded_file_operations: ClassVar[set] = {'edit_file'}
     edit_file = BaseCodeToolApiWrapper.edit_file
+
+    # In-memory cache for file content to avoid redundant API calls.
+    # Keyed by (file_path, branch) for branch-based reads and
+    # (path, commit_id) for commit-based reads in get_file_content.
+    _file_content_cache: Dict[tuple, str] = PrivateAttr(default_factory=dict)
 
     class Config:
         arbitrary_types_allowed = True
@@ -708,6 +736,11 @@ class ReposApiWrapper(CodeIndexerToolkit):
         ))
 
     def get_file_content(self, commit_id, path):
+        cache_key = (path, commit_id)
+        cached = self._file_content_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         version_descriptor = GitVersionDescriptor(
             version=commit_id, version_type="commit"
         )
@@ -724,6 +757,7 @@ class ReposApiWrapper(CodeIndexerToolkit):
             logger.error(msg)
             return ToolException(msg)
 
+        self._file_content_cache[cache_key] = content
         return content
 
     def create_branch(self, branch_name: str) -> str:
@@ -854,38 +888,69 @@ class ReposApiWrapper(CodeIndexerToolkit):
             self._client.create_push(
                 push=push, repository_id=self.repository_id, project=self.project
             )
+            # Invalidate cached content for this file on this branch
+            self._file_content_cache.pop((file_path, self.active_branch), None)
             return f"Created file {file_path}"
         except Exception as e:
             msg = f"Unable to create file due to error:\n{str(e)}"
             logger.error(msg)
             return ToolException(msg)
 
-    def _read_file(self, file_path: str, branch: str) -> str:
+    def _read_file(self, file_path: str, branch: str, offset: Optional[int] = None, limit: Optional[int] = None, **kwargs) -> str:
         """
         Read a file from this agent's branch, defined by self.active_branch,
         which supports PR branches in Azure DevOps.
         Parameters:
             file_path(str): the file path
             branch(str): repository branch
+            offset(int, optional): starting line number (1-indexed, inclusive).
+                When provided, only lines from this position are returned.
+            limit(int, optional): maximum number of lines to return from offset.
+                If not provided, returns all lines from offset to end of file.
+            **kwargs: Additional parameters for forward compatibility
         Returns:
-            str: The file decoded as a string, or an error message if not found
+            str: The file decoded as a string (optionally sliced by line range),
+                 or an error message if not found
         """
         self.active_branch = (branch or
                               self.active_branch if self.active_branch else self.base_branch
                               )
 
+        # Validate offset and limit when provided
+        if offset is not None and offset < 1:
+            return ToolException(
+                f"Invalid offset={offset}: must be a positive integer (1-indexed)."
+            )
+        if limit is not None and limit < 1:
+            return ToolException(
+                f"Invalid limit={limit}: must be a positive integer."
+            )
+
         try:
-            version_descriptor = GitVersionDescriptor(
-                version=self.active_branch, version_type="branch"
-            )
-            file_content = self._client.get_item_text(
-                repository_id=self.repository_id,
-                project=self.project,
-                path=file_path,
-                version_descriptor=version_descriptor,
-            )
-            # Azure DevOps API returns a generator of bytes, it should be decoded
-            decoded_content = "".join([chunk.decode("utf-8") for chunk in file_content])
+            cache_key = (file_path, self.active_branch)
+            decoded_content = self._file_content_cache.get(cache_key)
+
+            if decoded_content is None:
+                version_descriptor = GitVersionDescriptor(
+                    version=self.active_branch, version_type="branch"
+                )
+                file_content = self._client.get_item_text(
+                    repository_id=self.repository_id,
+                    project=self.project,
+                    path=file_path,
+                    version_descriptor=version_descriptor,
+                )
+                # Azure DevOps API returns a generator of bytes, it should be decoded
+                decoded_content = "".join([chunk.decode("utf-8") for chunk in file_content])
+                self._file_content_cache[cache_key] = decoded_content
+
+            # Apply line slicing if offset or limit is specified
+            if offset is not None or limit is not None:
+                lines = decoded_content.splitlines(keepends=True)
+                start = (offset - 1) if offset and offset > 0 else 0
+                end = start + limit if limit else len(lines)
+                return "".join(lines[start:end])
+
             return decoded_content
         except Exception as e:
             msg = (
@@ -922,6 +987,8 @@ class ReposApiWrapper(CodeIndexerToolkit):
             push = GitPush(commits=[new_commit], ref_updates=[ref_update])
 
             self._client.create_push(push=push, repository_id=self.repository_id, project=self.project)
+            # Invalidate cached content for this file on this branch
+            self._file_content_cache.pop((file_path, branch), None)
             return f"Updated file {file_path}"
         except ToolException:
             # Re-raise known tool exceptions
@@ -998,6 +1065,8 @@ class ReposApiWrapper(CodeIndexerToolkit):
             self._client.create_push(
                 push=push, repository_id=self.repository_id, project=self.project
             )
+            # Invalidate cached content for this file on this branch
+            self._file_content_cache.pop((file_path, branch_name), None)
             return "Deleted file " + file_path
         except Exception as e:
             msg = f"Unable to delete file due to error:\n{str(e)}"
