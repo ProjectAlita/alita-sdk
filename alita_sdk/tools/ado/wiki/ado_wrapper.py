@@ -76,6 +76,18 @@ class GetPageInput(BaseModel):
         return values
 
 
+DeletePageByPathInput = create_model(
+    "DeletePageByPathInput",
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
+    page_name=(str, Field(description="Wiki page path")),
+)
+
+DeletePageByIdInput = create_model(
+    "DeletePageByIdInput",
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
+    page_id=(int, Field(description="Wiki page ID")),
+)
+
 ModifyPageInput = create_model(
     "ModifyPageInput",
     wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
@@ -531,8 +543,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             prompt=image_description_prompt
         )
 
-    def delete_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
-        """Extract ADO wiki page content."""
+    def delete_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None):
+        """Delete ADO wiki page by path."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
             self._client.delete_page(project=self.project, wiki_identifier=wiki_id, path=page_name)
@@ -541,8 +553,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unable to delete wiki page: {str(e)}")
             return ToolException(f"Unable to delete wiki page: {str(e)}")
 
-    def delete_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None):
-        """Extract ADO wiki page content."""
+    def delete_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None):
+        """Delete ADO wiki page by ID."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
             self._client.delete_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id)
@@ -710,13 +722,13 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             {
                 "name": "delete_page_by_path",
                 "description": (self.delete_page_by_path.__doc__ or "") + default_wiki_info,
-                "args_schema": GetPageByPathInput,
+                "args_schema": DeletePageByPathInput,
                 "ref": self.delete_page_by_path,
             },
             {
                 "name": "delete_page_by_id",
                 "description": (self.delete_page_by_id.__doc__ or "") + default_wiki_info,
-                "args_schema": GetPageByIdInput,
+                "args_schema": DeletePageByIdInput,
                 "ref": self.delete_page_by_id,
             },
             {
