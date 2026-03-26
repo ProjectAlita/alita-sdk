@@ -369,9 +369,164 @@ def deepeval_model(alita_client):
 
 # ===================== Helper Functions =====================
 
+def search_and_extract_context_via_pipeline(
+    toolkit, 
+    query: str, 
+    index_name: str = TEST_INDEX_NAME, 
+    cut_off: float = 0.1
+) -> tuple[str, List[str]]:
+    """
+    Execute search via pipeline and extract LLM response + retrieval context.
+    
+    This function wraps search_index in a pipeline execution to get
+    LLM-generated responses instead of raw search results.
+
+    Args:
+        toolkit: BaseIndexerToolkit instance (must have .alita and .llm attributes)
+        query: Search query
+        index_name: Index to search in
+        cut_off: Similarity threshold (0.0 returns all results, useful for test data with random embeddings)
+
+    Returns:
+        Tuple of (actual_output, retrieval_context_list)
+    """
+    import sys
+    from pathlib import Path
+    
+    # Import pipeline execution utilities
+    SCRIPTS_DIR = Path(__file__).parent.parent.parent / ".alita" / "tests" / "test_pipelines" / "scripts"
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+    
+    from setup_strategy import LocalSetupStrategy
+    from utils_local import IsolatedPipelineTestRunner
+    
+    # Get alita client and llm from toolkit
+    alita_client = toolkit.alita
+    llm = toolkit.llm
+    
+    # Create toolkit configuration for LocalSetupStrategy
+    toolkit_config = {
+        "indexer_toolkit": {
+            "id": 1,
+            "type": "jira",  # This will need to match the toolkit type
+            "name": "indexer_toolkit",
+            "config": {
+                "connection_string": str(toolkit.connection_string.get_secret_value()),
+                "collection_schema": toolkit.collection_name,
+                "vectorstore_type": toolkit.vectorstore_type,
+                "embedding_model": toolkit.embedding_model,
+                "index_name": index_name,
+                "cut_off": cut_off,
+            },
+        }
+    }
+    
+    # Create LocalSetupStrategy with toolkit instance
+    local_strategy = LocalSetupStrategy(toolkit_configs=toolkit_config, llm=llm)
+    
+    # Register the toolkit instance directly (bypass normal creation)
+    local_strategy.created_toolkits["indexer_toolkit"] = {
+        "id": 1,
+        "type": "base_indexer",
+        "name": "indexer_toolkit",
+        "config": toolkit_config["indexer_toolkit"]["config"],
+    }
+    
+    # Get tools from the toolkit instance and convert dicts to BaseAction tools
+    from alita_sdk.tools.base.tool import BaseAction
+
+    tool_dicts = [tool for tool in toolkit.get_available_tools() if tool["name"] == "search_index"]
+    tools = []
+    for tool_dict in tool_dicts:
+        tools.append(BaseAction(
+            api_wrapper=toolkit,
+            name=tool_dict["name"],
+            description=tool_dict["description"],
+            args_schema=tool_dict["args_schema"],
+        ))
+    local_strategy.created_tools = tools
+    
+    # Create pipeline test runner
+    # Note: Don't pass llm here - let the runner create its own from the YAML-specified model (gpt-4o-mini)
+    # This avoids auth issues with Anthropic models through the LiteLLM proxy
+    runner = IsolatedPipelineTestRunner(
+        alita_client=alita_client,
+        tools=tools,
+        local_strategy=local_strategy,
+        verbose=False,
+        isolate_toolkits_per_test=False,
+    )
+    
+    # Execute the pipeline with the query
+    pipeline_yaml = Path(__file__).parent / "fixtures" / "pgvector" / "assistant_pipeline.yaml"
+    result = runner.run_test(
+        test_yaml_path=str(pipeline_yaml),
+        input_message=query,
+        timeout=120,
+    )
+    
+    if not result.success:
+        raise RuntimeError(f"Pipeline execution failed: {result.error}")
+
+    # Extract LLM response and retrieval context from pipeline output
+    # The output structure (from _build_result_from_callbacks in utils_local.py):
+    # - chat_history: [{'role': 'user', 'content': ...}, {'role': 'assistant', 'content': ...}]
+    # - tool_calls_dict: {tool_run_id: {'tool_name': ..., 'tool_output': JSON string, ...}}
+    output_data = result.output
+    actual_output = ""
+    retrieval_context = []
+
+    if isinstance(output_data, dict):
+        # Extract actual_output from chat_history (assistant's final response)
+        chat_history = output_data.get("chat_history", [])
+        for msg in reversed(chat_history):
+            if msg.get("role") == "assistant" and msg.get("content"):
+                actual_output = msg["content"]
+                break
+
+        # Extract retrieval_context from tool_calls_dict
+        # tool_calls_dict contains the actual tool execution results
+        tool_calls_dict = output_data.get("tool_calls_dict", {})
+        for tool_call in tool_calls_dict.values():
+            if tool_call.get("tool_name") == "search_index":
+                tool_output = tool_call.get("tool_output", "")
+                if tool_output:
+                    # tool_output is a JSON string of documents
+                    try:
+                        docs = json.loads(tool_output)
+                        if isinstance(docs, list):
+                            for doc in docs:
+                                content = doc.get('page_content') or doc.get('content') or str(doc)
+                                retrieval_context.append(content)
+                        elif isinstance(docs, str):
+                            # If no docs found, it returns an error string
+                            retrieval_context.append(docs)
+                    except json.JSONDecodeError:
+                        # tool_output might be a plain string (error message)
+                        retrieval_context.append(tool_output)
+    else:
+        actual_output = str(output_data)
+
+    # Validate that we got actual results, not errors
+    # Check if actual_output contains an error message
+    error_indicators = ["Error:", "error:", "401", "403", "500", "Authentication Error", "ToolException"]
+    if any(indicator in actual_output for indicator in error_indicators):
+        raise RuntimeError(f"Pipeline returned an error instead of valid output: {actual_output}")
+
+    # Ensure we have actual retrieval context (not just placeholder)
+    if not retrieval_context:
+        raise RuntimeError("No retrieval context was extracted from search_index tool output")
+
+    return actual_output, retrieval_context
+
+
 def search_and_extract_context(toolkit, query: str, index_name: str = TEST_INDEX_NAME, cut_off: float = 0.1) -> tuple[str, List[str]]:
     """
     Execute search and extract retrieval context.
+    
+    DEPRECATED: This function calls search_index directly. Use search_and_extract_context_via_pipeline
+    for proper RAG evaluation that tests the full pipeline flow.
 
     Args:
         toolkit: BaseIndexerToolkit instance
@@ -492,7 +647,7 @@ class TestSingleTurnRAGEvaluation:
         retrieval context (no hallucinations).
         """
         query = "What is allowedTools and when must it include the Task tool?"
-        actual_output, retrieval_context = search_and_extract_context(indexer_toolkit, query)
+        actual_output, retrieval_context = search_and_extract_context_via_pipeline(indexer_toolkit, query)
 
         test_case = LLMTestCase(
             input=query,
@@ -504,6 +659,8 @@ class TestSingleTurnRAGEvaluation:
         metric.measure(test_case)
 
         print(f"\nFaithfulness Test (allowedTools):")
+        print(f"  ACTUAL OUTPUT: {actual_output}")
+        print(f"  RETRIEVAL CONTEXT: {retrieval_context}")
         print(f"  Query: {query}")
         print(f"  Score: {metric.score} (threshold: {THRESHOLD_FAITHFULNESS})")
         print(f"  Reason: {metric.reason}")
