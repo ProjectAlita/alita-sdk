@@ -38,6 +38,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from deepeval import evaluate
 import pytest
 from pydantic import SecretStr
 from alita_sdk.runtime.clients.client import AlitaClient
@@ -49,7 +50,7 @@ from deepeval.metrics import (
     ContextualPrecisionMetric,
     ContextualRecallMetric,
 )
-from deepeval.models import DeepEvalBaseLLM
+from deepeval.models import AnthropicModel, AzureOpenAIModel, DeepEvalBaseLLM, GPTModel
 
 # Import multi-turn metrics
 from deepeval.metrics import ConversationalGEval, KnowledgeRetentionMetric
@@ -374,7 +375,7 @@ def search_and_extract_context_via_pipeline(
     query: str, 
     index_name: str = TEST_INDEX_NAME, 
     cut_off: float = 0.1
-) -> tuple[str, List[str]]:
+) -> tuple[str, List[str], List[float]]:
     """
     Execute search via pipeline and extract LLM response + retrieval context.
     
@@ -388,7 +389,7 @@ def search_and_extract_context_via_pipeline(
         cut_off: Similarity threshold (0.0 returns all results, useful for test data with random embeddings)
 
     Returns:
-        Tuple of (actual_output, retrieval_context_list)
+        Tuple of (actual_output, retrieval_context_list, scores_list)
     """
     import sys
     from pathlib import Path
@@ -476,6 +477,7 @@ def search_and_extract_context_via_pipeline(
     output_data = result.output
     actual_output = ""
     retrieval_context = []
+    scores = []
 
     if isinstance(output_data, dict):
         # Extract actual_output from chat_history (assistant's final response)
@@ -499,12 +501,18 @@ def search_and_extract_context_via_pipeline(
                             for doc in docs:
                                 content = doc.get('page_content') or doc.get('content') or str(doc)
                                 retrieval_context.append(content)
+                                # Extract score/similarity from metadata if available
+                                metadata = doc.get('metadata') or doc.get('cmetadata', {})
+                                score = metadata.get('score') or metadata.get('similarity') or doc.get('score', 0.0)
+                                scores.append(float(score) if score else 0.0)
                         elif isinstance(docs, str):
                             # If no docs found, it returns an error string
                             retrieval_context.append(docs)
+                            scores.append(0.0)
                     except json.JSONDecodeError:
                         # tool_output might be a plain string (error message)
                         retrieval_context.append(tool_output)
+                        scores.append(0.0)
     else:
         actual_output = str(output_data)
 
@@ -518,7 +526,7 @@ def search_and_extract_context_via_pipeline(
     if not retrieval_context:
         raise RuntimeError("No retrieval context was extracted from search_index tool output")
 
-    return actual_output, retrieval_context
+    return actual_output, retrieval_context, scores
 
 
 def search_and_extract_context(toolkit, query: str, index_name: str = TEST_INDEX_NAME, cut_off: float = 0.1) -> tuple[str, List[str]]:
@@ -647,20 +655,37 @@ class TestSingleTurnRAGEvaluation:
         retrieval context (no hallucinations).
         """
         query = "What is allowedTools and when must it include the Task tool?"
-        actual_output, retrieval_context = search_and_extract_context_via_pipeline(indexer_toolkit, query)
+        actual_output, retrieval_context, scores = search_and_extract_context_via_pipeline(indexer_toolkit, query)
+        expected_output = "allowedTools is a configuration that specifies which tools a subagent can access. For a coordinator to spawn subagents, the allowedTools must include the Task tool, which allows the subagent to perform its assigned task."
 
         test_case = LLMTestCase(
             input=query,
             actual_output=actual_output,
-            retrieval_context=retrieval_context,
+            expected_output=expected_output,
+            # retrieval_context=[]],
+        )
+        os.environ["ANTHROPIC_API_KEY"] = TOKEN
+        os.environ["OPENAI_API_KEY"] = TOKEN
+        model = GPTModel(
+            model="gpt-5-mini",
+            # api_key="eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJ1dWlkIjoiNjViOWIzOWEtNjU4OS00NDQ2LTlmZjItNGYyMTZiYTVmY2ZlIiwiZXhwaXJlcyI6IjIwMjYtMDktMjZUMTI6NTQifQ.3mp97ELnYkkpwQPeGWNygiDSdwhMwdzEN3z-21GMDN1jX9b7bR1WvTIZQsxHZAOVS7a1QLJB58YUdugKrH0MGw",
+            base_url="https://dev.elitea.ai/llm/v1"
         )
 
-        metric = FaithfulnessMetric(threshold=THRESHOLD_FAITHFULNESS, model=deepeval_model, async_mode=False)
+        metric = FaithfulnessMetric(threshold=THRESHOLD_FAITHFULNESS, model=model, async_mode=False, strict_mode=True)
+        metric2 = ContextualRelevancyMetric(threshold=THRESHOLD_FAITHFULNESS, model=model, async_mode=False, strict_mode=True)
         metric.measure(test_case)
+        res = evaluate(test_cases=[test_case], metrics=[metric], model=model)
+        print (f"Metric evaluation result: {res}")
+        print (f"Metric evaluation result: {res=}")
 
         print(f"\nFaithfulness Test (allowedTools):")
         print(f"  ACTUAL OUTPUT: {actual_output}")
-        print(f"  RETRIEVAL CONTEXT: {retrieval_context}")
+        print(f"  RETRIEVAL CONTEXT SIZE: {len(retrieval_context)} documents")
+        print(f"  RETRIEVAL CONTEXT WITH SCORES:")
+        for i, (context, score) in enumerate(zip(retrieval_context, scores), 1):
+            print(f"    [{i}] Score: {score:.4f}")
+            print(f"        Content: {context}...")  # Show first 200 chars
         print(f"  Query: {query}")
         print(f"  Score: {metric.score} (threshold: {THRESHOLD_FAITHFULNESS})")
         print(f"  Reason: {metric.reason}")
