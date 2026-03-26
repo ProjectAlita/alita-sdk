@@ -79,6 +79,24 @@ state:
   validation_passed:
     type: bool
     value: false
+  wiki_cache:
+    type: dict
+    value: {}
+  wiki_id:
+    type: string
+    value: ''
+  wiki_page_data:
+    type: dict
+    value: {}
+  wiki_pages_to_fetch:
+    type: list
+    value: []
+  current_wiki_index:
+    type: int
+    value: 0
+  page_id:
+    type: int
+    value: 0
 entry_point: ParseInput
 nodes:
   - id: ParseInput
@@ -364,15 +382,37 @@ nodes:
     transition: OutputResult
     variables_to_clean: []
   - id: OutputResult
-    type: code
-    code:
-      type: fixed
-      value: |-
-        # Return operation_result as the final response
-        operation_result = alita_state.get('operation_result', '')
-        operation_result
+    type: llm
     input:
       - operation_result
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a result formatter for the ADO hierarchy fetcher pipeline.
+          
+          **Your task:**
+          - Parse the operation_result
+          - If it's a successful operation (JSON list of filenames), output ONLY the JSON list
+          - If it's an error (JSON object with "status": "error"), explain the error clearly and suggest next steps
+          
+          **Output format for success:**
+          ```json
+          ["<id>_feature.json"]
+          ```
+          
+          **Output format for error:**
+          Explain what went wrong and provide the correct input format example.
+      task:
+        type: fstring
+        value: |
+          Operation result:
+          {operation_result}
+          
+          Format this result appropriately. If it's a filename list, output only the JSON list. If it's an error, explain clearly.
     output: []
     structured_output: false
     transition: END
@@ -715,10 +755,9 @@ nodes:
                 # Workaround: Assign parent sequentially (this is best-effort without System.Parent field)
                 if len(inferred_parents) == 1:
                     parent_map[item_id] = inferred_parents[0]
-                # If multiple parents, we need System.Parent field - fallback to first parent and mark for debug
+                # If multiple parents, we need System.Parent field - fallback to first parent
                 else:
                     parent_map[item_id] = inferred_parents[0]
-                    item['_parent_ambiguous'] = True
             else:
                 # No parent info at all, assume direct child of feature
                 parent_map[item_id] = epic_id
@@ -898,10 +937,58 @@ nodes:
         # Step 3: Identify missing item IDs (not in cache)
         missing_ids = [item_id for item_id in item_link_ids if item_id not in item_cache]
         
+        # Step 4: Collect all wiki-type links and extract wiki info
+        # Store as list of dicts with wiki_id and page_id
+        wiki_pages_to_fetch = []
+        
+        # Collect from feature
+        if 'links' in feature:
+            for link in feature['links']:
+                if link.get('type') == 'wiki':
+                    url = link.get('url', '')
+                    # Extract from URL pattern: /_wiki/wikis/{wiki-name}/{pageId}
+                    # URL decode the wiki name (e.g., LFA%20Cloud becomes LFA Cloud)
+                    import urllib.parse
+                    match = re.search(r'/_wiki/wikis/([^/]+)/(\d+)', url, re.IGNORECASE)
+                    if match:
+                        wiki_id = urllib.parse.unquote(match.group(1))
+                        page_id = int(match.group(2))
+                        wiki_pages_to_fetch.append({
+                            'wiki_id': wiki_id,
+                            'page_id': page_id
+                        })
+        
+        # Collect from dependencies
+        for dep_id, dep in dependencies.items():
+            if 'links' in dep:
+                for link in dep['links']:
+                    if link.get('type') == 'wiki':
+                        url = link.get('url', '')
+                        import urllib.parse
+                        match = re.search(r'/_wiki/wikis/([^/]+)/(\d+)', url, re.IGNORECASE)
+                        if match:
+                            wiki_id = urllib.parse.unquote(match.group(1))
+                            page_id = int(match.group(2))
+                            wiki_pages_to_fetch.append({
+                                'wiki_id': wiki_id,
+                                'page_id': page_id
+                            })
+        
+        # Remove duplicates based on page_id
+        seen = set()
+        unique_wiki_pages = []
+        for page in wiki_pages_to_fetch:
+            if page['page_id'] not in seen:
+                seen.add(page['page_id'])
+                unique_wiki_pages.append(page)
+        
         {
             'hierarchy_data': hierarchy_data,
             'item_cache': item_cache,
-            'missing_ids': missing_ids
+            'missing_ids': missing_ids,
+            'wiki_pages_to_fetch': unique_wiki_pages,
+            'wiki_cache': {},
+            'current_wiki_index': 0
         }
     input:
       - hierarchy_data
@@ -909,6 +996,9 @@ nodes:
       - hierarchy_data
       - item_cache
       - missing_ids
+      - wiki_pages_to_fetch
+      - wiki_cache
+      - current_wiki_index
     structured_output: true
     transition: CheckNeedFetchLinkedItems
   - id: CheckNeedFetchLinkedItems
@@ -1108,6 +1198,225 @@ nodes:
     input:
       - hierarchy_data
       - item_cache
+    output:
+      - hierarchy_data
+    structured_output: true
+    transition: CheckNeedFetchWikiPages
+  - id: CheckNeedFetchWikiPages
+    type: router
+    condition: |
+      {% if wiki_pages_to_fetch and current_wiki_index < wiki_pages_to_fetch|length %}
+        PrepareWikiPageParams
+      {% else %}
+        UpdateWikiLinkContent
+      {% endif %}
+    default_output: UpdateWikiLinkContent
+    input:
+      - wiki_pages_to_fetch
+      - current_wiki_index
+    routes:
+      - PrepareWikiPageParams
+      - UpdateWikiLinkContent
+  - id: PrepareWikiPageParams
+    type: code
+    code:
+      type: fixed
+      value: |-
+        wiki_pages = alita_state.get('wiki_pages_to_fetch', [])
+        idx = alita_state.get('current_wiki_index', 0)
+        
+        # Extract nested if needed
+        if isinstance(wiki_pages, dict) and 'wiki_pages_to_fetch' in wiki_pages:
+            wiki_pages = wiki_pages['wiki_pages_to_fetch']
+        
+        # Set safe defaults
+        wiki_id = 'default.wiki'
+        page_id = 0
+        
+        # Validate and extract values
+        if isinstance(wiki_pages, list) and idx < len(wiki_pages):
+            page_info = wiki_pages[idx]
+            if isinstance(page_info, dict):
+                # Extract wiki_id
+                if 'wiki_id' in page_info:
+                    wiki_id_value = page_info['wiki_id']
+                    if wiki_id_value and str(wiki_id_value).strip():
+                        wiki_id = str(wiki_id_value)
+                
+                # Extract page_id with robust validation
+                if 'page_id' in page_info:
+                    page_id_value = page_info['page_id']
+                    # Handle None, empty string, or whitespace
+                    if page_id_value is not None:
+                        page_id_str = str(page_id_value).strip()
+                        if page_id_str:
+                            try:
+                                page_id = int(page_id_value)
+                            except (ValueError, TypeError):
+                                page_id = 0
+        
+        {
+            'wiki_id': wiki_id,
+            'page_id': page_id
+        }
+    input:
+      - wiki_pages_to_fetch
+      - current_wiki_index
+    output:
+      - wiki_id
+      - page_id
+    structured_output: true
+    transition: FetchWikiPage
+  - id: FetchWikiPage
+    type: toolkit
+    input:
+      - wiki_id
+      - page_id
+    input_mapping:
+      wiki_identified:
+        type: variable
+        value: wiki_id
+      page_id:
+        type: variable
+        value: page_id
+    on_error:
+      transition: ProcessWikiPage
+    output:
+      - wiki_page_data
+    structured_output: true
+    tool: get_wiki_page_by_id
+    toolkit_name: LFAADOWikiReader
+    transition: ProcessWikiPage
+  - id: ProcessWikiPage
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        wiki_cache = alita_state.get('wiki_cache', {})
+        wiki_page_data = alita_state.get('wiki_page_data', {})
+        wiki_pages_to_fetch = alita_state.get('wiki_pages_to_fetch', [])
+        current_wiki_index = alita_state.get('current_wiki_index', 0)
+        page_id = alita_state.get('page_id', 0)  # Get the page_id we used to fetch
+        
+        # Extract nested if needed
+        if isinstance(wiki_cache, dict) and 'wiki_cache' in wiki_cache:
+            wiki_cache = wiki_cache['wiki_cache']
+        if isinstance(wiki_page_data, dict) and 'wiki_page_data' in wiki_page_data:
+            wiki_page_data = wiki_page_data['wiki_page_data']
+        if isinstance(wiki_pages_to_fetch, dict) and 'wiki_pages_to_fetch' in wiki_pages_to_fetch:
+            wiki_pages_to_fetch = wiki_pages_to_fetch['wiki_pages_to_fetch']
+        
+        # Add fetched page to cache if valid
+        # CRITICAL: The API returns content directly as a string, not as a dict
+        if page_id > 0:
+            if isinstance(wiki_page_data, str):
+                # Direct string response (most common case)
+                wiki_cache[int(page_id)] = {
+                    'id': int(page_id),
+                    'title': f'Wiki Page {page_id}',
+                    'content': wiki_page_data,
+                    'url': ''
+                }
+            elif isinstance(wiki_page_data, dict) and wiki_page_data:
+                # Dict response (legacy format)
+                wiki_cache[int(page_id)] = {
+                    'id': int(page_id),
+                    'title': wiki_page_data.get('path', f'Wiki Page {page_id}'),
+                    'content': wiki_page_data.get('content', ''),
+                    'url': wiki_page_data.get('remoteUrl', '')
+                }
+        
+        # Move to next wiki page
+        next_index = current_wiki_index + 1
+        
+        {
+            'wiki_cache': wiki_cache,
+            'current_wiki_index': next_index
+        }
+    input:
+      - wiki_cache
+      - wiki_page_data
+      - wiki_pages_to_fetch
+      - current_wiki_index
+      - page_id
+    output:
+      - wiki_cache
+      - current_wiki_index
+    structured_output: true
+    transition: CheckNeedFetchWikiPages
+  - id: UpdateWikiLinkContent
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        wiki_cache = alita_state.get('wiki_cache', {})
+        
+        # Extract nested if needed
+        if isinstance(hierarchy_data, dict) and 'hierarchy_data' in hierarchy_data:
+            hierarchy_data = hierarchy_data['hierarchy_data']
+        if isinstance(wiki_cache, dict) and 'wiki_cache' in wiki_cache:
+            wiki_cache = wiki_cache['wiki_cache']
+        
+        # Ensure wiki_cache is a valid dict
+        if not isinstance(wiki_cache, dict):
+            wiki_cache = {}
+        
+        # Normalize cache keys to integers
+        normalized_cache = {}
+        for key, value in wiki_cache.items():
+            try:
+                int_key = int(key)
+                normalized_cache[int_key] = value
+            except (ValueError, TypeError):
+                pass
+        wiki_cache = normalized_cache
+        
+        feature = hierarchy_data.get('feature', {})
+        dependencies = hierarchy_data.get('dependencies', {})
+        
+        # Update feature wiki links
+        if 'links' in feature:
+            for link in feature['links']:
+                if link.get('type') == 'wiki':
+                    url = link.get('url', '')
+                    # Extract page ID from URL
+                    match = re.search(r'/_wiki/wikis/[^/]+/(\d+)', url, re.IGNORECASE)
+                    if not match:
+                        match = re.search(r'[?&]pageId=(\d+)', url, re.IGNORECASE)
+                    
+                    if match:
+                        page_id = int(match.group(1))
+                        if page_id in wiki_cache:
+                            # Populate content with wiki page data (compact JSON)
+                            link['content'] = json.dumps(wiki_cache[page_id], separators=(',', ':'))
+        
+        # Update dependency wiki links
+        for dep_id, dep in dependencies.items():
+            if 'links' in dep:
+                for link in dep['links']:
+                    if link.get('type') == 'wiki':
+                        url = link.get('url', '')
+                        match = re.search(r'/_wiki/wikis/[^/]+/(\d+)', url, re.IGNORECASE)
+                        if not match:
+                            match = re.search(r'[?&]pageId=(\d+)', url, re.IGNORECASE)
+                        
+                        if match:
+                            page_id = int(match.group(1))
+                            if page_id in wiki_cache:
+                                # Populate content with wiki page data (compact JSON)
+                                link['content'] = json.dumps(wiki_cache[page_id], separators=(',', ':'))
+        
+        {
+            'hierarchy_data': hierarchy_data
+        }
+    input:
+      - hierarchy_data
+      - wiki_cache
     output:
       - hierarchy_data
     structured_output: true
