@@ -5,11 +5,21 @@ description: |
   
   Objective: Test error handling for non-existent list
   
+  Toolkit Implementation Detail:
+  The SharePoint toolkit uses a two-tier fallback strategy:
+  1. First attempt: REST API (may return 401 for non-existent lists)
+  2. Second attempt: Graph API (returns authoritative list-not-found error)
+  
+  When both attempts fail, the stack trace contains BOTH errors.
+  The final ToolException is the authoritative result; the intermediate REST 401
+  only indicates that fallback was triggered.
+  
   Expected Behavior:
   - Tool executes and returns error information
-  - Error message indicates list not found
+  - Error message indicates list not found (validate based on final ToolException)
   - No system crashes or unhandled exceptions
   - Error is clear and actionable
+  - Initial REST API 401 errors trigger fallback and should be ignored in validation
 
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
@@ -63,16 +73,28 @@ nodes:
 
           this test validates error handling for invalid list names.
 
+          IMPORTANT IMPLEMENTATION DETAIL:
+          the sharepoint toolkit tries REST API first, then falls back to Graph API if REST fails.
+          when both fail, the error output may contain BOTH errors (e.g., a 401 from REST and a
+          'list not found' from Graph API). the final ToolException is the authoritative result.
+
           perform the following checks:
           1. confirm the tool executed (result is not empty or null).
-          2. examine any error message for specific meaning. valid error patterns for invalid lists include:
+          2. if the error output contains multiple errors or a stack trace with intermediate HTTP errors:
+             - extract and validate the FINAL ToolException message - this is the authoritative result
+             - IGNORE intermediate REST API errors (e.g., 401 Unauthorized) - they only triggered fallback
+          3. valid error patterns for invalid lists (check the final ToolException message):
              - list not found or does not exist
              - invalid list title or list name
              - cannot access list or list unavailable
              - list retrieval failed or list error
-          3. determine if the error is about the invalid list itself.
-             errors like "list 'invalidlist_99999_doesnotexist' not found" are expected and correct.
-             system errors unrelated to the list name are failures.
+          4. errors like "list 'invalidlist_99999_doesnotexist' not found" are expected and correct.
+          5. intermediate REST API 401 errors in the stack trace are expected documented behavior
+             that triggers the graph api fallback. do NOT fail the test if 401 appears only in
+             intermediate stack trace entries.
+          6. ONLY fail if:
+             - the FINAL ToolException does not indicate list-not-found semantics
+             - system errors unrelated to the list name (network timeout, dns failure, server unavailable)
 
           return a json object with:
           {{

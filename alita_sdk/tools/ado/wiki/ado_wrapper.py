@@ -37,7 +37,8 @@ GetPageByPathInput = create_model(
     wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_name=(str, Field(description="Wiki page path")),
     image_description_prompt=(Optional[str],
-                              Field(description="Prompt which is used for image description", default=None))
+                              Field(description="Prompt which is used for image description", default=None)),
+    process_images=(Optional[bool], Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing."))
 )
 
 GetPageByIdInput = create_model(
@@ -45,7 +46,8 @@ GetPageByIdInput = create_model(
     wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
     page_id=(int, Field(description="Wiki page ID")),
     image_description_prompt=(Optional[str],
-                              Field(description="Prompt which is used for image description", default=None))
+                              Field(description="Prompt which is used for image description", default=None)),
+    process_images=(Optional[bool], Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing."))
 )
 
 
@@ -56,7 +58,15 @@ class GetPageInput(BaseModel):
     page_id: Optional[int] = Field(default=None, description="Wiki page ID")
     include_content: Optional[bool] = Field(default=False, description="Whether to include page content in the response. If True, content will be processed for image descriptions.")
     image_description_prompt: Optional[str] = Field(default=None, description="Prompt which is used for image description when include_content is True")
-    recursion_level: Optional[str] = Field(default="oneLevel", description="Level of recursion to retrieve sub-pages. Options: 'none' (no subpages), 'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.")
+    process_images: Optional[bool] = Field(default=True, description="Whether to process images in page content. Set to False to get raw content without image description processing.")
+    recursion_level: Optional[Literal['none', 'oneLevel', 'oneLevelPlusNestedEmptyFolders', 'full']] = Field(
+        default="oneLevel",
+        description="Controls how many levels of sub-pages are retrieved along with the main page. "
+                    "Options: 'none' (No subpages retrieved - only the requested page metadata), "
+                    "'oneLevel' (Direct children only - immediate sub-pages) [default], "
+                    "'oneLevelPlusNestedEmptyFolders' (Direct children plus recursive chains of nested child folders that only contain a single folder), "
+                    "'full' (All descendants - entire page hierarchy)."
+    )
 
     @model_validator(mode='before')
     @classmethod
@@ -68,6 +78,18 @@ class GetPageInput(BaseModel):
             raise ValueError("At least one of 'page_path' or 'page_id' must be provided")
         return values
 
+
+DeletePageByPathInput = create_model(
+    "DeletePageByPathInput",
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
+    page_name=(str, Field(description="Wiki page path")),
+)
+
+DeletePageByIdInput = create_model(
+    "DeletePageByIdInput",
+    wiki_identified=(Optional[str], Field(default=None, description="Wiki ID or wiki name. If not provided, uses the default wiki identifier from toolkit configuration.")),
+    page_id=(int, Field(description="Wiki page ID")),
+)
 
 ModifyPageInput = create_model(
     "ModifyPageInput",
@@ -291,31 +313,35 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error during the attempt to extract wiki: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki: {str(e)}")
 
-    def get_wiki_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
+    def get_wiki_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None, process_images: bool = True):
         """Extract ADO wiki page content."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
-            return self._process_images(self._client.get_page(project=self.project, wiki_identifier=wiki_id, path=page_name,
-                                         include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            content = self._client.get_page(project=self.project, wiki_identifier=wiki_id, path=page_name,
+                                            include_content=True).page.content
+            if process_images:
+                return self._process_images(content, image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            return content
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
-    def get_wiki_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None):
+    def get_wiki_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None, process_images: bool = True):
         """Extract ADO wiki page content."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
-            return self._process_images(self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id,
-                                                include_content=True).page.content,
-                                        image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            content = self._client.get_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id,
+                                                   include_content=True).page.content
+            if process_images:
+                return self._process_images(content, image_description_prompt=image_description_prompt, wiki_identified=wiki_id)
+            return content
         except Exception as e:
             logger.error(f"Error during the attempt to extract wiki page: {str(e)}")
             return ToolException(f"Error during the attempt to extract wiki page: {str(e)}")
 
     def get_wiki_page(self, wiki_identified: Optional[str] = None, page_path: Optional[str] = None, page_id: Optional[int] = None,
                       include_content: bool = False, image_description_prompt: Optional[str] = None,
-                      recursion_level: str = "oneLevel"):
+                      process_images: bool = True, recursion_level: Literal['none', 'oneLevel', 'oneLevelPlusNestedEmptyFolders', 'full'] = "oneLevel"):
         """Get wiki page metadata and optionally content.
 
         Retrieves comprehensive metadata for a wiki page including eTag, id, path, git_item_path,
@@ -328,8 +354,12 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             page_id: Wiki page ID. Optional if page_path is provided. Takes precedence over page_path.
             include_content: Whether to include page content in response. Defaults to False (metadata only).
             image_description_prompt: Optional prompt for image description when include_content is True.
+            process_images: Whether to process/describe images found in page content. Set to False to skip
+                           image processing and return raw content. Defaults to True.
             recursion_level: Level of recursion to retrieve sub-pages. Options: 'none' (no subpages),
-                           'oneLevel' (direct children only), 'full' (all descendants). Defaults to 'oneLevel'.
+                           'oneLevel' (direct children only), 'oneLevelPlusNestedEmptyFolders' (direct children
+                           plus recursive chains of nested child folders that only contain a single folder),
+                           'full' (all descendants). Defaults to 'oneLevel'.
 
         Returns:
             Dictionary containing eTag and comprehensive page metadata including id, path, git_item_path,
@@ -374,7 +404,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             )
 
             # Process images in content if requested
-            if include_content and result.get('page', {}).get('content'):
+            if include_content and process_images and result.get('page', {}).get('content'):
                 processed_content = self._process_images(
                     result['page']['content'],
                     image_description_prompt=image_description_prompt,
@@ -518,8 +548,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             prompt=image_description_prompt
         )
 
-    def delete_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None, image_description_prompt=None):
-        """Extract ADO wiki page content."""
+    def delete_page_by_path(self, wiki_identified: Optional[str] = None, page_name: str = None):
+        """Delete ADO wiki page by path."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
             self._client.delete_page(project=self.project, wiki_identifier=wiki_id, path=page_name)
@@ -528,8 +558,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unable to delete wiki page: {str(e)}")
             return ToolException(f"Unable to delete wiki page: {str(e)}")
 
-    def delete_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None, image_description_prompt=None):
-        """Extract ADO wiki page content."""
+    def delete_page_by_id(self, wiki_identified: Optional[str] = None, page_id: int = None):
+        """Delete ADO wiki page by ID."""
         try:
             wiki_id = self._resolve_wiki_identifier(wiki_identified)
             self._client.delete_page_by_id(project=self.project, wiki_identifier=wiki_id, id=page_id)
@@ -631,7 +661,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unable to modify wiki page: {str(e)}")
             return ToolException(f"Unable to modify wiki page: {str(e)}")
 
-    def _base_loader(self, wiki_identifier: str, chunking_tool: str = None, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
+    def _base_loader(self, wiki_identifier: Optional[str] = None, chunking_tool: str = None, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
+        wiki_identifier = self._resolve_wiki_identifier(wiki_identifier)
         pages = self._client.get_pages_batch(pages_batch_request={}, project=self.project, wiki_identifier=wiki_identifier)
         #
         for page in pages:
@@ -659,7 +690,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         """Return the parameters for indexing data."""
         return {
             'chunking_tool': (Literal['markdown', ''], Field(description="Name of chunking tool", default='markdown')),
-            "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
+            "wiki_identifier": (Optional[str], Field(default=None, description="Wiki identifier to index, e.g., 'ABCProject.wiki'. If not provided, uses the default wiki identifier from toolkit configuration.")),
             'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string")),
         }
 
@@ -697,13 +728,13 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             {
                 "name": "delete_page_by_path",
                 "description": (self.delete_page_by_path.__doc__ or "") + default_wiki_info,
-                "args_schema": GetPageByPathInput,
+                "args_schema": DeletePageByPathInput,
                 "ref": self.delete_page_by_path,
             },
             {
                 "name": "delete_page_by_id",
                 "description": (self.delete_page_by_id.__doc__ or "") + default_wiki_info,
-                "args_schema": GetPageByIdInput,
+                "args_schema": DeletePageByIdInput,
                 "ref": self.delete_page_by_id,
             },
             {

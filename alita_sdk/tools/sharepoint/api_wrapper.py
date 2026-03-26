@@ -20,6 +20,7 @@ from pydantic import Field, PrivateAttr, create_model, model_validator, SecretSt
 from .base_wrapper import BaseSharepointWrapper
 from .graph_wrapper import SharepointGraphWrapper
 from .rest_wrapper import SharepointRestWrapper
+from .models import OnenotePageItems
 from ..non_code_indexer_toolkit import NonCodeIndexerToolkit
 from ...runtime.utils.utils import IndexerKeywords
 
@@ -310,11 +311,6 @@ OnenoteDeletePageInput = create_model(
     page_id=(str, Field(description="The ID of the OneNote page to delete.")),
 )
 
-OnenoteSearchPagesInput = create_model(
-    "OnenoteSearchPagesInput",
-    query=(str, Field(description="Full-text search query to search across all OneNote pages on this site.")),
-    limit=(Optional[int], Field(default=50, gt=0, description="Maximum number of results to return.")),
-)
 
 OnenoteListAttachmentsInput = create_model(
     "OnenoteListAttachmentsInput",
@@ -744,16 +740,6 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         self._sync_backend_context()
         return self._backend.onenote_delete_page(page_id)
 
-    def onenote_search_pages(self, query: str, limit: int = 50) -> list:
-        """Search for OneNote pages matching a full-text query on this site.
-
-        Searches across all pages in all notebooks on the SharePoint site.
-        Returns a list of matching page metadata objects, each containing:
-        id, title, lastModifiedDateTime, createdDateTime, and webUrl.
-        Requires Graph API delegated access (token + scopes).
-        """
-        self._sync_backend_context()
-        return self._backend.onenote_search_pages(query, limit)
 
     def onenote_list_attachments(self, page_id: str) -> list:
         """List all file attachments on a OneNote page.
@@ -803,17 +789,17 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
         capture_images: bool = True,
         include_attachments: bool = True,
         read_attachment_content: bool = False,
-    ) -> list:
-        """Read and parse a OneNote page into a structured list of typed items.
+    ) -> OnenotePageItems:
+        """Read and parse a OneNote page into a structured collection of typed items.
 
-        Returns a list of dicts, one per content element, in document order:
+        Returns an OnenotePageItems collection (iterable, indexable) containing:
 
-        - ``{"type": "text", "content": "<plain text block>"}``
-        - ``{"type": "image", "description": "<LLM description or alt text>",
-             "src": "<canonical Graph API resource URL>", "alt": "<original alt>"}``
-        - ``{"type": "attachment", "name": "<filename>",
-             "download_url": "<canonical Graph API URL>",
-             "content": "<parsed text or None>"}``
+        - OnenoteTextItem       — plain text block  (.content)
+        - OnenoteImageItem      — embedded image    (.description, .src, .alt)
+        - OnenoteAttachmentItem — file attachment   (.name, .download_url, .content)
+
+        str(result) renders a human-readable plain-text summary suitable for
+        passing directly to an LLM.
 
         Requires Graph API delegated access (token + scopes).
         """
@@ -1058,7 +1044,11 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                     cfg = getattr(self, '_onenote_cfg', {})
                     capture_images = cfg.get('capture_images', True)
                     if capture_images:
-                        items = self._backend.onenote_read_page_items(
+                        # Use the internal method directly so raw_bytes and the
+                        # original 'type' field are preserved for the indexing
+                        # pipeline.  The public onenote_read_page_items() strips
+                        # those fields before returning to LLM tool callers.
+                        items = self._backend._onenote_parse_page_items(
                             page_id=page_id,
                             capture_images=True,
                             include_attachments=False,
@@ -1361,12 +1351,6 @@ class SharepointApiWrapper(NonCodeIndexerToolkit):
                 "description": self.onenote_delete_page.__doc__,
                 "args_schema": OnenoteDeletePageInput,
                 "ref": self.onenote_delete_page,
-            },
-            {
-                "name": "onenote_search_pages",
-                "description": self.onenote_search_pages.__doc__,
-                "args_schema": OnenoteSearchPagesInput,
-                "ref": self.onenote_search_pages,
             },
             {
                 "name": "onenote_list_attachments",

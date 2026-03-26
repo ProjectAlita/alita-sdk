@@ -690,7 +690,8 @@ class StateModifierNode(Runnable):
 
 
 def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_before=None, interrupt_after=None,
-                          state_class=None, output_variables=None, tool_registry=None):
+                          interrupt_after_successors=None, state_class=None, output_variables=None,
+                          tool_registry=None):
     # prepare output channels
     if interrupt_after is None:
         interrupt_after = []
@@ -734,6 +735,7 @@ def prepare_output_schema(lg_builder, memory, store, debug=False, interrupt_befo
         checkpointer=memory,
         interrupt_before_nodes=interrupt_before,
         interrupt_after_nodes=interrupt_after,
+        interrupt_after_successors=interrupt_after_successors or set(),
         auto_validate=False,
         debug=debug,
         store=store,
@@ -916,6 +918,9 @@ def create_graph(
     lg_builder = StateGraph(state_class)
     interrupt_before = [clean_string(every) for every in schema.get('interrupt_before', [])]
     interrupt_after = [clean_string(every) for every in schema.get('interrupt_after', [])]
+    # Build a mapping of node_id → successor node_ids so we can later
+    # determine which "next" values correspond to interrupt_after pauses.
+    node_successors = {}  # populated during the node loop
     try:
         for node in schema['nodes']:
             node_type = node.get('type', 'function')
@@ -1166,6 +1171,8 @@ def create_graph(
 
                 # reset printer output variable to avoid carrying over
                 reset_node_id = f"{node_id}_reset"
+                # Printer's successor for interrupt_after detection
+                node_successors[node_id] = [reset_node_id]
                 lg_builder.add_node(reset_node_id, PrinterNode(
                     input_mapping={'printer': {'type': 'fixed', 'value': PRINTER_COMPLETED_STATE}}
                 ))
@@ -1196,21 +1203,31 @@ def create_graph(
                 next_step = clean_string(node['transition'])
                 logger.info(f'Adding transition: {next_step}')
                 lg_builder.add_conditional_edges(node_id, TransitionalEdge(next_step))
+                node_successors[node_id] = [next_step]
             elif node.get('decision'):
                 logger.info(f'Adding decision: {node["decision"]["nodes"]}')
+                decision_nodes = node['decision']['nodes']
                 lg_builder.add_conditional_edges(node_id, DecisionEdge(
-                    client, node['decision']['nodes'],
+                    client, decision_nodes,
                     node['decision'].get('description', ""),
                     decisional_inputs=node['decision'].get('decisional_inputs', ['messages']),
                     default_output=node['decision'].get('default_output', 'END')))
+                node_successors[node_id] = [
+                    clean_string(n) for n in decision_nodes
+                ] + [node['decision'].get('default_output', 'END')]
             elif node.get('condition') and node_type != 'router':
                 logger.info(f'Adding condition: {node["condition"]}')
                 condition_input = node['condition'].get('condition_input', ['messages'])
                 condition_definition = node['condition'].get('condition_definition', '')
+                cond_outputs = node['condition'].get('conditional_outputs', [])
                 lg_builder.add_conditional_edges(node_id, ConditionalEdge(
                     condition=condition_definition, condition_inputs=condition_input,
-                    conditional_outputs=node['condition'].get('conditional_outputs', []),
+                    conditional_outputs=cond_outputs,
                     default_output=node['condition'].get('default_output', 'END')))
+                node_successors[node_id] = [
+                    clean_string(o.get('node', o) if isinstance(o, dict) else o)
+                    for o in cond_outputs
+                ] + [node['condition'].get('default_output', 'END')]
 
         # set default value for state variable at START
         try:
@@ -1228,6 +1245,17 @@ def create_graph(
 
         interrupt_before = interrupt_before or []
         interrupt_after = interrupt_after or []
+
+        # Compute valid "next" node IDs that indicate an interrupt_after pause.
+        # When interrupt_after fires on node A, state.next contains A's
+        # successor(s). By pre-computing this set we can distinguish a real
+        # interrupt_after pause from a crash that happens to occur on a graph
+        # where interrupt_after is configured.
+        interrupt_after_successors = set()
+        for ia_node in interrupt_after:
+            for succ in node_successors.get(ia_node, []):
+                if succ != 'END':
+                    interrupt_after_successors.add(succ)
 
         if not for_subgraph:
             # validate the graph for LangGraphAgentRunnable before the actual construction
@@ -1270,6 +1298,7 @@ def create_graph(
         lg_builder, memory, store, debug,
         interrupt_before=interrupt_before,
         interrupt_after=interrupt_after,
+        interrupt_after_successors=interrupt_after_successors,
         state_class={state_class: None},
         output_variables=node.get('output', []),
         tool_registry=tool_registry
@@ -1342,10 +1371,12 @@ def convert_dict_to_message(msg_dict):
 
 
 class LangGraphAgentRunnable(CompiledStateGraph):
-    def __init__(self, *args, output_variables=None, tool_registry=None, **kwargs):
+    def __init__(self, *args, output_variables=None, tool_registry=None,
+                 interrupt_after_successors=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.output_variables = output_variables
         self.tool_registry = tool_registry
+        self._interrupt_after_successors = interrupt_after_successors or set()
 
     def invoke(self, input: Union[dict[str, Any], Any],
                config: Optional[RunnableConfig] = None,
@@ -1546,7 +1577,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                 if hitl_interrupt and not self._is_hitl_resume(input):
                     hitl_for_ui = {
                         k: v for k, v in hitl_interrupt.items()
-                        if k != 'tool_args_raw'
+                        if k not in ('tool_args_raw', '_pending_messages')
                     }
                     logger.warning(
                         "[HITL] Stale HITL interrupt detected for tool '%s'. "
@@ -1584,6 +1615,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         tool_args = hitl_interrupt.get('tool_args_raw') or hitl_interrupt.get('tool_args', {})
                         resume_ctx = {
                             'tool_name': hitl_interrupt.get('tool_name', ''),
+                            'toolkit_name': hitl_interrupt.get('toolkit_name', ''),
                             'tool_args': tool_args if isinstance(tool_args, dict) else {},
                             'tool_call_id': f"call_{uuid4().hex[:24]}",
                             'action': hitl_resume_value.get('action', 'approve'),
@@ -1610,6 +1642,37 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                             decision.get('tool_name'),
                         )
 
+                        # ── Restore intermediate tool messages ──────────────
+                        # The LLMNode runs LLM calls AND tool execution inside
+                        # a single graph node (__perform_tool_calling loop).
+                        # When interrupt() fires from the sensitive-tool guard,
+                        # LangGraph checkpoints the state *before* the LLMNode
+                        # started — all intermediate messages (completed tool
+                        # calls + their results) are lost.  The middleware
+                        # captured them as '_pending_messages' in the interrupt
+                        # payload.  Inject them into graph state now so the
+                        # re-executed LLMNode sees the full conversation.
+                        pending_msgs_dicts = hitl_interrupt.get('_pending_messages') or []
+                        if pending_msgs_dicts:
+                            # Remove the trailing AIMessage that triggered the
+                            # sensitive tool — it will be replaced by the
+                            # synthetic AIMessage from _hitl_resume_context.
+                            trimmed = self._trim_pending_messages(pending_msgs_dicts)
+                            if trimmed:
+                                from langchain_core.messages.utils import messages_from_dict
+                                try:
+                                    restored_messages = messages_from_dict(trimmed)
+                                    self.update_state(config, {'messages': restored_messages})
+                                    logger.info(
+                                        "[HITL] Restored %d intermediate messages to graph state",
+                                        len(restored_messages),
+                                    )
+                                except Exception as exc:
+                                    logger.warning(
+                                        "[HITL] Failed to restore intermediate messages: %s",
+                                        exc,
+                                    )
+
                     result = super().invoke(
                         Command(resume=hitl_resume_value),
                         config=config,
@@ -1617,40 +1680,51 @@ class LangGraphAgentRunnable(CompiledStateGraph):
                         **kwargs,
                     )
                 elif should_continue:
-                    # Explicitly continuing interrupted execution - invoke with input
-                    result = super().invoke(input, config=config, *args, **kwargs)
+                    # Explicitly continuing interrupted execution.
+                    # For static (compile-time) interrupts, LangGraph requires
+                    # invoke(None) to resume from the interrupt point.
+                    # Passing input would restart the graph from the beginning.
+                    if self._is_at_static_interrupt(checkpoint_state):
+                        logger.info(
+                            "[CHECKPOINT] Resuming static interrupt via invoke(None) "
+                            "for thread %s (next=%s)",
+                            thread_id, checkpoint_state.next,
+                        )
+                        self.update_state(config, input)
+                        result = super().invoke(None, config=config, *args, **kwargs)
+                    else:
+                        result = super().invoke(input, config=config, *args, **kwargs)
                 elif is_at_end:
                     # Previous run completed - start fresh run with new input
-                    # Don't use invoke(None) as that just returns current state without running
                     logger.info(
                         f"[CHECKPOINT] Previous run completed (at END), starting fresh turn for thread {thread_id}"
                     )
-                    # FIX: Clear old checkpoint messages to prevent duplication.
-                    # The add_messages reducer would otherwise APPEND new messages to existing ones.
-                    # Use 'in' check instead of truthiness - empty list [] is falsy but means
-                    # "messages key exists with no history" (e.g., after chat clear), which still
-                    # requires clearing the old checkpoint to avoid stale SystemMessages.
-                    existing_messages = checkpoint_state.values.get('messages', [])
-                    if existing_messages:
-                        logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
-                        # Create RemoveMessage objects for all existing messages
-                        remove_msgs = [RemoveMessage(id=msg.id) for msg in existing_messages if
-                                       hasattr(msg, 'id') and msg.id]
-                        if remove_msgs:
-                            # Update state to remove old messages before invoking
-                            self.update_state(config, {'messages': remove_msgs})
-                    # Clear HITL decisions from previous execution batch
-                    if checkpoint_state.values.get('hitl_decisions'):
-                        self.update_state(config, {'hitl_decisions': None})
-                    # Clear pipeline-blocked flag from previous run
-                    if checkpoint_state.values.get('_pipeline_blocked'):
-                        self.update_state(config, {'_pipeline_blocked': None})
-
+                    self._clear_stale_checkpoint(config, checkpoint_state)
                     result = super().invoke(input, config=config, *args, **kwargs)
                 else:
-                    # Interrupted mid-execution - update state and continue from where we left off
-                    self.update_state(config, input)
-                    result = super().invoke(None, config=config, *args, **kwargs)
+                    # Checkpoint exists but execution didn't finish.
+                    # Distinguish static interrupt pauses from killed/crashed runs.
+                    if self._is_at_static_interrupt(checkpoint_state):
+                        # Graph is paused at a compile-time interrupt_before/after node.
+                        # Resume from the interrupt point with invoke(None).
+                        logger.info(
+                            "[CHECKPOINT] Resuming static interrupt for thread %s "
+                            "(next=%s)",
+                            thread_id, checkpoint_state.next,
+                        )
+                        self.update_state(config, input)
+                        result = super().invoke(None, config=config, *args, **kwargs)
+                    else:
+                        # Previous execution was interrupted (killed/stopped/crashed)
+                        # without completing. Clear stale checkpoint so the new
+                        # input (which carries full chat history from the DB)
+                        # doesn't get duplicated by the add_messages reducer.
+                        logger.info(
+                            f"[CHECKPOINT] Previous run interrupted (not at END), "
+                            f"clearing stale checkpoint for thread {thread_id}"
+                        )
+                        self._clear_stale_checkpoint(config, checkpoint_state)
+                        result = super().invoke(input, config=config, *args, **kwargs)
             else:
                 result = super().invoke(input, config=config, *args, **kwargs)
         except GraphRecursionError as e:
@@ -1696,7 +1770,7 @@ class LangGraphAgentRunnable(CompiledStateGraph):
 
                 # Strip internal-only fields (e.g. unmasked tool args) before logging
                 # or returning results that will be emitted to UI clients.
-                hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k != 'tool_args_raw'}
+                hitl_for_ui = {k: v for k, v in hitl_interrupt.items() if k not in ('tool_args_raw', '_pending_messages')}
                 logger.info(f"[HITL] Execution paused at HITL node: {hitl_for_ui}")
 
                 result_with_state = {
@@ -1823,6 +1897,83 @@ class LangGraphAgentRunnable(CompiledStateGraph):
         return interrupt_args == resumed_args
 
     @staticmethod
+    def _trim_pending_messages(pending_msgs_dicts: list[dict]) -> list[dict]:
+        """Remove the trailing AIMessage that triggered the sensitive tool.
+
+        The messages captured by the sensitive-tool guard include the AIMessage
+        whose tool_call caused the interrupt.  On resume, this is replaced by
+        the synthetic AIMessage from ``_hitl_resume_context``, so we must not
+        inject the original to avoid duplicate / orphaned tool-call IDs.
+
+        Additionally, any ToolMessages that belong to incomplete tool_calls in
+        the trailing AIMessage are kept (they are results of non-sensitive
+        sibling tools that already executed successfully).
+        """
+        if not pending_msgs_dicts:
+            return []
+
+        def _msg_type(message_dict: dict) -> str:
+            if not isinstance(message_dict, dict):
+                return ''
+            if 'type' in message_dict and isinstance(message_dict.get('data'), dict):
+                return message_dict.get('type', '')
+            return message_dict.get('type', '')
+
+        def _msg_data(message_dict: dict) -> dict:
+            if not isinstance(message_dict, dict):
+                return {}
+            data = message_dict.get('data')
+            return data if isinstance(data, dict) else message_dict
+
+        def _tool_calls(message_dict: dict) -> list[dict]:
+            data = _msg_data(message_dict)
+            tool_calls = data.get('tool_calls', [])
+            return tool_calls if isinstance(tool_calls, list) else []
+
+        def _tool_call_id(message_dict: dict) -> str:
+            data = _msg_data(message_dict)
+            value = data.get('tool_call_id', '')
+            return value if isinstance(value, str) else ''
+
+        # Walk backwards to find the last AI message.
+        last_ai_idx = None
+        for i in range(len(pending_msgs_dicts) - 1, -1, -1):
+            msg_type = _msg_type(pending_msgs_dicts[i])
+            if msg_type == 'ai':
+                last_ai_idx = i
+                break
+
+        if last_ai_idx is None:
+            # No AIMessage found — return everything as-is.
+            return list(pending_msgs_dicts)
+
+        # Keep everything before the last AIMessage.  ToolMessages that follow
+        # (results of sibling tool_calls in the same batch) are kept too — they
+        # are valid results that should be visible to the LLM.
+        result = list(pending_msgs_dicts[:last_ai_idx])
+
+        # Collect ToolMessages that follow the last AIMessage (sibling results).
+        last_ai_tool_call_ids: set = set()
+        for tc in _tool_calls(pending_msgs_dicts[last_ai_idx]):
+            tc_id = tc.get('id', '')
+            if tc_id:
+                last_ai_tool_call_ids.add(tc_id)
+
+        # If there are completed sibling ToolMessages, we must keep the AIMessage
+        # (since ToolMessages require a matching AIMessage).  Only remove the
+        # AIMessage when ALL its ToolMessages are missing (common single-tool case).
+        sibling_tool_msgs = [
+            msg for msg in pending_msgs_dicts[last_ai_idx + 1:]
+            if _msg_type(msg) == 'tool' and _tool_call_id(msg) in last_ai_tool_call_ids
+        ]
+        if sibling_tool_msgs:
+            # Keep the AIMessage and its completed siblings.
+            result.append(pending_msgs_dicts[last_ai_idx])
+            result.extend(sibling_tool_msgs)
+
+        return result
+
+    @staticmethod
     def _is_hitl_resume(input_data: dict) -> bool:
         """Check if the input represents an HITL resume action."""
         if not isinstance(input_data, dict):
@@ -1861,6 +2012,54 @@ class LangGraphAgentRunnable(CompiledStateGraph):
             "action": action,
             "value": value,
         }
+
+    def _is_at_static_interrupt(self, checkpoint_state) -> bool:
+        """Check if the graph is paused at a compile-time static interrupt.
+
+        Static interrupts are configured via interrupt_before / interrupt_after
+        at graph compilation time. When the graph pauses at one of these nodes,
+        it must be resumed with invoke(None, config) — passing input would
+        restart the graph from the beginning.
+
+        For interrupt_before: state.next contains the node about to run,
+        which IS in interrupt_before_nodes — direct match.
+        For interrupt_after: state.next contains the SUCCESSOR of the node
+        that just completed. We match it against the pre-computed
+        _interrupt_after_successors set (built from YAML transitions in
+        create_graph). This prevents misclassifying a crashed run as a
+        static interrupt just because interrupt_after is configured.
+        """
+        if not checkpoint_state.next:
+            return False
+        if any(n in self.interrupt_before_nodes for n in checkpoint_state.next):
+            return True
+        if self._interrupt_after_successors and any(
+            n in self._interrupt_after_successors for n in checkpoint_state.next
+        ):
+            return True
+        return False
+
+    def _clear_stale_checkpoint(self, config: RunnableConfig, checkpoint_state) -> None:
+        """Remove stale messages and flags from a previous checkpoint.
+
+        Called before starting a fresh turn when a checkpoint exists
+        (either completed or interrupted). Prevents the add_messages
+        reducer from appending new input on top of old state.
+        """
+        existing_messages = checkpoint_state.values.get('messages', [])
+        if existing_messages:
+            logger.info(f"[CHECKPOINT] Clearing {len(existing_messages)} existing checkpoint messages")
+            remove_msgs = [
+                RemoveMessage(id=msg.id)
+                for msg in existing_messages
+                if hasattr(msg, 'id') and msg.id
+            ]
+            if remove_msgs:
+                self.update_state(config, {'messages': remove_msgs})
+        if checkpoint_state.values.get('hitl_decisions'):
+            self.update_state(config, {'hitl_decisions': None})
+        if checkpoint_state.values.get('_pipeline_blocked'):
+            self.update_state(config, {'_pipeline_blocked': None})
 
     def _handle_graph_recursion_error(
             self,

@@ -119,11 +119,24 @@ class SharepointAuthorizationHelper:
         if limit_files is not None and (not isinstance(limit_files, int) or limit_files <= 0):
             raise ValueError(f"limit_files must be a positive integer, got: {limit_files}")
 
-        # Normalize extension filters: accept 'pdf' or '.pdf', lowercase dot-prefixed
+        # Normalize extension filters: accept 'pdf', '.pdf', or '*.pdf',
+        # always producing a lowercase dot-prefixed form (e.g. '.pdf').
         def _norm(exts):
             if not exts:
                 return []
-            return [f".{e.strip().lstrip('.').lower()}" for e in exts if e and e.strip()]
+            result = []
+            for e in exts:
+                if not e or not e.strip():
+                    continue
+                e = e.strip()
+                # Strip glob prefix: '*.pdf' → '.pdf', '*pdf' → 'pdf'
+                if e.startswith('*'):
+                    e = e.lstrip('*')
+                # Strip leading dot(s): '.pdf' → 'pdf'
+                e = e.lstrip('.')
+                if e:
+                    result.append(f'.{e.lower()}')
+            return result
 
         def _ext_match(filename, norm_exts):
             if not norm_exts:
@@ -142,49 +155,56 @@ class SharepointAuthorizationHelper:
             result = []
             def _recurse_drive(drive_id, drive_path, parent_folder, limit_files):
                 # Escape folder_name for URL safety if present
+                _page_top = 999  # use large page size to minimise round-trips
                 if parent_folder:
                     safe_folder_name = quote(parent_folder.strip('/'), safe="/")
-                    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:/{safe_folder_name}:/children?$top={limit_files}"
+                    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root:/{safe_folder_name}:/children?$top={_page_top}"
                 else:
-                    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children?$top={limit_files}"
-                response = requests.get(url, headers=headers)
-                if response.status_code != 200:
-                    return []
-                files_json = response.json()
-                if "value" not in files_json:
-                    return []
+                    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drives/{drive_id}/root/children?$top={_page_top}"
                 files = []
-                for file in files_json["value"]:
-                    file_name = file.get('name', '')
-                    # Build full path reflecting nested folders
-                    if parent_folder:
-                        full_path = '/' + '/'.join([drive_path.strip('/'), parent_folder.strip('/'), file_name.strip('/')])
-                    else:
-                        full_path = '/' + '/'.join([drive_path.strip('/'), file_name.strip('/')])
-                    temp_props = {
-                        'Name': file_name,
-                        'Path': full_path,
-                        'Created': file.get('createdDateTime'),
-                        'Modified': file.get('lastModifiedDateTime'),
-                        'Link': file.get('webUrl'),
-                        'id': file.get('id')
-                    }
-                    if not all([temp_props['Name'], temp_props['Path'], temp_props['id']]):
-                        continue  # skip files with missing required fields
-                    if 'folder' in file:
-                        # Recursively extract files from this folder
-                        inner_folder = parent_folder + '/' + file_name if parent_folder else file_name
-                        inner_files = _recurse_drive(drive_id, drive_path, inner_folder, limit_files)
-                        files.extend(inner_files)
-                    else:
-                        # Apply extension filters
-                        if norm_skip and _ext_match(file_name, norm_skip):
-                            continue
-                        if norm_include and not _ext_match(file_name, norm_include):
-                            continue
-                        files.append(temp_props)
+                next_link = url
+                while next_link:
+                    response = requests.get(next_link, headers=headers)
+                    if response.status_code != 200:
+                        break
+                    files_json = response.json()
+                    if "value" not in files_json:
+                        break
+                    for file in files_json["value"]:
+                        file_name = file.get('name', '')
+                        # Build full path reflecting nested folders
+                        if parent_folder:
+                            full_path = '/' + '/'.join([drive_path.strip('/'), parent_folder.strip('/'), file_name.strip('/')])
+                        else:
+                            full_path = '/' + '/'.join([drive_path.strip('/'), file_name.strip('/')])
+                        temp_props = {
+                            'Name': file_name,
+                            'Path': full_path,
+                            'Created': file.get('createdDateTime'),
+                            'Modified': file.get('lastModifiedDateTime'),
+                            'Link': file.get('webUrl'),
+                            'id': file.get('id')
+                        }
+                        if not all([temp_props['Name'], temp_props['Path'], temp_props['id']]):
+                            continue  # skip files with missing required fields
+                        if 'folder' in file:
+                            # Recursively extract files from this folder
+                            inner_folder = parent_folder + '/' + file_name if parent_folder else file_name
+                            inner_files = _recurse_drive(drive_id, drive_path, inner_folder, limit_files)
+                            files.extend(inner_files)
+                        else:
+                            # Apply extension filters
+                            if norm_skip and _ext_match(file_name, norm_skip):
+                                continue
+                            if norm_include and not _ext_match(file_name, norm_include):
+                                continue
+                            files.append(temp_props)
+                        if limit_files is not None and len(result) + len(files) >= limit_files:
+                            return files[:limit_files - len(result)]
+                    next_link = files_json.get('@odata.nextLink')
+                    # Stop paginating if we already have enough files
                     if limit_files is not None and len(result) + len(files) >= limit_files:
-                        return files[:limit_files - len(result)]
+                        break
                 return files
             #
             site_segments = [seg for seg in site_url.strip('/').split('/') if seg][-2:]

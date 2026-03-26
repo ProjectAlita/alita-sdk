@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import json
 import logging
 from traceback import format_exc
@@ -19,7 +20,7 @@ except ImportError:
 
 from ..langchain.constants import ELITEA_RS
 from ..langchain.utils import create_pydantic_model, propagate_the_input_mapping
-from ..toolkits.security import is_tool_blocked, normalize_tool_name
+from ..toolkits.security import is_tool_blocked, normalize_tool_name, qualified_tool_identity
 if TYPE_CHECKING:
     from .lazy_tools import ToolRegistry
 
@@ -28,6 +29,14 @@ logger = logging.getLogger(__name__)
 SENSITIVE_TOOL_BLOCKED_RESULT_TYPE = 'sensitive_tool_blocked'
 MAX_BLOCKED_TOOL_CONTINUATION_ATTEMPTS = 5
 BLOCKED_TOOL_CONTINUATION_NUDGE_MARKER = 'This is a continuation turn after the blocked action(s):'
+
+# ContextVar used by __perform_tool_calling to expose intermediate messages
+# accumulated during the current LLMNode execution.  The sensitive-tool guard
+# middleware reads this before calling interrupt() so the messages can be
+# persisted in the checkpoint and restored on resume.
+_PENDING_TOOL_MESSAGES: contextvars.ContextVar[list] = contextvars.ContextVar(
+    '_pending_tool_messages', default=[],
+)
 
 
 # def _is_thinking_model(llm_client: Any) -> bool:
@@ -946,7 +955,58 @@ class LLMNode(BaseTool):
         # Check if dynamic tool selection was performed (affects tool index injection)
         configurable = config.get('configurable', {}) if isinstance(config, dict) and config else {}
         has_selected_tools = bool(configurable.get('selected_tools'))
-        hitl_ctx = configurable.get('_hitl_resume_context')
+        hitl_ctx = configurable.pop('_hitl_resume_context', None)
+
+        # Guard: only honour the HITL resume context when the tool it
+        # references actually belongs to *this* LLM node.  In pipelines
+        # the HITL interrupt may have fired inside a preceding Toolkit
+        # (FunctionTool) node; that node already executed the tool on
+        # resume, but the context lingered in config and would cause this
+        # LLM node to fabricate a synthetic tool call for a tool it does
+        # not own (see #3966).
+        #
+        # When toolkit_name is present in the resume context we use
+        # qualified identity (toolkit_name + tool_name) so that two
+        # different toolkits that expose a tool with the same base name
+        # (e.g. jira.create_issue vs github.create_issue) are correctly
+        # distinguished.
+        if hitl_ctx and hitl_ctx.get('tool_name'):
+            ctx_tool = hitl_ctx['tool_name']
+            ctx_toolkit = hitl_ctx.get('toolkit_name') or ''
+            if ctx_toolkit:
+                # Qualified comparison: build qualified identities for
+                # every tool this LLM node owns and check membership.
+                own_qualified = set()
+                for t in (self.available_tools or []):
+                    identity = self._get_tool_identity(t)
+                    own_qualified.add(
+                        qualified_tool_identity(
+                            identity['tool_name'],
+                            identity.get('toolkit_name'),
+                        )
+                    )
+                ctx_qualified = qualified_tool_identity(ctx_tool, ctx_toolkit)
+                if ctx_qualified not in own_qualified:
+                    logger.info(
+                        "[HITL] Ignoring stale _hitl_resume_context for '%s' "
+                        "— not in this LLM node's tools %s",
+                        ctx_qualified,
+                        sorted(own_qualified) if own_qualified else '(none)',
+                    )
+                    hitl_ctx = None
+            else:
+                # Fallback: no toolkit info — use normalized base names so
+                # that prefixed/aliased names (e.g. github___tool) still
+                # match the base name from the HITL interrupt payload.
+                own_tool_names = {normalize_tool_name(t.name) for t in (self.available_tools or [])}
+                if ctx_tool not in own_tool_names:
+                    logger.info(
+                        "[HITL] Ignoring stale _hitl_resume_context for tool '%s' "
+                        "— not in this LLM node's tools %s",
+                        ctx_tool,
+                        sorted(own_tool_names) if own_tool_names else '(none)',
+                    )
+                    hitl_ctx = None
 
         # there are 2 possible flows here: LLM node from pipeline (with prompt and task)
         # or standalone LLM node for chat (with messages only)
@@ -1483,14 +1543,25 @@ class LLMNode(BaseTool):
         # Build set of tool names previously approved by the user.
         # Used to auto-approve tools in the guard on iterations *after*
         # the first one (the first must consume the checkpoint replay value).
+        # Uses qualified identity (toolkit_name.tool_name) so that approving
+        # e.g. jira.create_issue does NOT auto-approve github.create_issue.
         _approved_tool_names: set[str] = set()
         for decision in (hitl_decisions or []):
             if decision.get('action') == 'approve' and decision.get('tool_name'):
-                _approved_tool_names.add(normalize_tool_name(decision['tool_name']))
+                _approved_tool_names.add(qualified_tool_identity(
+                    decision['tool_name'], decision.get('toolkit_name'),
+                ))
         _approved_token = None
 
         new_messages = messages + [completion]
         iteration = 0
+
+        # Track the number of input messages so we can compute intermediate
+        # messages produced during this execution (for HITL checkpoint restore).
+        _input_msg_count = len(messages)
+
+        # Reset the pending-messages contextvar at the start of each execution.
+        _PENDING_TOOL_MESSAGES.set([])
 
         # Extra tool lookup table populated after a blocked-tool continuation turn.
         # In lazy-tools mode the regular get_filtered_tools() returns only
@@ -1558,6 +1629,12 @@ class LLMNode(BaseTool):
                     try:
                         logger.info(f"Executing tool '{tool_name}' with args: {tool_args}")
 
+                        # Expose accumulated intermediate messages BEFORE invoking
+                        # the tool.  If the tool triggers a sensitive-tool interrupt,
+                        # the guard reads this contextvar so the messages survive the
+                        # checkpoint and can be restored on resume.
+                        _PENDING_TOOL_MESSAGES.set(list(new_messages[_input_msg_count:]))
+
                         # Try async invoke first (for MCP tools), fallback to sync
                         tool_result = None
                         if hasattr(tool_to_execute, 'ainvoke'):
@@ -1599,9 +1676,21 @@ class LLMNode(BaseTool):
                             continue
 
                         # Check if tool_result is structured content (list of dicts)
-                        # TODO: need solid check for being compatible with ToolMessage content format
-                        if isinstance(tool_result, list) and all(
-                                isinstance(item, dict) and 'type' in item for item in tool_result
+                        # Only use the structured fast-path when every item has an
+                        # LLM-standard content block type AND no bytes values are
+                        # present (bytes are not JSON-serializable and would cause
+                        # a 400 from the LLM API).
+                        _STANDARD_CONTENT_TYPES = {"text", "image", "image_url", "document", "search_result"}
+
+                        def _is_llm_safe_content_block(item: dict) -> bool:
+                            if not isinstance(item, dict):
+                                return False
+                            if item.get('type') not in _STANDARD_CONTENT_TYPES:
+                                return False
+                            return not any(isinstance(v, bytes) for v in item.values())
+
+                        if isinstance(tool_result, list) and tool_result and all(
+                                _is_llm_safe_content_block(item) for item in tool_result
                         ):
                             # Use structured content directly for multimodal support
                             tool_message = ToolMessage(
@@ -1620,8 +1709,11 @@ class LLMNode(BaseTool):
                         # GraphInterrupt (from interrupt()) and other graph-level
                         # signals must propagate to the graph executor.
                         # Reset auto-approve context before propagating.
+                        # NOTE: _PENDING_TOOL_MESSAGES was set right before invoke
+                        # and already consumed by the middleware's interrupt() call.
                         if _approved_token is not None:
                             reset_hitl_approved_tools(_approved_token)
+                        _PENDING_TOOL_MESSAGES.set([])
                         raise
                     except Exception as e:
                         import traceback
@@ -1758,6 +1850,7 @@ class LLMNode(BaseTool):
                 # Reset auto-approve context before propagating.
                 if _approved_token is not None:
                     reset_hitl_approved_tools(_approved_token)
+                _PENDING_TOOL_MESSAGES.set([])
                 raise
             except Exception as e:
                 error_str = str(e).lower()
@@ -2014,6 +2107,8 @@ class LLMNode(BaseTool):
         else:
             logger.info(f"Tool execution completed after {iteration} iterations")
 
+        # Clear the pending-messages contextvar on normal completion.
+        _PENDING_TOOL_MESSAGES.set([])
         return new_messages, current_completion
 
     def __get_struct_output_model(self, llm_client, pydantic_model, method: Literal["function_calling", "json_mode", "json_schema"] = "function_calling"):

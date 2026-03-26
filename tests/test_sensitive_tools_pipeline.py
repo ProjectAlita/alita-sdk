@@ -182,7 +182,7 @@ class TestApiTrustModel:
             set_hitl_approved_tools,
             reset_hitl_approved_tools,
         )
-        token = set_hitl_approved_tools({"create_issue", "close_issue"})
+        token = set_hitl_approved_tools({"github.create_issue", "github.close_issue"})
         try:
             ctx = {
                 "tool_name": "create_issue",
@@ -192,7 +192,9 @@ class TestApiTrustModel:
                 "policy_message": "Approval required",
                 "tool_args": {},
             }
-            result = SensitiveToolGuardMiddleware._review_sensitive_tool_call(ctx)
+            guard = SensitiveToolGuardMiddleware.__new__(SensitiveToolGuardMiddleware)
+            guard._auto_approve = False
+            result = guard._review_sensitive_tool_call(ctx)
             assert result["action"] == "approve"
         finally:
             reset_hitl_approved_tools(token)
