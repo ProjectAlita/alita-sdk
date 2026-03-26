@@ -661,7 +661,8 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Unable to modify wiki page: {str(e)}")
             return ToolException(f"Unable to modify wiki page: {str(e)}")
 
-    def _base_loader(self, wiki_identifier: str, chunking_tool: str = None, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
+    def _base_loader(self, wiki_identifier: Optional[str] = None, chunking_tool: str = None, title_contains: Optional[str] = None, **kwargs) -> Generator[Document, None, None]:
+        wiki_identifier = self._resolve_wiki_identifier(wiki_identifier)
         pages = self._client.get_pages_batch(pages_batch_request={}, project=self.project, wiki_identifier=wiki_identifier)
         #
         for page in pages:
@@ -689,7 +690,7 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
         """Return the parameters for indexing data."""
         return {
             'chunking_tool': (Literal['markdown', ''], Field(description="Name of chunking tool", default='markdown')),
-            "wiki_identifier": (str, Field(description="Wiki identifier to index, e.g., 'ABCProject.wiki'")),
+            "wiki_identifier": (Optional[str], Field(default=None, description="Wiki identifier to index, e.g., 'ABCProject.wiki'. If not provided, uses the default wiki identifier from toolkit configuration.")),
             'title_contains': (Optional[str], Field(default=None, description="Optional filter to include only pages with titles containing exact this string")),
         }
 
