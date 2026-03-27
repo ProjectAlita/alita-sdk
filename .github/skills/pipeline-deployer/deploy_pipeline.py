@@ -15,6 +15,7 @@ Environment Variables (from .env):
     TEST_VERSION - (Optional) Version ID to update directly (update mode)
 
 Command-line arguments override environment variables.
+.env file: project root .env is used by default; override with --env <path>.
 
 Modes:
     Update mode (default): Updates YAML instructions of an existing version.
@@ -32,30 +33,30 @@ from dotenv import load_dotenv
 
 
 def load_environment(args: Optional[Any] = None) -> Dict[str, str]:
-    """Load and validate environment variables, with optional CLI overrides."""
-    # Try to load .env from project root
-    env_file = Path(__file__).parent.parent.parent.parent / '.env'
-    if env_file.exists():
-        load_dotenv(env_file)
+    """Load environment variables from .env file, with optional CLI overrides."""
+    # Determine which .env file to load:
+    # - If --env provided: load that file only
+    # - Otherwise: project root .env only (no fallback, no CWD)
+    if args and getattr(args, 'env', None):
+        env_file = Path(args.env)
+        if not env_file.exists():
+            print(f"❌ .env file not found: {args.env}")
+            sys.exit(1)
+        load_dotenv(env_file, override=True)
+        print(f"ℹ️  Loaded env from: {env_file}")
     else:
-        # Try .alita/.env
-        env_file = Path(__file__).parent.parent.parent.parent / '.alita' / '.env'
+        env_file = Path(__file__).parent.parent.parent.parent / '.env'
         if env_file.exists():
-            load_dotenv(env_file)
-    
-    # Also load from current directory
-    load_dotenv()
-    
+            load_dotenv(env_file, override=True)
+
     # Build config from env vars first, then override with CLI args
     env = {}
-    
-    # Required vars (TEST_APP is optional if TEST_VERSION is provided)
     env['TEST_DEPLOYMENT_URL'] = os.getenv('TEST_DEPLOYMENT_URL', '')
     env['TEST_API_KEY'] = os.getenv('TEST_API_KEY', '')
     env['TEST_PROJECT_ID'] = os.getenv('TEST_PROJECT_ID', '')
     env['TEST_APP'] = os.getenv('TEST_APP', '')
     env['TEST_VERSION'] = os.getenv('TEST_VERSION', '')
-    
+
     # Override with command-line arguments if provided
     if args:
         if args.url:
@@ -68,28 +69,25 @@ def load_environment(args: Optional[Any] = None) -> Dict[str, str]:
             env['TEST_APP'] = args.app_id
         if args.version_id:
             env['TEST_VERSION'] = args.version_id
-    
+
     # Validate required fields
     required_vars = ['TEST_DEPLOYMENT_URL', 'TEST_API_KEY', 'TEST_PROJECT_ID']
     missing = [var for var in required_vars if not env.get(var)]
-    
-    # At least one of TEST_APP or TEST_VERSION must be provided
-    # Note: TEST_APP is always needed for the API endpoint URL
-    # If both are provided, TEST_VERSION is used and TEST_APP is only for the endpoint
+
+    # TEST_APP is always needed for the API endpoint URL
     if not env.get('TEST_APP'):
         if not env.get('TEST_VERSION'):
             missing.append('TEST_APP (required for API endpoint)')
         else:
-            # Only TEST_VERSION provided - still need app ID for endpoint
             print(f"⚠️  Warning: TEST_VERSION provided without TEST_APP")
             print(f"   TEST_APP is required for API endpoint construction")
             missing.append('TEST_APP')
-    
+
     if missing:
         print(f"❌ Missing required configuration: {', '.join(missing)}")
         print(f"   Set via environment variables or command-line arguments")
         sys.exit(1)
-    
+
     return env
 
 
@@ -344,12 +342,14 @@ def main():
   TEST_PROJECT_ID      Project ID
   TEST_APP             Application ID (always required)
   TEST_VERSION         Version ID (optional, update mode only — skips version lookup)
-
 Examples:
   # Update existing version (default mode)
   python deploy_pipeline.py pipeline.yaml
 
-  # Override with command-line arguments
+  # Use a custom .env file
+  python deploy_pipeline.py pipeline.yaml --env /path/to/.env
+
+  # Override specific params
   python deploy_pipeline.py pipeline.yaml --project-id 123 --app-id 456
 
   # Use specific version ID for update
@@ -361,6 +361,7 @@ Examples:
     )
     
     parser.add_argument('yaml_file', help='Path to pipeline YAML file')
+    parser.add_argument('--env', help='Path to .env file (default: project root .env)')
     parser.add_argument('--url', help='Backend URL (overrides TEST_DEPLOYMENT_URL)')
     parser.add_argument('--api-key', help='API Bearer token (overrides TEST_API_KEY)')
     parser.add_argument('--project-id', help='Project ID (overrides TEST_PROJECT_ID)')
@@ -447,10 +448,10 @@ Examples:
     
     print("\n" + "=" * 60)
     if success:
-        print("✅ Deployment completed successfully")
+        print("\u2705 Deployment completed successfully")
         sys.exit(0)
     else:
-        print("❌ Deployment failed")
+        print("\u274c Deployment failed")
         sys.exit(1)
 
 
