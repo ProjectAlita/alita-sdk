@@ -1,0 +1,717 @@
+state:
+  input:
+    type: string
+  feature_id:
+    type: int
+    value: 0
+  force_reinit:
+    type: bool
+    value: false
+  load_attachments:
+    type: bool
+    value: true
+  artifact_filepath:
+    type: string
+    value: ''
+  validation_passed:
+    type: bool
+    value: false
+  error_message:
+    type: string
+    value: ''
+  cached_data:
+    type: string
+    value: ''
+  file_exists:
+    type: bool
+    value: false
+  feature_data:
+    type: dict
+    value: {}
+  all_fetched_items:
+    type: list
+    value: []
+  all_item_ids:
+    type: list
+    value: []
+  current_query:
+    type: string
+    value: ''
+  current_parent_ids:
+    type: list
+    value: []
+  current_depth:
+    type: int
+    value: 0
+  has_more_levels:
+    type: bool
+    value: false
+  level_items:
+    type: list
+    value: []
+  hierarchy_data:
+    type: dict
+    value: {}
+  operation_result:
+    type: string
+    value: ''
+entry_point: ParseInput
+nodes:
+  # ── Input validation ──────────────────────────────────────────────
+  - id: ParseInput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        import re
+
+        input_str = alita_state.get('input', '').strip()
+
+        if not input_str:
+            result = {
+                "validation_passed": False,
+                "error_message": "Input required. Provide JSON: {\"id\": 123}",
+                "feature_id": 0,
+                "force_reinit": False,
+                "load_attachments": True,
+                "artifact_filepath": ""
+            }
+        else:
+            parse_failed = False
+            try:
+                input_data = json.loads(input_str)
+            except json.JSONDecodeError:
+                fixed = re.sub(r':\s*True\b', ': true', input_str)
+                fixed = re.sub(r':\s*False\b', ': false', fixed)
+                try:
+                    input_data = json.loads(fixed)
+                except json.JSONDecodeError:
+                    parse_failed = True
+                    result = {
+                        "validation_passed": False,
+                        "error_message": f"Invalid JSON. Expected: {{\"id\": 123}}\nReceived: \"{input_str}\"",
+                        "feature_id": 0,
+                        "force_reinit": False,
+                        "load_attachments": True,
+                        "artifact_filepath": ""
+                    }
+
+            if not parse_failed:
+                if not isinstance(input_data, dict):
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Input must be a JSON object.",
+                        "feature_id": 0,
+                        "force_reinit": False,
+                        "load_attachments": True,
+                        "artifact_filepath": ""
+                    }
+                elif 'id' not in input_data:
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Missing required field 'id'. Expected: {\"id\": 123}",
+                        "feature_id": 0,
+                        "force_reinit": bool(input_data.get('force_reinit', False)),
+                        "load_attachments": bool(input_data.get('load_attachments', True)),
+                        "artifact_filepath": ""
+                    }
+                else:
+                    try:
+                        feature_id = int(input_data['id'])
+                        if feature_id <= 0:
+                            raise ValueError()
+                    except (ValueError, TypeError):
+                        feature_id = None
+                        result = {
+                            "validation_passed": False,
+                            "error_message": f"Invalid ID: {input_data['id']}. Must be a positive integer.",
+                            "feature_id": 0,
+                            "force_reinit": False,
+                            "load_attachments": True,
+                            "artifact_filepath": ""
+                        }
+
+                    if feature_id:
+                        result = {
+                            "validation_passed": True,
+                            "error_message": "",
+                            "feature_id": feature_id,
+                            "force_reinit": bool(input_data.get('force_reinit', False)),
+                            "load_attachments": bool(input_data.get('load_attachments', True)),
+                            "artifact_filepath": f"{feature_id}_feature.json"
+                        }
+
+        result
+    input:
+      - input
+    output:
+      - validation_passed
+      - error_message
+      - feature_id
+      - force_reinit
+      - load_attachments
+      - artifact_filepath
+    structured_output: true
+    transition: ValidationRouter
+  - id: ValidationRouter
+    type: router
+    condition: |
+      {% if validation_passed %}
+        TryReadCache
+      {% else %}
+        FormatError
+      {% endif %}
+    default_output: FormatError
+    input:
+      - validation_passed
+    routes:
+      - TryReadCache
+      - FormatError
+
+  # ── Error formatting ──────────────────────────────────────────────
+  - id: FormatError
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        error_message = alita_state.get('error_message', 'Unknown error')
+        feature_id = alita_state.get('feature_id', 0)
+        operation_result = json.dumps({
+            "status": "error",
+            "item_id": feature_id,
+            "error": error_message
+        })
+        {"operation_result": operation_result}
+    input:
+      - error_message
+      - feature_id
+    output:
+      - operation_result
+    structured_output: true
+    transition: END
+
+  # ── Cache check ───────────────────────────────────────────────────
+  - id: TryReadCache
+    type: toolkit
+    input:
+      - artifact_filepath
+    input_mapping:
+      filename:
+        type: variable
+        value: artifact_filepath
+    on_error:
+      transition: MarkNoCache
+    output:
+      - cached_data
+    structured_output: false
+    tool: readFile
+    toolkit_name: epic_artifacts
+    transition: EvaluateCache
+  - id: MarkNoCache
+    type: code
+    code:
+      type: fixed
+      value: |-
+        {"file_exists": False, "cached_data": ""}
+    input: []
+    output:
+      - file_exists
+      - cached_data
+    structured_output: true
+    transition: FetchFeature
+  - id: EvaluateCache
+    type: code
+    code:
+      type: fixed
+      value: |-
+        {"file_exists": True}
+    input: []
+    output:
+      - file_exists
+    structured_output: true
+    transition: CacheRouter
+  - id: CacheRouter
+    type: router
+    condition: |
+      {% if force_reinit %}
+        FetchFeature
+      {% else %}
+        ReturnFilename
+      {% endif %}
+    default_output: ReturnFilename
+    input:
+      - force_reinit
+    routes:
+      - FetchFeature
+      - ReturnFilename
+
+  # ── Feature fetch ─────────────────────────────────────────────────
+  - id: FetchFeature
+    type: toolkit
+    input:
+      - feature_id
+      - load_attachments
+    input_mapping:
+      id:
+        type: variable
+        value: feature_id
+      expand:
+        type: fixed
+        value: All
+      parse_attachments:
+        type: variable
+        value: load_attachments
+      process_images:
+        type: fixed
+        value: true
+    on_error:
+      transition: HandleFetchError
+    output:
+      - feature_data
+    structured_output: true
+    tool: get_work_item
+    toolkit_name: LFAADOBoardReader
+    transition: ValidateFeature
+  - id: HandleFetchError
+    type: code
+    code:
+      type: fixed
+      value: |-
+        feature_id = alita_state.get('feature_id')
+        {
+            "validation_passed": False,
+            "error_message": f"Failed to fetch work item {feature_id}. Item may not exist or access denied."
+        }
+    input:
+      - feature_id
+    output:
+      - validation_passed
+      - error_message
+    structured_output: true
+    transition: FormatError
+  - id: ValidateFeature
+    type: code
+    code:
+      type: fixed
+      value: |-
+        feature_data = alita_state.get('feature_data', {})
+        feature_id = alita_state.get('feature_id')
+
+        if not feature_data or not isinstance(feature_data, dict):
+            result = {
+                "validation_passed": False,
+                "error_message": f"Work item {feature_id} not found or inaccessible."
+            }
+        elif 'System.Id' not in feature_data and 'id' not in feature_data:
+            result = {
+                "validation_passed": False,
+                "error_message": f"Invalid response for work item {feature_id}."
+            }
+        else:
+            result = {"validation_passed": True, "error_message": ""}
+
+        result
+    input:
+      - feature_data
+      - feature_id
+    output:
+      - validation_passed
+      - error_message
+    structured_output: true
+    transition: FeatureRouter
+  - id: FeatureRouter
+    type: router
+    condition: |
+      {% if validation_passed %}
+        MergeCache
+      {% else %}
+        FormatError
+      {% endif %}
+    default_output: FormatError
+    input:
+      - validation_passed
+    routes:
+      - MergeCache
+      - FormatError
+
+  # ── Cache merge (relations from previous run) ─────────────────────
+  - id: MergeCache
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+
+        feature_data = alita_state.get('feature_data', {})
+        cached_data_str = alita_state.get('cached_data', '')
+        load_attachments = alita_state.get('load_attachments', True)
+        file_exists = alita_state.get('file_exists', False)
+
+        # If not loading attachments and cache exists, copy relations from cached feature
+        if not load_attachments and file_exists and cached_data_str:
+            try:
+                cached = json.loads(cached_data_str) if isinstance(cached_data_str, str) else cached_data_str
+                if isinstance(cached, dict):
+                    cached_relations = cached.get('feature', {}).get('relations')
+                    if cached_relations is not None:
+                        feature_data['relations'] = cached_relations
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        {'feature_data': feature_data}
+    input:
+      - feature_data
+      - cached_data
+      - load_attachments
+      - file_exists
+    output:
+      - feature_data
+    structured_output: true
+    transition: InitializeFetch
+
+  # ── Dependency tree fetch (recursive) ─────────────────────────────
+  - id: InitializeFetch
+    type: code
+    code:
+      type: fixed
+      value: |-
+        feature_id = alita_state.get('feature_id')
+        current_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] = {feature_id}"
+
+        {
+            "current_query": current_query,
+            "all_item_ids": [],
+            "all_fetched_items": [],
+            "current_parent_ids": [feature_id],
+            "current_depth": 0
+        }
+    input:
+      - feature_id
+    output:
+      - current_query
+      - all_item_ids
+      - all_fetched_items
+      - current_parent_ids
+      - current_depth
+    structured_output: true
+    transition: FetchLevel
+  - id: FetchLevel
+    type: toolkit
+    input:
+      - current_query
+    input_mapping:
+      fields:
+        type: fixed
+        value:
+          - System.Id
+          - System.Title
+          - System.State
+          - System.WorkItemType
+          - System.Parent
+          - System.Description
+          - System.AssignedTo
+          - System.Reason
+          - System.CreatedDate
+          - System.ChangedDate
+      limit:
+        type: fixed
+        value: 1000
+      query:
+        type: variable
+        value: current_query
+    on_error:
+      transition: BuildOutput
+    output:
+      - level_items
+    structured_output: true
+    tool: search_work_items
+    toolkit_name: LFAADOBoardReader
+    transition: ProcessLevel
+  - id: ProcessLevel
+    type: code
+    code:
+      type: fixed
+      value: |-
+        level_items = alita_state.get('level_items', [])
+        all_item_ids = alita_state.get('all_item_ids', [])
+        all_fetched_items = alita_state.get('all_fetched_items', [])
+        current_parent_ids = alita_state.get('current_parent_ids', [])
+        current_depth = alita_state.get('current_depth', 0)
+
+        # Extract nested if needed
+        if isinstance(all_item_ids, dict) and 'all_item_ids' in all_item_ids:
+            all_item_ids = all_item_ids['all_item_ids']
+        if isinstance(all_fetched_items, dict) and 'all_fetched_items' in all_fetched_items:
+            all_fetched_items = all_fetched_items['all_fetched_items']
+        if isinstance(level_items, dict) and 'level_items' in level_items:
+            level_items = level_items['level_items']
+        if isinstance(current_parent_ids, dict) and 'current_parent_ids' in current_parent_ids:
+            current_parent_ids = current_parent_ids['current_parent_ids']
+
+        if not isinstance(level_items, list):
+            level_items = []
+
+        child_ids = []
+        for item in level_items:
+            item_id = item.get('id') or item.get('System.Id')
+            if item_id and item_id not in all_item_ids:
+                if not item.get('System.Parent') and current_parent_ids:
+                    item['_inferred_parent_from_query'] = current_parent_ids
+                child_ids.append(item_id)
+                all_item_ids.append(item_id)
+                all_fetched_items.append(item)
+
+        next_depth = current_depth + 1
+        max_depth = 100
+
+        if child_ids and next_depth < max_depth:
+            ids_str = ','.join(map(str, child_ids))
+            next_query = f"SELECT [System.Id], [System.Title], [System.State], [System.WorkItemType], [System.Parent], [System.Description] FROM WorkItems WHERE [System.Parent] IN ({ids_str})"
+            has_more = True
+        else:
+            next_query = ""
+            has_more = False
+
+        {
+            "current_query": next_query,
+            "all_item_ids": all_item_ids,
+            "all_fetched_items": all_fetched_items,
+            "has_more_levels": has_more,
+            "current_parent_ids": child_ids if has_more else [],
+            "current_depth": next_depth
+        }
+    input:
+      - level_items
+      - all_item_ids
+      - all_fetched_items
+      - current_parent_ids
+      - current_depth
+    output:
+      - current_query
+      - all_item_ids
+      - all_fetched_items
+      - has_more_levels
+      - current_parent_ids
+      - current_depth
+    structured_output: true
+    transition: CheckMore
+  - id: CheckMore
+    type: router
+    condition: |
+      {% if has_more_levels %}
+        FetchLevel
+      {% else %}
+        BuildOutput
+      {% endif %}
+    default_output: BuildOutput
+    input:
+      - has_more_levels
+    routes:
+      - FetchLevel
+      - BuildOutput
+
+  # ── Build output JSON ─────────────────────────────────────────────
+  - id: BuildOutput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        import re
+        import html as _html
+
+        feature_data = alita_state.get('feature_data', {})
+        feature_id = alita_state.get('feature_id')
+        all_fetched_items = alita_state.get('all_fetched_items', [])
+
+        if isinstance(all_fetched_items, dict) and 'all_fetched_items' in all_fetched_items:
+            all_fetched_items = all_fetched_items['all_fetched_items']
+
+        def remove_ado_links(obj):
+            if isinstance(obj, dict):
+                obj.pop('_links', None)
+                for v in obj.values():
+                    if isinstance(v, dict):
+                        remove_ado_links(v)
+                    elif isinstance(v, list):
+                        for i in v:
+                            if isinstance(i, dict):
+                                remove_ado_links(i)
+            return obj
+
+        def strip_html(text):
+            if not text:
+                return ''
+            text = _html.unescape(text)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = text.replace('\xa0', ' ')
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
+
+        def extract_links(text):
+            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
+            if not text:
+                return links
+            urls = []
+            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
+            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
+            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
+            seen = set()
+            for url in urls:
+                if url in seen:
+                    continue
+                seen.add(url)
+                if 'figma.com' in url:
+                    links['figma'].append(url)
+                elif '/_wiki/' in url:
+                    links['wiki'].append(url)
+                elif 'workitem=' in url or '/_workitems/' in url:
+                    links['item'].append(url)
+                else:
+                    links['other'].append(url)
+            return links
+
+        if isinstance(feature_data, dict):
+            remove_ado_links(feature_data)
+        for item in all_fetched_items:
+            if isinstance(item, dict):
+                remove_ado_links(item)
+
+        description_raw = feature_data.get('System.Description', '')
+
+        feature = {
+            'id': feature_id,
+            'title': feature_data.get('System.Title', 'Untitled'),
+            'state': feature_data.get('System.State', 'Unknown'),
+            'type': feature_data.get('System.WorkItemType', 'Feature'),
+            'url': feature_data.get('url', ''),
+            'description': strip_html(description_raw),
+            'assigned_to': feature_data.get('System.AssignedTo', 'N/A'),
+            'created_date': feature_data.get('System.CreatedDate', ''),
+            'changed_date': feature_data.get('System.ChangedDate', ''),
+            'links': extract_links(description_raw),
+            'children_ids': []
+        }
+
+        if 'relations' in feature_data:
+            feature['relations'] = feature_data['relations']
+
+        parent_map = {}
+        for item in all_fetched_items:
+            item_id = item.get('id') or item.get('System.Id')
+            parent_id = item.get('System.Parent')
+            if parent_id:
+                parent_map[item_id] = parent_id
+            elif '_inferred_parent_from_query' in item:
+                inferred = item['_inferred_parent_from_query']
+                parent_map[item_id] = inferred[0] if inferred else feature_id
+            else:
+                parent_map[item_id] = feature_id
+
+        dependencies = {}
+        for item in all_fetched_items:
+            item_id = item.get('id') or item.get('System.Id')
+            item_id_str = str(item_id)
+            parent_id = parent_map.get(item_id, feature_id)
+            dependencies[item_id_str] = {
+                'id': item_id,
+                'title': item.get('System.Title', 'Untitled'),
+                'state': item.get('System.State', 'Unknown'),
+                'type': item.get('System.WorkItemType', 'Task'),
+                'parent_id': parent_id,
+                'children_ids': [],
+                'level': 0,
+                'description': strip_html(item.get('System.Description', '')),
+                'assigned_to': item.get('System.AssignedTo', 'N/A'),
+                'reason': item.get('System.Reason', ''),
+                'created_date': item.get('System.CreatedDate', ''),
+                'changed_date': item.get('System.ChangedDate', ''),
+                'url': item.get('url', '')
+            }
+
+        for dep_id, dep in dependencies.items():
+            pid = dep['parent_id']
+            pid_str = str(pid)
+            if pid == feature_id:
+                if dep['id'] not in feature['children_ids']:
+                    feature['children_ids'].append(dep['id'])
+                dep['level'] = 1
+            elif pid_str in dependencies:
+                parent = dependencies[pid_str]
+                if dep['id'] not in parent['children_ids']:
+                    parent['children_ids'].append(dep['id'])
+
+        for _ in range(10):
+            updated = False
+            for dep_id, dep in dependencies.items():
+                if dep['level'] == 0:
+                    pid_str = str(dep['parent_id'])
+                    if pid_str in dependencies and dependencies[pid_str]['level'] > 0:
+                        dep['level'] = dependencies[pid_str]['level'] + 1
+                        updated = True
+            if not updated:
+                break
+
+        max_level = max((d['level'] for d in dependencies.values()), default=0)
+
+        hierarchy_data = {
+            'feature': feature,
+            'dependencies': dependencies,
+            'metadata': {
+                'total_items': len(dependencies),
+                'max_level': max_level
+            }
+        }
+
+        {'hierarchy_data': hierarchy_data}
+    input:
+      - feature_data
+      - feature_id
+      - all_fetched_items
+    output:
+      - hierarchy_data
+    structured_output: true
+    transition: SaveOutput
+
+  # ── Save & return ─────────────────────────────────────────────────
+  - id: SaveOutput
+    type: toolkit
+    input:
+      - hierarchy_data
+      - artifact_filepath
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filedata:
+        type: fstring
+        value: '{hierarchy_data}'
+      filename:
+        type: variable
+        value: artifact_filepath
+      filepath:
+        type: fixed
+        value: null
+    output: []
+    structured_output: true
+    tool: createFile
+    toolkit_name: epic_artifacts
+    transition: ReturnFilename
+  - id: ReturnFilename
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        artifact_filepath = alita_state.get('artifact_filepath', '')
+        {"operation_result": json.dumps([artifact_filepath])}
+    input:
+      - artifact_filepath
+    output:
+      - operation_result
+    structured_output: true
+    transition: END
+  # operation_result is the output for agent-to-agent communication
