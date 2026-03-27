@@ -74,8 +74,6 @@ jobs:
       TESTRAIL_PASSWORD: ${{ secrets.TESTRAIL_PASSWORD }}
       JIRA_PROJECT: "EL"
       TEST_CASES_DIR: ${{ inputs.test_cases_dir }}
-      ENVIRONMENT: ${{ inputs.environment }}
-      ENV_NAME: ${{ inputs.environment }}
       DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
       DEFAULT_LLM_MODEL: ${{ secrets.DEFAULT_LLM_MODEL }}
 
@@ -104,36 +102,23 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Make alita-sdk source available
-        # The base image has alita_sdk installed as an editable install pointing
-        # to /app, but the actual source is in the checked-out workspace.
-        # Adding GITHUB_WORKSPACE to PYTHONPATH makes the module importable.
-        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
-
-      - name: Prepare sandbox cache paths
-        # Resolve to canonical paths. In GitHub Actions containers, $GITHUB_WORKSPACE
-        # is commonly a symlink (/__w -> /home/runner/work). Deno permission checks
-        # use resolved paths; if sandbox allow_read uses unresolved /__w paths,
-        # reads can fail with NotCapable despite looking in-scope.
-        shell: bash
+      
+      - name: Resolve environment secrets
         run: |
-          REAL_WORKSPACE="$(realpath "$GITHUB_WORKSPACE")"
-          SANDBOX_BASE_REAL="${REAL_WORKSPACE}/.alita/tests/test_pipelines"
-          DENO_DIR_REAL="${SANDBOX_BASE_REAL}/node_modules"
-
-          echo "SANDBOX_BASE=$SANDBOX_BASE_REAL" >> "$GITHUB_ENV"
-          echo "DENO_DIR=$DENO_DIR_REAL" >> "$GITHUB_ENV"
-
-          export SANDBOX_BASE="$SANDBOX_BASE_REAL"
-          export DENO_DIR="$DENO_DIR_REAL"
-
-          mkdir -p "$SANDBOX_BASE/tmp"
-          mkdir -p "$DENO_DIR"
-          echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
-          echo "REAL_WORKSPACE=$REAL_WORKSPACE"
-          echo "SANDBOX_BASE=$SANDBOX_BASE"
-          echo "DENO_DIR=$DENO_DIR"
+          if [ "${{ inputs.environment }}" = "local" ]; then
+            ENV_UPPER="STAGE"
+          else
+            ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
+          fi
+          echo "ENV_UPPER=${ENV_UPPER}" >> $GITHUB_ENV
+      
+      - name: Setup test environment
+        uses: ./.github/actions/setup-test-environment
+        with:
+          deployment-url: ${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER)] }}
+          api-token: ${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER)] }}
+          project-id: ${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER)] }}
+          sandbox-subdir: '.alita/tests/test_pipelines'
 
       - name: Setup gh CLI
         uses: dev-hanz-ops/install-gh-cli-action@v0.1.0
@@ -176,23 +161,6 @@ jobs:
           echo "Running test command: $TEST_COMMAND"
           echo "::notice::Tests to run: $TESTS_TO_RUN"         
 
-      - name: Uppercase the environment
-        id: set-api-key
-        run: |
-          if [ "${{ inputs.environment }}" = "local" ]; then
-            ENV_UPPER="STAGE"
-          else
-            ENV_UPPER=$(echo "${{ inputs.environment }}" | tr '[:lower:]' '[:upper:]')
-          fi
-          echo "ENV_UPPER=${ENV_UPPER}" >> $GITHUB_ENV
-
-      - name: Resolve environment secrets
-        run: |
-          # ENV_UPPER is now in the env context from the previous step;
-          echo "DEPLOYMENT_URL=${{ secrets[format('DEPLOYMENT_URL_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
-          echo "API_KEY=${{ secrets[format('ALITA_API_KEY_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
-          echo "PROJECT_ID=${{ secrets[format('PROJECT_ID_{0}', env.ENV_UPPER)] }}" >> $GITHUB_ENV
-
       - name: Run tests
         id: wait_tests
         timeout-minutes: 30
@@ -213,26 +181,21 @@ jobs:
             echo "tests_failed=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Copy test results
-        if: always()
-        run: |
-          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
-          cp "${RESULTS_DIR}/results.json" ./results.json 2>/dev/null || echo "{}" > ./results.json
-          cp "${RESULTS_DIR}/results_for_bug_reporter.json" ./results_for_bug_reporter.json 2>/dev/null || echo "{}" > ./results_for_bug_reporter.json
-          cp "${RESULTS_DIR}/results_errors_only.json" ./results_errors_only.json 2>/dev/null || echo "{}" > ./results_errors_only.json
-          cp "${RESULTS_DIR}/results_errors_only_for_bug_reporter.json" ./results_errors_only_for_bug_reporter.json 2>/dev/null || echo "{}" > ./results_errors_only_for_bug_reporter.json
-          
       - name: Generate test report
         if: always()
         run: |
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
           echo "Generating test report..."
-          python .alita/tests/test_pipelines/scripts/generate_report.py ./results.json
+          python .alita/tests/test_pipelines/scripts/generate_report.py "${RESULTS_DIR}/results.json"
 
       - name: Print execution summary
         if: always()
         id: test_summary
         run: |
-          if [ ! -f ./results.json ]; then
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          RESULTS_FILE="${RESULTS_DIR}/results.json"
+          
+          if [ ! -f "${RESULTS_FILE}" ]; then
             echo "❌ No results.json found - tests may not have completed"
             if [ -n "$GITHUB_STEP_SUMMARY" ]; then
               echo "" >> "$GITHUB_STEP_SUMMARY"
@@ -244,11 +207,11 @@ jobs:
           fi
           
           # Parse JSON with jq
-          SUITE=$(jq -r '.suite_name // "unknown"' ./results.json)
-          PASSED=$(jq -r '.passed // 0' ./results.json)
-          FAILED=$(jq -r '.failed // 0' ./results.json)
-          ERRORS=$(jq -r '.errors // 0' ./results.json)
-          SKIPPED=$(jq -r '.skipped // 0' ./results.json)
+          SUITE=$(jq -r '.suite_name // "unknown"' "${RESULTS_FILE}")
+          PASSED=$(jq -r '.passed // 0' "${RESULTS_FILE}")
+          FAILED=$(jq -r '.failed // 0' "${RESULTS_FILE}")
+          ERRORS=$(jq -r '.errors // 0' "${RESULTS_FILE}")
+          SKIPPED=$(jq -r '.skipped // 0' "${RESULTS_FILE}")
           
           # Determine status based on failures, errors, and container exit code
           TESTS_FAILED="${{ steps.wait_tests.outputs.tests_failed }}"
@@ -284,9 +247,9 @@ jobs:
           # Collect any test runner log files written to the results directory
           RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
           if [ -d "$RESULTS_DIR" ]; then
-            find "$RESULTS_DIR" -name "*.log" -exec cat {} \; > docker-logs.txt 2>&1 || true
+            find "$RESULTS_DIR" -name "*.log" -exec cat {} \; > "${RESULTS_DIR}/docker-logs.txt" 2>&1 || true
           fi
-          touch docker-logs.txt
+          touch "${RESULTS_DIR}/docker-logs.txt"
 
       - name: Download PR change context
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
@@ -319,33 +282,26 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           alita agent run .alita/agents/test-fixer.agent.md --dir . "Analyze ${RESULTS_PATH} on ${{ inputs.environment }} and branch ${formated_branch}" || echo "AI analysis completed with warnings"
 
-      - name: Copy AI analysis outputs
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
-        run: |
-          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
-          cp "${RESULTS_DIR}/fix_output.json" ./fix_output.json 2>/dev/null || echo "{}" > ./fix_output.json
-          cp "${RESULTS_DIR}/fix_milestone.json" ./fix_milestone.json 2>/dev/null || echo "{}" > ./fix_milestone.json
-          
-          echo "fix_output.json content:"
-          cat ./fix_output.json
-
       - name: Label PR with tests_ai_healed
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
-          if [ ! -f ./fix_output.json ]; then
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          FIX_OUTPUT="${RESULTS_DIR}/fix_output.json"
+          
+          if [ ! -f "${FIX_OUTPUT}" ]; then
             echo "No fix_output.json found, skipping PR labeling"
             exit 0
           fi
           
           # Check if fixes were committed
-          COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+          COMMITTED=$(jq -r '.committed // false' "${FIX_OUTPUT}")
           if [ "$COMMITTED" != "true" ]; then
             echo "No fixes committed, skipping PR labeling"
             exit 0
           fi
           
           # Get PR number from fix_output.json
-          PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+          PR_NUMBER=$(jq -r '.commit_details.pr_number // null' "${FIX_OUTPUT}")
           if [ "$PR_NUMBER" = "null" ]; then
             echo "No PR found for branch, skipping labeling"
             exit 0
@@ -363,40 +319,44 @@ jobs:
       - name: Post AI Analysis Summary to GitHub
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         run: |
-          if [ ! -f ./fix_output.json ]; then
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          FIX_OUTPUT="${RESULTS_DIR}/fix_output.json"
+          FIX_MILESTONE="${RESULTS_DIR}/fix_milestone.json"
+          
+          if [ ! -f "${FIX_OUTPUT}" ]; then
             echo "::warning::No AI analysis output found"
             exit 0
           fi
           
           # Check if file is valid JSON
-          if ! jq empty ./fix_output.json 2>/dev/null; then
+          if ! jq empty "${FIX_OUTPUT}" 2>/dev/null; then
             echo "::warning::Invalid JSON in fix_output.json"
             exit 0
           fi
           
           # Parse AI analysis results
-          FIXED_COUNT=$(jq -r '.summary.fixed // 0' ./fix_output.json)
-          FLAKY_COUNT=$(jq -r '.summary.flaky // 0' ./fix_output.json)
-          BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
-          TOTAL_ANALYZED=$(jq -r '(.summary.total_analyzed // ((.summary.fixed // 0) + (.summary.flaky // 0) + (.summary.blocked // 0)))' ./fix_output.json)
+          FIXED_COUNT=$(jq -r '.summary.fixed // 0' "${FIX_OUTPUT}")
+          FLAKY_COUNT=$(jq -r '.summary.flaky // 0' "${FIX_OUTPUT}")
+          BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' "${FIX_OUTPUT}")
+          TOTAL_ANALYZED=$(jq -r '(.summary.total_analyzed // ((.summary.fixed // 0) + (.summary.flaky // 0) + (.summary.blocked // 0)))' "${FIX_OUTPUT}")
           
           # Count blocked tests by blocker_type from fix_output.json
-          SDK_BUG_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "sdk_bug")] | length' ./fix_output.json)
-          AUTOMATION_BUG_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "automation_bug")] | length' ./fix_output.json)
-          MAX_ATTEMPTS_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "max_attempts_exceeded")] | length' ./fix_output.json)
-          PR_REGRESSION_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "pr_regression")] | length' ./fix_output.json)
-          PR_REGRESSION_TOP=$(jq -r '.pr_regressions // [] | length' ./fix_output.json)
+          SDK_BUG_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "sdk_bug")] | length' "${FIX_OUTPUT}")
+          AUTOMATION_BUG_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "automation_bug")] | length' "${FIX_OUTPUT}")
+          MAX_ATTEMPTS_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "max_attempts_exceeded")] | length' "${FIX_OUTPUT}")
+          PR_REGRESSION_BLOCKED=$(jq -r '[.blocked[]? | select(.blocker_type == "pr_regression")] | length' "${FIX_OUTPUT}")
+          PR_REGRESSION_TOP=$(jq -r '.pr_regressions // [] | length' "${FIX_OUTPUT}")
           
           # Count SDK bugs from intent analysis in milestone
           SDK_BUG_COUNT=0
           TEST_CODE_ISSUE_COUNT=0
           AUTOMATION_BUG_INTENT_COUNT=0
           INTENT_ANALYSIS_COUNT=0
-          if [ -f ./fix_milestone.json ] && jq empty ./fix_milestone.json 2>/dev/null; then
-            SDK_BUG_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "sdk_bug")] | length' ./fix_milestone.json)
-            TEST_CODE_ISSUE_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "test_code_issue")] | length' ./fix_milestone.json)
-            AUTOMATION_BUG_INTENT_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "automation_bug")] | length' ./fix_milestone.json)
-            INTENT_ANALYSIS_COUNT=$(jq -r '.intent_analysis // [] | length' ./fix_milestone.json)
+          if [ -f "${FIX_MILESTONE}" ] && jq empty "${FIX_MILESTONE}" 2>/dev/null; then
+            SDK_BUG_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "sdk_bug")] | length' "${FIX_MILESTONE}")
+            TEST_CODE_ISSUE_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "test_code_issue")] | length' "${FIX_MILESTONE}")
+            AUTOMATION_BUG_INTENT_COUNT=$(jq -r '[.intent_analysis[]? | select(.classification == "automation_bug")] | length' "${FIX_MILESTONE}")
+            INTENT_ANALYSIS_COUNT=$(jq -r '.intent_analysis // [] | length' "${FIX_MILESTONE}")
           fi
           
           # Write AI Analysis Summary to GitHub Step Summary
@@ -455,7 +415,7 @@ jobs:
                 echo "| # | Test | Root Cause | Fix Applied |"
                 echo "|---|------|------------|-------------|"
                 COUNTER=1
-                jq -c '.fixed[]?' ./fix_output.json | while read -r item; do
+                jq -c '.fixed[]?' "${FIX_OUTPUT}" | while read -r item; do
                   TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                   ISSUE=$(echo "$item" | jq -r '.issue // "N/A"')
                   FIX=$(echo "$item" | jq -r '.fix // "N/A"')
@@ -477,7 +437,7 @@ jobs:
                 echo "| # | Test | Reason |"
                 echo "|---|------|--------|"
                 COUNTER=1
-                jq -c '.flaky[]?' ./fix_output.json | while read -r item; do
+                jq -c '.flaky[]?' "${FIX_OUTPUT}" | while read -r item; do
                   TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                   REASON=$(echo "$item" | jq -r '.reason // "N/A"')
                   echo "| ${COUNTER} | ${TEST_IDS} | ${REASON} |"
@@ -499,7 +459,7 @@ jobs:
                   echo "> These tests were **not patched** because the failures are caused by SDK code defects, not test logic errors. Weakening assertions would hide real bugs."
                   echo ""
                   COUNTER=1
-                  jq -c '.blocked[]? | select(.blocker_type == "sdk_bug")' ./fix_output.json | while read -r item; do
+                  jq -c '.blocked[]? | select(.blocker_type == "sdk_bug")' "${FIX_OUTPUT}" | while read -r item; do
                     TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                     BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
                     EXPECTED=$(echo "$item" | jq -r '.expected_behavior // "N/A"')
@@ -536,7 +496,7 @@ jobs:
                   echo "> Environment/infrastructure issues confirmed by rerun. These require TA team verification, not code fixes."
                   echo ""
                   COUNTER=1
-                  jq -c '.blocked[]? | select(.blocker_type == "automation_bug")' ./fix_output.json | while read -r item; do
+                  jq -c '.blocked[]? | select(.blocker_type == "automation_bug")' "${FIX_OUTPUT}" | while read -r item; do
                     TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                     BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
                     TOOL_NAME=$(echo "$item" | jq -r '.tool_name // "N/A"')
@@ -577,7 +537,7 @@ jobs:
                   echo "> These tests exhausted all fix attempts (3 max) without passing."
                   echo ""
                   COUNTER=1
-                  jq -c '.blocked[]? | select(.blocker_type == "max_attempts_exceeded")' ./fix_output.json | while read -r item; do
+                  jq -c '.blocked[]? | select(.blocker_type == "max_attempts_exceeded")' "${FIX_OUTPUT}" | while read -r item; do
                     TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
                     BUG_DESC=$(echo "$item" | jq -r '.bug_description // "N/A"')
                     ATTEMPTS=$(echo "$item" | jq -r '.attempts_made // "N/A"')
@@ -600,8 +560,8 @@ jobs:
               fi
               
               # Show Intent Analysis from milestone (how each test was classified)
-              if [ -f ./fix_milestone.json ] && jq empty ./fix_milestone.json 2>/dev/null; then
-                INTENT_COUNT=$(jq -r '.intent_analysis // [] | length' ./fix_milestone.json)
+              if [ -f "${FIX_MILESTONE}" ] && jq empty "${FIX_MILESTONE}" 2>/dev/null; then
+                INTENT_COUNT=$(jq -r '.intent_analysis // [] | length' "${FIX_MILESTONE}")
                 if [ "$INTENT_COUNT" -gt 0 ]; then
                   echo "<details>"
                   echo "<summary>🔍 <b>Test Intent Analysis</b> — ${INTENT_COUNT} tests classified</summary>"
@@ -610,7 +570,7 @@ jobs:
                   echo ""
                   echo "| Test | Type | Classification | Primary Feature | SDK Correct? | Reasoning |"
                   echo "|------|------|----------------|-----------------|--------------|-----------|" 
-                  jq -r '.intent_analysis[]? | "| \(.test_id // "N/A") | \(.positive_or_negative // "N/A") | \(if .classification == "sdk_bug" then "🐛 SDK Bug" elif .classification == "automation_bug" then "🔌 Automation Bug" elif .classification == "pr_regression" then "⚠️ PR Regression" else "🔧 Test Issue" end) | \(.primary_feature // "N/A") | \(if .sdk_behaves_correctly then "✅" else "❌" end) | \(.reasoning // "N/A") |"' ./fix_milestone.json
+                  jq -r '.intent_analysis[]? | "| \(.test_id // "N/A") | \(.positive_or_negative // "N/A") | \(if .classification == "sdk_bug" then "🐛 SDK Bug" elif .classification == "automation_bug" then "🔌 Automation Bug" elif .classification == "pr_regression" then "⚠️ PR Regression" else "🔧 Test Issue" end) | \(.primary_feature // "N/A") | \(if .sdk_behaves_correctly then "✅" else "❌" end) | \(.reasoning // "N/A") |"' "${FIX_MILESTONE}"
                   echo ""
                   echo "</details>"
                   echo ""
@@ -618,15 +578,15 @@ jobs:
               fi
               
               # Add milestone summary if available (collapsible)
-              if [ -f ./fix_milestone.json ]; then
-                if jq empty ./fix_milestone.json 2>/dev/null; then
+              if [ -f "${FIX_MILESTONE}" ]; then
+                if jq empty "${FIX_MILESTONE}" 2>/dev/null; then
                   # Gather milestone data
-                  MS_ENV=$(jq -r '.environment // "N/A"' ./fix_milestone.json)
-                  MS_BRANCH=$(jq -r '.ci_target_branch // "N/A"' ./fix_milestone.json)
-                  MS_SUITE=$(jq -r '.suite // "N/A"' ./fix_milestone.json)
-                  MS_FAILED_COUNT=$(jq -r '.initial_failures // [] | length' ./fix_milestone.json)
-                  FIX_ATTEMPTS_COUNT=$(jq -r '.fix_attempts // [] | length' ./fix_milestone.json)
-                  RERUN_COUNT=$(jq -r '.rerun_attempts // [] | length' ./fix_milestone.json)
+                  MS_ENV=$(jq -r '.environment // "N/A"' "${FIX_MILESTONE}")
+                  MS_BRANCH=$(jq -r '.ci_target_branch // "N/A"' "${FIX_MILESTONE}")
+                  MS_SUITE=$(jq -r '.suite // "N/A"' "${FIX_MILESTONE}")
+                  MS_FAILED_COUNT=$(jq -r '.initial_failures // [] | length' "${FIX_MILESTONE}")
+                  FIX_ATTEMPTS_COUNT=$(jq -r '.fix_attempts // [] | length' "${FIX_MILESTONE}")
+                  RERUN_COUNT=$(jq -r '.rerun_attempts // [] | length' "${FIX_MILESTONE}")
                   
                   echo "<details>"
                   echo "<summary>📋 <b>Fix Milestone</b> — ${MS_FAILED_COUNT} failures, ${FIX_ATTEMPTS_COUNT} fix attempts</summary>"
@@ -640,13 +600,13 @@ jobs:
                   echo ""
                   
                   # Show error patterns as table with classification
-                  ERROR_PATTERNS_COUNT=$(jq -r '.error_patterns // [] | length' ./fix_milestone.json)
+                  ERROR_PATTERNS_COUNT=$(jq -r '.error_patterns // [] | length' "${FIX_MILESTONE}")
                   if [ "$ERROR_PATTERNS_COUNT" -gt 0 ]; then
                     echo "**Error Patterns:**"
                     echo ""
                     echo "| Pattern | Tests | Category |"
                     echo "|---------|-------|----------|"
-                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) | \(if .category == "sdk_bug" then "🐛 SDK Bug" elif .category == "automation_bug" then "🔌 Automation Bug" elif .category == "pr_regression" then "⚠️ PR Regression" else "🔧 Test Issue" end) |"' ./fix_milestone.json
+                    jq -r '.error_patterns[]? | "| \(.root_cause // "Unknown") | \((.test_ids // []) | join(", ")) | \(if .category == "sdk_bug" then "🐛 SDK Bug" elif .category == "automation_bug" then "🔌 Automation Bug" elif .category == "pr_regression" then "⚠️ PR Regression" else "🔧 Test Issue" end) |"' "${FIX_MILESTONE}"
                     echo ""
                   fi
                   
@@ -656,11 +616,11 @@ jobs:
                     echo ""
                     echo "| # | Rationale | Intent Preserved |"
                     echo "|---|-----------|------------------|"
-                    jq -r '.fix_attempts[]? | "| \(.attempt) | \(.fix_rationale // "N/A") | \(if .intent_preserved == false then "❌ No" elif .intent_preserved == true then "✅ Yes" else "N/A" end) |"' ./fix_milestone.json
+                    jq -r '.fix_attempts[]? | "| \(.attempt) | \(.fix_rationale // "N/A") | \(if .intent_preserved == false then "❌ No" elif .intent_preserved == true then "✅ Yes" else "N/A" end) |"' "${FIX_MILESTONE}"
                     echo ""
                     
                     # Warn if any fix did not preserve intent
-                    INTENT_BROKEN=$(jq -r '[.fix_attempts[]? | select(.intent_preserved == false)] | length' ./fix_milestone.json)
+                    INTENT_BROKEN=$(jq -r '[.fix_attempts[]? | select(.intent_preserved == false)] | length' "${FIX_MILESTONE}")
                     if [ "$INTENT_BROKEN" -gt 0 ]; then
                       echo "> [!WARNING]"
                       echo "> **${INTENT_BROKEN} fix attempt(s) did not preserve test intent** — these fixes were reverted and tests classified as blockers to avoid hiding SDK bugs."
@@ -680,15 +640,15 @@ jobs:
               fi
               
               # Add commit information if fixes were committed
-              COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+              COMMITTED=$(jq -r '.committed // false' "${FIX_OUTPUT}")
               if [ "$COMMITTED" = "true" ]; then
-                COMMIT_MSG=$(jq -r '.commit_details.commit_message // null' ./fix_output.json)
-                if [ "$COMMIT_MSG" = "null" ] && [ -f ./fix_milestone.json ]; then
-                  COMMIT_MSG=$(jq -r '.commit_info.commit_message // "N/A"' ./fix_milestone.json)
+                COMMIT_MSG=$(jq -r '.commit_details.commit_message // null' "${FIX_OUTPUT}")
+                if [ "$COMMIT_MSG" = "null" ] && [ -f "${FIX_MILESTONE}" ]; then
+                  COMMIT_MSG=$(jq -r '.commit_info.commit_message // "N/A"' "${FIX_MILESTONE}")
                 fi
-                BRANCH=$(jq -r '.commit_details.branch // "N/A"' ./fix_output.json)
-                FILES_COUNT=$(jq -r '.commit_details.files_count // 0' ./fix_output.json)
-                PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+                BRANCH=$(jq -r '.commit_details.branch // "N/A"' "${FIX_OUTPUT}")
+                FILES_COUNT=$(jq -r '.commit_details.files_count // 0' "${FIX_OUTPUT}")
+                PR_NUMBER=$(jq -r '.commit_details.pr_number // null' "${FIX_OUTPUT}")
                 
                 echo "> [!TIP]"
                 echo "> Fixes committed and pushed to branch \`${BRANCH}\`"
@@ -714,29 +674,32 @@ jobs:
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         id: check_blocked
         run: |
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          FIX_OUTPUT="${RESULTS_DIR}/fix_output.json"
+          
           echo "Parsing fix_output.json for blocked tests..."
           
           # Check if file exists and is valid JSON
-          if [ ! -f ./fix_output.json ]; then
+          if [ ! -f "${FIX_OUTPUT}" ]; then
             echo "fix_output.json not found"
             echo "bug_report_needed=false" >> $GITHUB_OUTPUT
             exit 0
           fi
           
           # Parse blocked count
-          BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' ./fix_output.json)
+          BLOCKED_COUNT=$(jq -r '.summary.blocked // 0' "${FIX_OUTPUT}")
           echo "Blocked tests count: $BLOCKED_COUNT"
           
           # Check if any blocked tests need bug reports
           if [ "$BLOCKED_COUNT" -gt 0 ]; then
-            BUG_REPORT_NEEDED=$(jq -r '[.blocked[]? | select(.bug_report_needed == true)] | length > 0' ./fix_output.json)
+            BUG_REPORT_NEEDED=$(jq -r '[.blocked[]? | select(.bug_report_needed == true)] | length > 0' "${FIX_OUTPUT}")
             
             if [ "$BUG_REPORT_NEEDED" = "true" ]; then
               echo "::notice::Bug report needed for blocked tests"
               echo "bug_report_needed=true" >> $GITHUB_OUTPUT
               
               # Export blocked tests details for bug report
-              jq -r '.blocked[]? | select(.bug_report_needed == true)' ./fix_output.json > blocked_tests_details.json
+              jq -r '.blocked[]? | select(.bug_report_needed == true)' "${FIX_OUTPUT}" > blocked_tests_details.json
               echo "Blocked tests requiring bug reports:"
               cat blocked_tests_details.json
             else
@@ -751,13 +714,16 @@ jobs:
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' }}
         id: check_pr_regressions
         run: |
-          if [ ! -f ./fix_output.json ]; then
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          FIX_OUTPUT="${RESULTS_DIR}/fix_output.json"
+          
+          if [ ! -f "${FIX_OUTPUT}" ]; then
             echo "pr_regressions_found=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Check for PR regressions (bugs introduced by the PR's new code)
-          PR_REGRESSION_COUNT=$(jq -r '.pr_regressions // [] | length' ./fix_output.json)
+          PR_REGRESSION_COUNT=$(jq -r '.pr_regressions // [] | length' "${FIX_OUTPUT}")
           echo "PR regressions count: $PR_REGRESSION_COUNT"
 
           if [ "$PR_REGRESSION_COUNT" -gt 0 ]; then
@@ -777,11 +743,11 @@ jobs:
                 echo ""
                 echo "| Test(s) | Component | Method(s) | Description |"
                 echo "|---------|-----------|-----------|-------------|"
-                jq -r '.pr_regressions[]? | "| \((.test_ids // []) | join(", ")) | `\(.sdk_component // "N/A")` | \((.affected_methods // []) | join(", ")) | \(.bug_description // "N/A") |"' ./fix_output.json
+                jq -r '.pr_regressions[]? | "| \((.test_ids // []) | join(", ")) | `\(.sdk_component // "N/A")` | \((.affected_methods // []) | join(", ")) | \(.bug_description // "N/A") |"' "${FIX_OUTPUT}"
                 echo ""
                 echo "### Recommendations"
                 echo ""
-                jq -r '.pr_regressions[]? | "- **\((.test_ids // []) | join(", "))**: \(.recommendation // "Fix the regression in your PR code")"' ./fix_output.json
+                jq -r '.pr_regressions[]? | "- **\((.test_ids // []) | join(", "))**: \(.recommendation // "Fix the regression in your PR code")"' "${FIX_OUTPUT}"
                 echo ""
               } >> "$GITHUB_STEP_SUMMARY"
             fi
@@ -796,37 +762,34 @@ jobs:
           RESULTS_PATH=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
           alita agent run .alita/agents/bug-reporter.agent.md --dir . "Analyze data in ${RESULTS_PATH} on ${{ inputs.environment }} environment" || echo "Bug reporter completed with warnings"
       
-      - name: Copy bug reporter outputs
-        if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
-        run: |
-          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
-          cp "${RESULTS_DIR}/bug_report_output.json" ./bug_report_output.json 2>/dev/null || echo "{}" > ./bug_report_output.json
-          
-          echo "bug_report_output.json content:"
-          cat ./bug_report_output.json
-      
       - name: Post Bug Report Summary to GitHub
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
-          if [ ! -f ./bug_report_output.json ]; then
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          BUG_REPORT="${RESULTS_DIR}/bug_report_output.json"
+          
+          if [ ! -f "${BUG_REPORT}" ]; then
             echo "::warning::No bug report output found"
             exit 0
           fi
           
+          echo "bug_report_output.json content:"
+          cat "${BUG_REPORT}"
+          
           # Check if file is valid JSON
-          if ! jq empty ./bug_report_output.json 2>/dev/null; then
+          if ! jq empty "${BUG_REPORT}" 2>/dev/null; then
             echo "::warning::Invalid JSON in bug_report_output.json"
             exit 0
           fi
           
           # Parse bug report results
-          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
-          AUTOMATION_BUGS_CREATED=$(jq -r '.summary.automation_bugs_created // 0' ./bug_report_output.json)
-          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
-          PR_REGRESSIONS_SKIPPED=$(jq -r '.summary.pr_regressions_skipped // 0' ./bug_report_output.json)
-          TEST_BUGS_SKIPPED=$(jq -r '.summary.test_bugs_skipped // 0' ./bug_report_output.json)
-          FAILED=$(jq -r '.summary.failed // 0' ./bug_report_output.json)
-          TOTAL=$(jq -r '.summary.total_analyzed // 0' ./bug_report_output.json)
+          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' "${BUG_REPORT}")
+          AUTOMATION_BUGS_CREATED=$(jq -r '.summary.automation_bugs_created // 0' "${BUG_REPORT}")
+          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' "${BUG_REPORT}")
+          PR_REGRESSIONS_SKIPPED=$(jq -r '.summary.pr_regressions_skipped // 0' "${BUG_REPORT}")
+          TEST_BUGS_SKIPPED=$(jq -r '.summary.test_bugs_skipped // 0' "${BUG_REPORT}")
+          FAILED=$(jq -r '.summary.failed // 0' "${BUG_REPORT}")
+          TOTAL=$(jq -r '.summary.total_analyzed // 0' "${BUG_REPORT}")
           
           # Write Bug Report Summary to GitHub Step Summary
           if [ -n "$GITHUB_STEP_SUMMARY" ]; then
@@ -858,7 +821,7 @@ jobs:
                 echo "| # | Issue | Tests | Component | Labels |"
                 echo "|---|-------|-------|-----------|--------|"
                 COUNTER=1
-                jq -c '.bugs_created[]?' ./bug_report_output.json | while read -r item; do
+                jq -c '.bugs_created[]?' "${BUG_REPORT}" | while read -r item; do
                   TITLE=$(echo "$item" | jq -r '.title')
                   ISSUE_URL=$(echo "$item" | jq -r '.issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + (.issue_number | tostring))')
                   TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
@@ -879,7 +842,7 @@ jobs:
                 echo "| # | Issue | Tests | Tool | Error Type | Labels |"
                 echo "|---|-------|-------|------|------------|--------|"
                 COUNTER=1
-                jq -c '.automation_bugs_created[]?' ./bug_report_output.json | while read -r item; do
+                jq -c '.automation_bugs_created[]?' "${BUG_REPORT}" | while read -r item; do
                   TITLE=$(echo "$item" | jq -r '.title')
                   ISSUE_URL=$(echo "$item" | jq -r '.issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + (.issue_number | tostring))')
                   TEST_IDS=$(echo "$item" | jq -r '(.test_ids // []) | join(", ")')
@@ -900,7 +863,7 @@ jobs:
                 echo "> [!NOTE]"
                 echo "> The following test failures matched existing bugs and were not re-reported"
                 echo ""
-                jq -r '.duplicates_skipped[]? | . as $e | (if $e.existing_issue_titles then [$e.existing_issue_titles, (if $e.existing_issue_urls then $e.existing_issue_urls else ($e.existing_issue_numbers // [] | map("https://github.com/ProjectAlita/projectalita.github.io/issues/" + tostring)) end)] | transpose | map("  - **Similar to:** [\(.[0])](\(.[1]))") elif $e.existing_issue_title then ["  - **Similar to:** [\($e.existing_issue_title)](\($e.existing_issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + ($e.existing_issue_number | tostring))))"] else ["  - **Similar to:** N/A"] end) as $links | "- **Tests:** \(($e.test_ids // []) | join(", "))\n" + ($links | join("\n")) + "\n  - **Reason:** \($e.similarity_reason // "N/A")\n"' ./bug_report_output.json
+                jq -r '.duplicates_skipped[]? | . as $e | (if $e.existing_issue_titles then [$e.existing_issue_titles, (if $e.existing_issue_urls then $e.existing_issue_urls else ($e.existing_issue_numbers // [] | map("https://github.com/ProjectAlita/projectalita.github.io/issues/" + tostring)) end)] | transpose | map("  - **Similar to:** [\(.[0])](\(.[1]))") elif $e.existing_issue_title then ["  - **Similar to:** [\($e.existing_issue_title)](\($e.existing_issue_url // ("https://github.com/ProjectAlita/projectalita.github.io/issues/" + ($e.existing_issue_number | tostring))))"] else ["  - **Similar to:** N/A"] end) as $links | "- **Tests:** \(($e.test_ids // []) | join(", "))\n" + ($links | join("\n")) + "\n  - **Reason:** \($e.similarity_reason // "N/A")\n"' "${BUG_REPORT}"
                 echo ""
                 echo "</details>"
                 echo ""
@@ -916,7 +879,7 @@ jobs:
                 echo ""
                 echo "| Tests | Reason | Action |"
                 echo "|-------|--------|--------|"
-                jq -r '.failed[]? | "| \((.test_ids // []) | join(", ")) | \(.reason // "N/A") | \(.action_needed // "Manual review required") |"' ./bug_report_output.json
+                jq -r '.failed[]? | "| \((.test_ids // []) | join(", ")) | \(.reason // "N/A") | \(.action_needed // "Manual review required") |"' "${BUG_REPORT}"
                 echo ""
                 echo "</details>"
                 echo ""
@@ -927,28 +890,32 @@ jobs:
       - name: Label PR with bug detection status
         if: ${{ always() && steps.wait_tests.outputs.tests_failed == 'true' && steps.check_blocked.outputs.bug_report_needed == 'true' && inputs.enable_bug_reporting }}
         run: |
-          if [ ! -f ./bug_report_output.json ]; then
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          BUG_REPORT="${RESULTS_DIR}/bug_report_output.json"
+          FIX_OUTPUT="${RESULTS_DIR}/fix_output.json"
+          
+          if [ ! -f "${BUG_REPORT}" ]; then
             echo "No bug_report_output.json found, skipping PR labeling"
             exit 0
           fi
           
           # Check if file is valid JSON
-          if ! jq empty ./bug_report_output.json 2>/dev/null; then
+          if ! jq empty "${BUG_REPORT}" 2>/dev/null; then
             echo "Invalid JSON in bug_report_output.json, skipping PR labeling"
             exit 0
           fi
           
           # Parse bug report results
-          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' ./bug_report_output.json)
-          AUTOMATION_BUGS_CREATED=$(jq -r '.summary.automation_bugs_created // 0' ./bug_report_output.json)
-          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' ./bug_report_output.json)
+          BUGS_CREATED=$(jq -r '.summary.bugs_created // 0' "${BUG_REPORT}")
+          AUTOMATION_BUGS_CREATED=$(jq -r '.summary.automation_bugs_created // 0' "${BUG_REPORT}")
+          DUPLICATES_SKIPPED=$(jq -r '.summary.duplicates_skipped // 0' "${BUG_REPORT}")
           
           # Try to get PR number from various sources
           PR_NUMBER=""
           
           # First try from fix_output.json
-          if [ -f ./fix_output.json ] && jq empty ./fix_output.json 2>/dev/null; then
-            PR_NUMBER=$(jq -r '.commit_details.pr_number // null' ./fix_output.json)
+          if [ -f "${FIX_OUTPUT}" ] && jq empty "${FIX_OUTPUT}" 2>/dev/null; then
+            PR_NUMBER=$(jq -r '.commit_details.pr_number // null' "${FIX_OUTPUT}")
           fi
           
           # Fall back to GitHub context
@@ -998,6 +965,9 @@ jobs:
       - name: Determine final job status
         if: always()
         run: |
+          RESULTS_DIR=".alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}"
+          FIX_OUTPUT="${RESULTS_DIR}/fix_output.json"
+          
           TESTS_FAILED="${{ steps.wait_tests.outputs.tests_failed }}"
           TIMED_OUT="${{ steps.wait_tests.outputs.timeout }}"
 
@@ -1015,21 +985,21 @@ jobs:
 
           # ── Tests failed – AI analysis must provide a clear verdict ──
 
-          if [ ! -f ./fix_output.json ] || ! jq empty ./fix_output.json 2>/dev/null; then
+          if [ ! -f "${FIX_OUTPUT}" ] || ! jq empty "${FIX_OUTPUT}" 2>/dev/null; then
             echo "::error::Tests failed and AI analysis output is missing or invalid – job status is unclear"
             exit 1
           fi
 
-          FIXED=$(jq -r '.summary.fixed // 0' ./fix_output.json)
-          FLAKY=$(jq -r '.summary.flaky // 0' ./fix_output.json)
-          BLOCKED=$(jq -r '.summary.blocked // 0' ./fix_output.json)
-          COMMITTED=$(jq -r '.committed // false' ./fix_output.json)
+          FIXED=$(jq -r '.summary.fixed // 0' "${FIX_OUTPUT}")
+          FLAKY=$(jq -r '.summary.flaky // 0' "${FIX_OUTPUT}")
+          BLOCKED=$(jq -r '.summary.blocked // 0' "${FIX_OUTPUT}")
+          COMMITTED=$(jq -r '.committed // false' "${FIX_OUTPUT}")
 
           # Count blocked by type
-          SDK_BUGS=$(jq -r '[.blocked[]? | select(.blocker_type == "sdk_bug")] | length' ./fix_output.json)
-          AUTOMATION_BUGS=$(jq -r '[.blocked[]? | select(.blocker_type == "automation_bug")] | length' ./fix_output.json)
-          PR_REGRESSIONS=$(jq -r '((.pr_regressions // []) | length) + ([.blocked[]? | select(.blocker_type == "pr_regression")] | length)' ./fix_output.json)
-          MAX_ATTEMPTS=$(jq -r '[.blocked[]? | select(.blocker_type == "max_attempts_exceeded")] | length' ./fix_output.json)
+          SDK_BUGS=$(jq -r '[.blocked[]? | select(.blocker_type == "sdk_bug")] | length' "${FIX_OUTPUT}")
+          AUTOMATION_BUGS=$(jq -r '[.blocked[]? | select(.blocker_type == "automation_bug")] | length' "${FIX_OUTPUT}")
+          PR_REGRESSIONS=$(jq -r '((.pr_regressions // []) | length) + ([.blocked[]? | select(.blocker_type == "pr_regression")] | length)' "${FIX_OUTPUT}")
+          MAX_ATTEMPTS=$(jq -r '[.blocked[]? | select(.blocker_type == "max_attempts_exceeded")] | length' "${FIX_OUTPUT}")
 
           echo "AI verdict → fixed=$FIXED  flaky=$FLAKY  blocked=$BLOCKED  committed=$COMMITTED"
           echo "Blocked breakdown → sdk_bugs=$SDK_BUGS  automation_bugs=$AUTOMATION_BUGS  pr_regressions=$PR_REGRESSIONS  max_attempts=$MAX_ATTEMPTS"
@@ -1079,17 +1049,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-results-${{ inputs.test_cases_dir }}
-          path: |
-            ./results.html
-            ./results.json
-            ./results_for_bug_reporter.json
-            ./results_errors_only.json
-            ./results_errors_only_for_bug_reporter.json
-            ./docker-logs.txt
-            ./fix_output.json
-            ./fix_milestone.json
-            ./blocked_tests_details.json
-            ./bug_report_output.json
+          path: .alita/tests/test_pipelines/test_results/suites/${{ inputs.test_cases_dir }}/
           retention-days: 1
 
       - name: CLEAN UP WORKSPACE AFTER RUN

@@ -27,7 +27,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: search_by_title
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results
   - id: process_results
     type: llm

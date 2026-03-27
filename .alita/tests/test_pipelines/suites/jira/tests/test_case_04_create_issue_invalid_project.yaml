@@ -77,10 +77,6 @@ nodes:
           }}
 
           Return **ONLY** the JSON object. No markdown, no additional text.
-            "error": "Error details if failed, null if passed"
-          }}
-
-          Return **ONLY** the JSON object. No markdown, no additional text.
       chat_history:
         type: fixed
         value: []

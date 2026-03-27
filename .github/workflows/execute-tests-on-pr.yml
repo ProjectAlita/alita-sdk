@@ -1,4 +1,4 @@
-name: Execute toolkit AI tests on PR
+name: Pr verification
 
 on:
   pull_request:
@@ -69,9 +69,9 @@ jobs:
         env:
           DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
           DEFAULT_LLM_MODEL: ${{ secrets.DEFAULT_LLM_MODEL }}
-          DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
-          ALITA_API_KEY: ${{ secrets.ALITA_API_KEY_STAGE }}
-          PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
+          ELITEA_DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
+          ELITEA_TOKEN: ${{ secrets.ALITA_API_KEY_STAGE }}
+          ELITEA_PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
           GIT_TOOL_ACCESS_TOKEN: ${{ secrets.GIT_TOOL_ACCESS_TOKEN }}
 
       - name: Parse Agent Output
@@ -155,7 +155,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  test-execution:
+  toolkit-tests:
     needs: [configure-matrix]
     if: needs.configure-matrix.outputs.has-tests == 'true'
     strategy:
@@ -173,8 +173,56 @@ jobs:
       enable_rp_reporting: false
     secrets: inherit
 
+  unit-tests:
+    runs-on: ubuntu-latest
+    if: github.actor != 'eln1nxl'
+    permissions:
+      contents: read
+      packages: read
+      checks: write
+    container:
+      image: ghcr.io/projectalita/alita-sdk:pyodide
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+        PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Make alita-sdk source available
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
+
+      - name: Ensure pytest is available
+        run: python -m pip install -q pytest && python -m pytest --version
+
+      - name: Install deepeval for document loader tests
+        run: python -m pip install --no-cache-dir "deepeval>=3.4.6"
+
+      - name: Run unit tests
+        run: |
+          mkdir -p tests/reports
+          python -m pytest tests/ --ignore=tests/runtime/test_alita_llm.py --junit-xml=tests/reports/unit-test-results.xml
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: tests/reports/unit-test-results.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: PUBLISH TEST REPORT
+        uses: mikepenz/action-junit-report@v4
+        if: always()
+        with:
+          report_paths: 'tests/reports/unit-test-results.xml'
+
   summarize-and-comment:
-    needs: [configure-matrix, test-execution]
+    needs: [configure-matrix, toolkit-tests]
     if: always() && needs.configure-matrix.outputs.has-tests == 'true'
     runs-on: ubuntu-latest
     permissions:

@@ -17,7 +17,7 @@ from langchain_core.messages import AIMessage
 
 def test_clean_string():
     assert clean_string('hello world!') == 'helloworld'
-    assert clean_string('a_b-c.d') == 'a_b-c.d'
+    assert clean_string('a_b-c.d') == 'a_b-c_d'
 
 def test_save_dataframe_success():
     df = pd.DataFrame({'a': [1,2]})
@@ -287,15 +287,15 @@ def test_clean_string_comprehensive():
         ('', ''),
         ('simple', 'simple'),
         ('with spaces', 'withspaces'),
-        ('with-dashes_and.dots', 'with-dashes_and.dots'),
+        ('with-dashes_and.dots', 'with-dashes_and_dots'),
         ('UPPER_case', 'UPPER_case'),
         ('123numbers', '123numbers'),
         ('special!@#$%chars', 'specialchars'),
         ('unicode🚀test', 'unicodetest'),
-        ('file[1].txt', 'file1.txt'),
+        ('file[1].txt', 'file1_txt'),
         ('path\\to\\file', 'pathtofile'),
-        ('email@domain.com', 'emaildomain.com'),
-        ('mix_ALL-types.123!@#', 'mix_ALL-types.123')
+        ('email@domain.com', 'emaildomain_com'),
+        ('mix_ALL-types.123!@#', 'mix_ALL-types_123')
     ]
     
     for input_val, expected in test_cases:

@@ -37,6 +37,15 @@ _SCRIPTS_DIR = (
 
 load_dotenv(_PROJECT_ROOT / ".env")
 
+# Prepend any extra paths needed for system tools (e.g. Tesseract, Poppler).
+# On Windows: winget-installed binaries may not be on the PATH that VS Code inherits
+# when spawning the test runner process directly.
+# Add paths to TEST_EXTRA_PATH in .env (semicolon-separated), e.g.:
+#   TEST_EXTRA_PATH=C:\Program Files\Tesseract-OCR;C:\Program Files\poppler\bin
+_extra = os.environ.get("TEST_EXTRA_PATH", "")
+if _extra:
+  os.environ["PATH"] = _extra + os.pathsep + os.environ.get("PATH", "")
+
 for _p in [str(_PROJECT_ROOT), str(_TESTS_DIR)]:
   if _p not in sys.path:
     sys.path.insert(0, _p)

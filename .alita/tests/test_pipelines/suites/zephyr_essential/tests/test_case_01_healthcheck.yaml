@@ -31,7 +31,7 @@ nodes:
     type: toolkit
     output:
       - healthcheck_result
-    structured_output: true
+    structured_output: false
     tool: healthcheck
     toolkit_name: ${ZEPHYR_ESSENTIAL_TOOLKIT_NAME}
     transition: validate_results

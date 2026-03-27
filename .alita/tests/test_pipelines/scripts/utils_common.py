@@ -178,17 +178,17 @@ def load_session_from_env() -> str | None:
 
 def load_token_from_env() -> str | None:
     """Load API token from environment variable or .env file."""
-    return load_from_env("AUTH_TOKEN") or load_from_env("ELITEA_TOKEN") or load_from_env("API_KEY")
+    return load_from_env("ELITEA_TOKEN") or load_from_env("AUTH_TOKEN") or load_from_env("API_KEY")
 
 
 def load_base_url_from_env() -> str | None:
     """Load base URL from environment variable or .env file."""
-    return load_from_env("BASE_URL") or load_from_env("DEPLOYMENT_URL")
+    return load_from_env("ELITEA_DEPLOYMENT_URL") or load_from_env("DEPLOYMENT_URL") or load_from_env("BASE_URL")
 
 
 def load_project_id_from_env() -> int | None:
     """Load project ID from environment variable or .env file."""
-    value = load_from_env("PROJECT_ID")
+    value = load_from_env("ELITEA_PROJECT_ID") or load_from_env("PROJECT_ID")
     if value:
         try:
             return int(value)

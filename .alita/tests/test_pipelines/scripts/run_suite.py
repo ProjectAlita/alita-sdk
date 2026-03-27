@@ -783,14 +783,17 @@ def run_suite(
 
         suite.results.append(r)
 
-        if r.get('error'):
+        if r.get('error') and r.get('test_passed') is None:
+            # Hard crash from a continue_on_error node: test result is indeterminate.
+            # Count as an error (not passed, not failed) so it's visible and distinct.
+            suite.errors += 1
+        elif r.get('error'):
+            # Hard crash from a core node: test_passed=False was already set by run_pipeline.
             suite.errors += 1
         elif r.get('test_passed') is True:
             suite.passed += 1
-        elif r.get('test_passed') is False:
-            suite.failed += 1
         else:
-            # test_passed is None - mark as failed since we cannot verify the test passed
+            # test_passed is False or None without an error field
             suite.failed += 1
 
     suite.execution_time = time.time() - start_time
@@ -1212,9 +1215,8 @@ def main():
         pipelines = find_tests_in_suite(folder_path, patterns, config, args.wildcards)
     else:
         # REMOTE: Get pipelines from folder and match with backend
-        base_url = args.base_url or load_from_env("BASE_URL") or load_from_env(
-            "DEPLOYMENT_URL") or "http://192.168.68.115"
-        project_id = args.project_id or int(load_from_env("PROJECT_ID") or "2")
+        base_url = args.base_url or load_base_url_from_env() or "http://192.168.68.115"
+        project_id = args.project_id or load_project_id_from_env() or 2
         headers = get_auth_headers()
 
         if not headers:

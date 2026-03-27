@@ -1,0 +1,66 @@
+name: 'Setup Test Environment'
+description: 'Configure Python path, sandbox paths, and optionally set environment secrets'
+inputs:
+  deployment-url:
+    description: 'ELITEA deployment URL (optional - skip if already set in container env)'
+    required: false
+    default: ''
+  api-token:
+    description: 'ELITEA API token (optional - skip if already set in container env)'
+    required: false
+    default: ''
+  project-id:
+    description: 'ELITEA project ID (optional - skip if already set in container env)'
+    required: false
+    default: ''
+  sandbox-subdir:
+    description: 'Optional subdirectory under workspace for sandbox base (e.g., ".alita/tests/test_pipelines")'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Set Python runtime flags
+      shell: bash
+      run: |
+        echo "PYTHONDONTWRITEBYTECODE=1" >> $GITHUB_ENV
+        echo "PYTHONUNBUFFERED=1" >> $GITHUB_ENV
+
+    - name: Set environment variables
+      if: inputs.deployment-url != ''
+      shell: bash
+      run: |
+        echo "ELITEA_DEPLOYMENT_URL=${{ inputs.deployment-url }}" >> $GITHUB_ENV
+        echo "ELITEA_TOKEN=${{ inputs.api-token }}" >> $GITHUB_ENV
+        echo "ELITEA_PROJECT_ID=${{ inputs.project-id }}" >> $GITHUB_ENV
+
+    - name: Make alita-sdk source available
+      shell: bash
+      run: echo "PYTHONPATH=$GITHUB_WORKSPACE:${PYTHONPATH}" >> $GITHUB_ENV
+
+    - name: Resolve sandbox paths to canonical locations
+      shell: bash
+      run: |
+        REAL_WORKSPACE="$(realpath "$GITHUB_WORKSPACE")"
+        
+        if [[ -n "${{ inputs.sandbox-subdir }}" ]]; then
+          SANDBOX_BASE_REAL="${REAL_WORKSPACE}/${{ inputs.sandbox-subdir }}"
+        else
+          SANDBOX_BASE_REAL="${REAL_WORKSPACE}"
+        fi
+        
+        # Set DENO_DIR to node_modules under sandbox base for proper Deno package resolution
+        DENO_DIR_REAL="${SANDBOX_BASE_REAL}/node_modules"
+
+        echo "SANDBOX_BASE=$SANDBOX_BASE_REAL" >> "$GITHUB_ENV"
+        echo "DENO_DIR=$DENO_DIR_REAL" >> "$GITHUB_ENV"
+
+        export SANDBOX_BASE="$SANDBOX_BASE_REAL"
+        export DENO_DIR="$DENO_DIR_REAL"
+
+        mkdir -p "$DENO_DIR_REAL"
+
+        echo "GITHUB_WORKSPACE=$GITHUB_WORKSPACE"
+        echo "REAL_WORKSPACE=$REAL_WORKSPACE"
+        echo "SANDBOX_BASE=$SANDBOX_BASE"
+        echo "DENO_DIR=$DENO_DIR"

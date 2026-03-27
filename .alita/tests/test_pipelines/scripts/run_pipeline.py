@@ -73,7 +73,7 @@ class PipelineResult:
 
 def get_auth_headers(include_content_type: bool = False) -> dict:
     """Get authentication headers from environment."""
-    token = load_from_env("AUTH_TOKEN") or load_from_env("ELITEA_TOKEN") or load_from_env("API_KEY")
+    token = load_token_from_env()
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -119,8 +119,15 @@ def load_nodes_with_continue_on_error(pipeline_name: str, logger: Optional[TestL
                     if not data or not isinstance(data, dict):
                         continue
                     
-                    # Check if this is the right test file
-                    if data.get("name") != pipeline_name:
+                    # Check if this is the right test file.
+                    # Pipeline names on the platform may carry a session prefix (e.g.
+                    # "296c5eff_GH20 - Create Pull Request") that the YAML doesn't have.
+                    # Match if the YAML name is a suffix of the pipeline name (case-insensitive).
+                    # Guard against empty yaml_name — str.endswith("") is always True.
+                    yaml_name = data.get("name", "")
+                    if not yaml_name:
+                        continue
+                    if yaml_name != pipeline_name and not pipeline_name.endswith(yaml_name):
                         continue
                     
                     # Found the right file - extract nodes with continue_on_error
@@ -257,15 +264,55 @@ def process_pipeline_result(
     """
     # Check for error in response (only if error is non-null)
     if isinstance(result_data, dict) and result_data.get("error"):
-        return PipelineResult(
-            success=False,
-            pipeline_id=pipeline_id,
-            pipeline_name=pipeline_name,
-            version_id=version_id,
-            execution_time=execution_time,
-            output=result_data,
-            error=str(result_data.get("error"))
-        )
+        error_str = str(result_data.get("error"))
+
+        # Determine whether the hard crash came from a node with continue_on_error: true.
+        # LangGraph embeds the node name in the error as:
+        #   "During task with name '<node_id>' and id '...'"
+        import re as _re
+        _nodes_coe = load_nodes_with_continue_on_error(pipeline_name, logger)
+        _match = _re.search(r"During task with name '([^']+)'", error_str)
+        _crashing_node = _match.group(1) if _match else None
+        _crash_in_coe_node = bool(_crashing_node and _crashing_node in _nodes_coe)
+
+        if _crash_in_coe_node:
+            # The crash happened in a cleanup/optional node that is allowed to fail.
+            # The actual validation (test_passed) ran BEFORE this node and its result
+            # was in chat_history — but the platform wipes chat_history on a hard crash,
+            # so we cannot recover it.
+            # Keep test_passed=None (indeterminate) rather than forcing False, so the
+            # caller knows the test result is unknown — not that the test failed.
+            if logger:
+                logger.debug(
+                    f"Hard crash from continue_on_error node '{_crashing_node}' — "
+                    f"pipeline terminated before END. Test result is indeterminate "
+                    f"(chat_history cleared by platform). Fix the test to prevent None "
+                    f"input reaching this node."
+                )
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                output=result_data,
+                test_passed=None,   # indeterminate — crash was in cleanup, not test logic
+                error=error_str
+            )
+        else:
+            # Crash in a core test node — definitively a failure.
+            if logger and _crashing_node:
+                logger.debug(f"Hard crash from core node '{_crashing_node}' — marking test_passed=False.")
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                output=result_data,
+                test_passed=False,
+                error=error_str
+            )
 
     # Extract test_passed from result
     test_passed = None
@@ -825,6 +872,59 @@ def process_pipeline_result(
     )
 
 
+def _extract_hitl_thread_id(result_data: dict) -> Optional[str]:
+    """
+    Extract thread_id from a HITL interrupt response.
+
+    When the platform's sensitive_tool_guard raises a GraphInterrupt, the
+    thread_id is embedded in the tool call metadata. We need it to resume.
+
+    IMPORTANT: This function must distinguish between:
+    1. Real HITL interrupt: GraphInterrupt from sensitive_tool_guard middleware
+    2. ToolException crash: ValidationError or other errors with GraphInterrupt in traceback
+
+    Returns:
+        thread_id string if a HITL (sensitive_tool) interrupt is detected, else None
+    """
+    if not isinstance(result_data, dict):
+        return None
+
+    tool_calls_dict = result_data.get("tool_calls_dict", {})
+    if not isinstance(tool_calls_dict, dict):
+        return None
+
+    for tool_call in tool_calls_dict.values():
+        if not isinstance(tool_call, dict):
+            continue
+
+        # Check for the HITL finish reason
+        if tool_call.get("finish_reason") != "error":
+            continue
+
+        error_text = tool_call.get("error", "")
+        if not isinstance(error_text, str):
+            continue
+
+        # Detect sensitive_tool_guard interrupt signature
+        # BOTH GraphInterrupt AND sensitive_tool must be present (not OR)
+        # This prevents false positives from ToolException crashes that mention
+        # GraphInterrupt in their traceback.
+        if "GraphInterrupt" not in error_text or "sensitive_tool" not in error_text:
+            continue
+
+        # Additional safeguard: exclude ToolException/ValidationError crashes
+        # These are NOT HITL interrupts even if they contain GraphInterrupt text
+        if "ToolException" in error_text or "ValidationError" in error_text:
+            continue
+
+        # Extract thread_id from metadata
+        thread_id = tool_call.get("metadata", {}).get("thread_id")
+        if thread_id:
+            return thread_id
+
+    return None
+
+
 def execute_pipeline(
     base_url: str,
     project_id: int,
@@ -834,7 +934,11 @@ def execute_pipeline(
     logger: Optional[TestLogger] = None,
 ) -> PipelineResult:
     """Execute a pipeline using the v2 predict API (synchronous).
-    
+
+    Automatically handles HITL (Human-in-the-Loop) sensitive_tool_guard interrupts
+    by resuming with an 'approve' action, allowing tests to exercise write-operations
+    (create_issue, update_file, etc.) without manual intervention.
+
     Args:
         logger: Optional TestLogger instance for logging
     """
@@ -939,7 +1043,126 @@ def execute_pipeline(
             error="Response is not valid JSON"
         )
 
-    # Process the result using shared function
+    # Auto-resume HITL sensitive_tool_guard interrupts.
+    # The platform's sensitive_tool_guard middleware interrupts execution to request
+    # human approval before write operations (create_issue, update_file, etc.).
+    # A pipeline may contain multiple sensitive tools, each requiring a separate approval.
+    # We loop until no more HITL interrupts are present in the response.
+    # MAX_HITL_APPROVALS guards against infinite loops (e.g., a mis-configured pipeline).
+    MAX_HITL_APPROVALS = 10
+    hitl_approvals = 0
+
+    while hitl_approvals < MAX_HITL_APPROVALS:
+        hitl_thread_id = _extract_hitl_thread_id(result_data)
+        if not hitl_thread_id:
+            break
+
+        hitl_approvals += 1
+        if logger:
+            logger.debug(
+                f"HITL sensitive_tool interrupt detected (thread: {hitl_thread_id}, "
+                f"approval #{hitl_approvals}). Auto-approving for test execution..."
+            )
+
+        resume_payload = {
+            "chat_history": [],
+            "user_input": "",
+            "thread_id": hitl_thread_id,
+            "hitl_resume": True,
+            "hitl_action": "approve",
+        }
+
+        try:
+            resume_response = requests.post(
+                predict_url,
+                headers=headers,
+                json=resume_payload,
+                timeout=timeout,
+            )
+        except requests.exceptions.Timeout:
+            execution_time = time.time() - start_time
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                error=f"HITL resume request timed out after {timeout}s",
+            )
+        except Exception as e:
+            execution_time = time.time() - start_time
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                error=f"HITL resume request failed: {e}",
+            )
+
+        execution_time = time.time() - start_time
+
+        if resume_response.status_code not in (200, 201):
+            error_text = resume_response.text if resume_response.text else "No response body"
+            
+            # Special handling for HTTP 400: Check if this is a ToolException/ValidationError
+            # being incorrectly interpreted as a HITL interrupt.
+            # If the error body contains ToolException or ValidationError traceback,
+            # this is NOT a HITL interrupt - it's a pipeline crash that should be reported.
+            if resume_response.status_code == 400:
+                if "ToolException" in error_text or "ValidationError" in error_text:
+                    if logger:
+                        logger.debug(
+                            f"HTTP 400 contains ToolException/ValidationError - "
+                            f"this is a pipeline crash, not a HITL interrupt. "
+                            f"Returning error to caller."
+                        )
+                    # Parse the original error from the response if possible
+                    try:
+                        error_data = resume_response.json()
+                        # Return the original error, not the HITL resume failure
+                        return process_pipeline_result(
+                            result_data=error_data,
+                            pipeline_id=pipeline_id,
+                            pipeline_name=pipeline_name,
+                            version_id=version_id,
+                            execution_time=execution_time,
+                            logger=logger,
+                        )
+                    except json.JSONDecodeError:
+                        pass  # Fall through to generic error handling
+            
+            if logger:
+                logger.http_error(
+                    resume_response.status_code,
+                    error_text,
+                    context=f"HITL resume POST {predict_url}",
+                )
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                error=f"HITL resume HTTP {resume_response.status_code}: {error_text}",
+            )
+
+        try:
+            result_data = resume_response.json()
+        except json.JSONDecodeError:
+            return PipelineResult(
+                success=False,
+                pipeline_id=pipeline_id,
+                pipeline_name=pipeline_name,
+                version_id=version_id,
+                execution_time=execution_time,
+                output=resume_response.text,
+                error="HITL resume response is not valid JSON",
+            )
+
+        if logger:
+            logger.debug(f"HITL resume #{hitl_approvals} completed, checking for further interrupts...")
+
     return process_pipeline_result(
         result_data=result_data,
         pipeline_id=pipeline_id,
@@ -974,8 +1197,8 @@ def main():
         parser.error("Either pipeline_id or --name is required")
 
     # Load configuration
-    base_url = args.base_url or load_from_env("BASE_URL") or load_from_env("DEPLOYMENT_URL") or "http://192.168.68.115"
-    project_id = args.project_id or int(load_from_env("PROJECT_ID") or "2")
+    base_url = args.base_url or load_base_url_from_env() or "http://192.168.68.115"
+    project_id = args.project_id or load_project_id_from_env() or 2
     headers = get_auth_headers()
 
     if "Authorization" not in headers:

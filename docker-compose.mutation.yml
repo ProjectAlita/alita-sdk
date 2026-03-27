@@ -1,0 +1,47 @@
+# Dedicated compose file for distributed mutation testing.
+# Spins up 3 independent workers, each with its own copy of the source code.
+# The cosmic-ray coordinator (run locally) distributes mutations over HTTP.
+#
+# Usage:
+#   1. Build + start workers:
+#        docker compose -f docker-compose.mutation.yml up --build -d
+#
+#   2. Init session (first time only):
+#        cosmic-ray init cosmic-ray-security.toml cr-security.sqlite
+#        cosmic-ray init cosmic-ray-guard.toml    cr-guard.sqlite
+#
+#   3. Run mutations (distributed across 3 workers, ~3x faster):
+#        cosmic-ray exec cosmic-ray-security.toml cr-security.sqlite
+#        cosmic-ray exec cosmic-ray-guard.toml    cr-guard.sqlite
+#
+#   4. View results:
+#        cr-report cr-security.sqlite --show-pending
+#        cr-html   cr-security.sqlite > report-security.html
+#
+#   5. Stop workers:
+#        docker compose -f docker-compose.mutation.yml down
+
+services:
+  mutation-worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.mutation-worker
+    container_name: cr-worker-1
+    ports:
+      - "8001:8080"
+
+  mutation-worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.mutation-worker
+    container_name: cr-worker-2
+    ports:
+      - "8002:8080"
+
+  mutation-worker-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.mutation-worker
+    container_name: cr-worker-3
+    ports:
+      - "8003:8080"

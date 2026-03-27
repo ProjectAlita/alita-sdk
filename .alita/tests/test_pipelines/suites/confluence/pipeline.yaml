@@ -12,9 +12,9 @@ description: Confluence toolkit integration tests
 env_mapping:
   toolkit_config: ${CONFLUENCE_CONFIG_PATH:../../configs/confluence-config.json}
   space: ${CONFLUENCE_SPACE:AT}
-  base_url: ${CONFLUENCE_BASE_URL:https://epamelitea.atlassian.net/}
-  api_key: ${CONFLUENCE_API_KEY}
-  username: ${CONFLUENCE_USERNAME}
+  confluence_api_key: ${CONFLUENCE_API_KEY}
+  confluence_username: ${CONFLUENCE_USERNAME}
+  confluence_base_url: ${CONFLUENCE_BASE_URL:https://epamelitea.atlassian.net/}
 
 # Setup steps executed before running tests
 # Steps are executed in order; if a step fails, setup stops
@@ -26,9 +26,9 @@ setup:
       config_type: confluence
       alita_title: ${CONFLUENCE_SECRET_NAME:confluence}
       data:
-        api_key: ${CONFLUENCE_API_KEY}
-        base_url: ${CONFLUENCE_BASE_URL:https://epamelitea.atlassian.net/}
-        username: ${CONFLUENCE_USERNAME}
+        api_key: ${confluence_api_key}
+        base_url: ${confluence_base_url}
+        username: ${confluence_username}
 
   # Step 2: Create or update the Confluence toolkit on the platform
   - name: Create Confluence Toolkit

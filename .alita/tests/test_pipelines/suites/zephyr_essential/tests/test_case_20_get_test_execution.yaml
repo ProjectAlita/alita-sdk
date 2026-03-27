@@ -242,7 +242,7 @@ nodes:
         value: []
       system:
         type: fixed
-        value: You are a strict quality assurance validator. Only return valid JSON.
+        value: You are a strict quality assurance validator. Return ONLY a valid JSON object. Do not include any text, explanation, or markdown before or after the JSON object.
       task:
         type: fstring
         value: |

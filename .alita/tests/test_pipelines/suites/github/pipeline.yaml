@@ -54,39 +54,6 @@ setup:
       - key: GITHUB_TOOLKIT_NAME
         value: $.name
 
-  # Step 3: Create a test branch for write operations
-  - name: Create Test Branch
-    type: toolkit_invoke
-    enabled: true
-    config:
-      toolkit_id: ${GITHUB_TOOLKIT_ID}
-      tool_name: create_branch
-      tool_params:
-        proposed_branch_name: tc-test-${TIMESTAMP}
-        from_branch: ${GITHUB_BASE_BRANCH:main}
-    continue_on_error: true  # Branch may already exist
-    save_to_env:
-      - key: GITHUB_TEST_BRANCH
-        value: $.result.branch_name
-
-  # Step 4: Create test issue for read tests
-  - name: Create Test Issue
-    type: toolkit_invoke
-    enabled: true
-    config:
-      toolkit_id: ${GITHUB_TOOLKIT_ID}
-      tool_name: create_issue
-      tool_params:
-        title: "[Test] Automated Test Issue"
-        body: |
-          This issue is used for automated testing of the GitHub toolkit.
-          Do not close or delete this issue.
-        labels: ["test", "automated"]
-    continue_on_error: true  # Issue may already exist
-    save_to_env:
-      - key: GITHUB_TEST_ISSUE_NUMBER
-        value: $.result.number
-
 # Composable pipelines - seeded first, used by hooks and other pipelines
 # These are reusable pipeline components that can be invoked conditionally
 composable_pipelines: []
@@ -113,8 +80,6 @@ execution:
   substitutions:
     GITHUB_TOOLKIT_ID: ${GITHUB_TOOLKIT_ID}
     GITHUB_TOOLKIT_NAME: ${GITHUB_TOOLKIT_NAME}
-    GITHUB_TEST_BRANCH: ${GITHUB_TEST_BRANCH}
-    GITHUB_TEST_ISSUE_NUMBER: ${GITHUB_TEST_ISSUE_NUMBER}
     DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-5-mini}
 
   # Execution settings
@@ -126,18 +91,6 @@ execution:
 # Cleanup steps executed after tests complete
 # Steps are executed in order; failures are logged but don't stop cleanup
 cleanup:
-  # Step 1: Delete test branches created during tests
-  # Note: This requires a delete_branch tool in the toolkit
-  - name: Delete Test Branch
-    type: toolkit_invoke
-    config:
-      toolkit_id: ${GITHUB_TOOLKIT_ID}
-      tool_name: delete_branch
-      tool_params:
-        branch_name: ${GITHUB_TEST_BRANCH}
-        force: true  # Allow deleting even if it's the active branch
-    continue_on_error: true
-
   # Step 2: Close test PRs
   # Note: This requires close_pull_request tool in the toolkit
   - name: Close Test Pull Requests

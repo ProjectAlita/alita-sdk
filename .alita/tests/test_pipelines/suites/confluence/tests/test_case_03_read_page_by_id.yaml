@@ -31,7 +31,7 @@ nodes:
       - tool_result
     structured_output: true
     tool: read_page_by_id
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results
 
   - id: process_results

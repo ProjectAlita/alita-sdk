@@ -140,8 +140,30 @@ nodes:
     structured_output: true
     tool: rename_wiki_page
     toolkit_name: ado-wiki-testing
-    transition: validate_rename
-  - id: validate_rename
+    transition: cleanup_wiki_page
+  - id: cleanup_wiki_page
+    type: toolkit
+    continue_on_error: true
+    input:
+      - wiki_identifier
+      - new_page_name
+    input_mapping:
+      page_name:
+        type: variable
+        value: new_page_name
+      wiki_identified:
+        type: variable
+        value: wiki_identifier
+      wiki_identifier:
+        type: variable
+        value: wiki_identifier
+    output:
+      - cleanup_result
+    structured_output: true
+    tool: delete_page_by_path
+    toolkit_name: ado-wiki-testing
+    transition: validate_rename_result
+  - id: validate_rename_result
     type: llm
     input:
       - tool_result
@@ -178,25 +200,4 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
-    transition: cleanup_wiki_page
-  - id: cleanup_wiki_page
-    type: toolkit
-    input:
-      - wiki_identifier
-      - new_page_name
-    input_mapping:
-      page_name:
-        type: variable
-        value: new_page_name
-      wiki_identified:
-        type: variable
-        value: wiki_identifier
-      wiki_identifier:
-        type: variable
-        value: wiki_identifier
-    output:
-      - cleanup_result
-    structured_output: true
-    tool: delete_page_by_path
-    toolkit_name: ado-wiki-testing
     transition: END

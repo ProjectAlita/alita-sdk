@@ -59,29 +59,14 @@ nodes:
         value: []
       system:
         type: fixed
-        value: You are a test data generator. Generate random, unique test data for Confluence page testing.
+        value: You are a test data generator. Be concise. Do NOT add explanations.
       task:
         type: fstring
         value: |
-          Generate random test data for a Confluence page update test using timestamp: {timestamp}
+          Generate test data for Confluence page update test. Timestamp: {timestamp}
 
-          Create unique and randomized values for:
-          1. Page title - must include TC_10_Update and timestamp, plus a random UUID or random words
-          2. Initial body content - generate random HTML paragraph with diverse content (200-300 chars)
-          3. Updated body content - generate completely different random HTML content (200-300 chars)
-
-          Requirements:
-          - Use varied vocabulary and realistic content
-          - Make initial and updated content clearly different
-          - Include proper HTML paragraph tags
-          - Ensure page title is unique using timestamp and random elements
-
-              "page_title": "unique title with TC_10_Update_{timestamp}_randomid",
-              "initial_body": "<p>Random initial content here...</p>",
-              "updated_body": "<p>Completely different updated content here...</p>"
-
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the fields object. Do not use markdown ```json. Do not include explanations.
+          Return ONLY this JSON (no markdown, no extra text):
+          {{"page_title": "TC_10_Update_{timestamp}_auto", "initial_body": "<p>Initial test content {timestamp}.</p>", "updated_body": "<p>Updated test content {timestamp} v2.</p>"}}
     model: gpt-4o
     output:
       - test_data
@@ -120,7 +105,7 @@ nodes:
       - create_result
     structured_output: true
     tool: create_page
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: extract_page_id
   - id: extract_page_id
     type: llm
@@ -132,21 +117,23 @@ nodes:
         value: []
       system:
         type: fixed
-        value: You are a data extraction assistant.
+        value: You are a data extractor. Return only the requested JSON. No markdown, no explanation.
       task:
         type: fstring
         value: |
-          Extract the page ID from the create_page result.
+          Extract the numeric page ID from the following Confluence create_page tool output.
 
-          Create Result: {create_result}
+          Tool Output: {create_result}
 
-          Find the 'id' field in the page details and return ONLY the page ID as a string.
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the page ID as a plain string (no JSON, no quotes, no explanations).
+          The output contains a Details dict with an 'id' field (a numeric string like '261062657').
+          Return ONLY this JSON (no markdown, no extra text):
+          {{"page_id": "<numeric_id_string>"}}
     model: gpt-4o
     output:
       - page_id
-    structured_output: false
+    structured_output: true
+    structured_output_dict:
+      page_id: str
     transition: update_page
   - id: update_page
     type: toolkit
@@ -172,7 +159,7 @@ nodes:
       - update_result
     structured_output: true
     tool: update_page_by_id
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: read_updated_page
   - id: read_updated_page
     type: toolkit
@@ -186,7 +173,7 @@ nodes:
       - read_result
     structured_output: true
     tool: read_page_by_id
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: validate_update
   - id: validate_update
     type: llm
@@ -201,39 +188,29 @@ nodes:
         value: []
       system:
         type: fixed
-        value: You are a quality assurance validator.
+        value: You are a quality assurance validator. Return only the requested JSON. No markdown, no explanation.
       task:
         type: fstring
         value: |
-          Analyze the update and read results.
+          Analyze the update and read results for a Confluence page update test. Keep response under 200 tokens.
 
           Update Result: {update_result}
           Read Result: {read_result}
           Page ID: {page_id}
-          Expected Body: {updated_body}
+          Expected Updated Body: {updated_body}
 
-          Perform the following checks:
+          Checks:
+          1. update_successful: update result contains "updated successfully" or "success"
+          2. page_id_in_result: page_id value appears in update result
+          3. content_updated: read result contains words from the expected updated body
+          4. has_labels: update result mentions "label", "automation", or "updated"
 
-          1. Verify update was successful (update result contains "updated successfully").
-          2. Verify page ID is mentioned in update result.
-          3. Check if read result contains the updated content.
-          4. Validate that labels information is present in update result.
-
-          Return a JSON object with the following structure:
-
-          {{
-            "validation_results": {{
-              "update_successful": boolean (true if update completed),
-              "page_id_in_result": boolean (true if page ID is in update result),
-              "content_updated": boolean (true if read result contains updated content),
-              "has_labels": boolean (true if labels mentioned in update result)
-            }}
-          }}
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+          Return ONLY this JSON (no markdown, no extra text):
+          {{"validation_results": {{"update_successful": boolean, "page_id_in_result": boolean, "content_updated": boolean, "has_labels": boolean}}}}
     model: gpt-4o
     output:
       - test_results
+    structured_output: true
     structured_output_dict:
       test_results: dict
     transition: delete_page
@@ -248,33 +225,22 @@ nodes:
         value: []
       system:
         type: fixed
-        value: You are a quality assurance validator.
+        value: You are a quality assurance validator. Be concise. Do NOT echo full inputs.
       task:
         type: fstring
         value: |
-          Analyze the complete workflow results.
+          Analyze the complete workflow results. Keep response under 300 tokens.
 
           Delete Result: {delete_result}
           Validation Results: {test_results}
 
-          Perform the following checks:
+          Checks:
+          1. Page deleted successfully (delete result contains success/deleted message).
+          2. Update was successful (validation_results.update_successful is true).
+          3. Content was verified (validation_results.content_updated is true).
 
-          1. Verify the page was deleted successfully.
-          2. Evaluate overall test success (create, update, read, delete all succeeded).
-
-          Return a JSON object named test_results with the following structure:
-
-          {{
-            "test_passed": boolean (true if all operations succeeded),
-            "tool_executed": boolean (true if all tools ran without errors),
-            "page_created": boolean (true),
-            "page_updated": boolean (from validation_results),
-            "content_verified": boolean (from validation_results),
-            "page_deleted": boolean (true if delete was successful)
-            "failed_checks": [string] // list of failed assertions
-          }}
-
-          Return **EXACTLY** **NONNEGOTIATABLE** only the `test_results` JSON object. Do not use markdown ```json when returning the json. Do not include any explanations, summaries, or additional text.
+          Return ONLY this JSON (no markdown, no extra text):
+          {{"test_passed": boolean, "tool_executed": true, "page_created": true, "page_updated": boolean, "content_verified": boolean, "page_deleted": boolean, "failed_checks": []}}
     model: gpt-4o
     output:
       - test_results
@@ -296,5 +262,5 @@ nodes:
       - delete_result
     structured_output: false
     tool: delete_page
-    toolkit_name: confluence-testing
+    toolkit_name: ${CONFLUENCE_TOOLKIT_NAME}
     transition: process_results

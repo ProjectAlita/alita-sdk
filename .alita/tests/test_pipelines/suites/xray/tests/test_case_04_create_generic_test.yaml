@@ -194,4 +194,45 @@ nodes:
       - test_results
     structured_output_dict:
       test_results: dict
+    transition: extract_json_result
+
+  - id: extract_json_result
+    type: code
+    code:
+      type: fixed
+      value: |
+        import json
+        import re
+
+        # Extract JSON from LLM response which may contain prose + JSON block
+        raw = alita_state.get("test_results", "")
+        result_dict = {}
+
+        if isinstance(raw, dict) and "test_passed" in raw:
+            result_dict = raw
+        elif isinstance(raw, str) and raw.strip():
+            # Try direct parse first
+            try:
+                result_dict = json.loads(raw.strip())
+            except Exception:
+                # Extract JSON block from markdown fences or prose
+                m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw, re.DOTALL)
+                if not m:
+                    m = re.search(r'(\{[^{}]*"test_passed"[^{}]*\})', raw, re.DOTALL)
+                if m:
+                    try:
+                        result_dict = json.loads(m.group(1))
+                    except Exception:
+                        pass
+
+        if not result_dict or "test_passed" not in result_dict:
+            result_dict = {"test_passed": None, "error": "Could not extract JSON from LLM response"}
+
+        # Wrap in test_results so framework finds it via result.test_results.test_passed path
+        {"test_results": result_dict}
+    input:
+      - test_results
+    output:
+      - test_results
+    structured_output: true
     transition: END

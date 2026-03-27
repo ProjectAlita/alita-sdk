@@ -119,13 +119,17 @@ class CLIConfig:
     @property
     def deployment_url(self) -> Optional[str]:
         """Get deployment URL from environment or config.json."""
-        return self._get_config_value('DEPLOYMENT_URL', 'deployment_url')
+        # Check ELITEA_DEPLOYMENT_URL first, then DEPLOYMENT_URL, then BASE_URL
+        return (os.getenv('ELITEA_DEPLOYMENT_URL') or 
+                self._get_config_value('DEPLOYMENT_URL', 'deployment_url') or
+                os.getenv('BASE_URL'))
     
     @property
     def project_id(self) -> Optional[int]:
         """Get project ID from environment or config.json."""
         try:
-            value = self._get_config_value('PROJECT_ID', 'project_id')
+            # Check ELITEA_PROJECT_ID first, then PROJECT_ID
+            value = os.getenv('ELITEA_PROJECT_ID') or self._get_config_value('PROJECT_ID', 'project_id')
             return int(value) if value else None
         except (TypeError, ValueError):
             return None
@@ -133,7 +137,10 @@ class CLIConfig:
     @property
     def api_key(self) -> Optional[str]:
         """Get API key from environment or config.json."""
-        return self._get_config_value('API_KEY', 'api_key')
+        # Check ELITEA_TOKEN first, then API_KEY, then AUTH_TOKEN
+        return (os.getenv('ELITEA_TOKEN') or 
+                self._get_config_value('API_KEY', 'api_key') or
+                os.getenv('AUTH_TOKEN'))
     
     @property
     def default_model(self) -> Optional[str]:

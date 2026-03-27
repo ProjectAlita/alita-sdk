@@ -192,6 +192,19 @@ JIRA_TOKEN=...
 
 Override: `export ALITA_ENV_FILE=/path/to/.env`
 
+### Docker Image (ghcr.io)
+
+The CI workflows and local runs use a pre-built Docker image hosted on GitHub Container Registry (`ghcr.io`).
+
+**Requirements before pulling the image:**
+- You must be logged in to `ghcr.io`:
+  ```bash
+  echo $GITHUB_TOKEN | docker login ghcr.io -u <your-github-username> --password-stdin
+  ```
+- The token used for login must have the **`read:packages`** permission (GitHub Personal Access Token or `GITHUB_TOKEN` in Actions).
+
+Without this, `docker pull ghcr.io/projectalita/alita-sdk:pyodide` will fail with an authorization error.
+
 ## Common Commands
 
 ```bash

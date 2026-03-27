@@ -2,15 +2,14 @@ name: "SP11 - read_document: Read file content"
 priority: Critical
 description: |
   Verify the SharePoint 'read_document' tool reads file content successfully.
-  Self-contained test that uploads a file before reading it.
+  Uses a pre-existing permanent test fixture file (DO_NOT_DELETE_test-document.txt).
   
   Objective: Test basic file reading functionality
   
   Expected Behavior:
-  - File is uploaded successfully
   - Tool executes successfully without errors
   - Returns file content as string or structured data
-  - Content matches uploaded data
+  - Content is not empty
   - No error messages in output
 
 toolkits:
@@ -18,27 +17,9 @@ toolkits:
     name: ${SHAREPOINT_TOOLKIT_NAME}
 
 state:
-  folder_path:
+  file_path:
     type: str
-    value: "sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles"
-  filedata:
-    type: str
-    value: |
-      This is a test document created by the SharePoint SDK test suite.
-      Test ID: SP11
-      Purpose: Validate read_document functionality
-      Content: This file will be read back to verify the tool works correctly.
-      Timestamp: ${TIMESTAMP}
-  filename:
-    type: str
-    value: "SP11_test_document.txt"
-  replace:
-    type: bool
-    value: true
-  upload_result:
-    type: dict
-  server_relative_path:
-    type: str
+    value: "/sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles/${TEST_FILE_NAME}"
   document_content:
     type: dict
   error_indicators:
@@ -47,69 +28,19 @@ state:
   test_results:
     type: dict
 
-entry_point: upload_test_file
+entry_point: invoke_read_document
 
 nodes:
-  - id: upload_test_file
-    type: toolkit
-    tool: upload_file
-    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
-    input:
-      - folder_path
-      - filedata
-      - filename
-      - replace
-    input_mapping:
-      folder_path:
-        type: variable
-        value: folder_path
-      filedata:
-        type: variable
-        value: filedata
-      filename:
-        type: variable
-        value: filename
-      replace:
-        type: variable
-        value: replace
-    output:
-      - upload_result
-    structured_output: true
-    transition: convert_path
-
-  - id: convert_path
-    type: code
-    input:
-      - folder_path
-      - filename
-    code:
-      type: fixed
-      value: |
-        # Get variables from state
-        folder_path = alita_state.get('folder_path')
-        filename = alita_state.get('filename')
-        
-        # Construct server-relative path
-        # We know the folder and filename, so build the path directly
-        # Format: /sites/ALITA/Shared Documents/folder/file.txt
-        server_relative_path = f"/{folder_path}/{filename}"
-        
-        {"server_relative_path": server_relative_path}
-    output:
-      - server_relative_path
-    structured_output: true
-    transition: invoke_read_document
-
   - id: invoke_read_document
     type: toolkit
     tool: read_document
     toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
     input:
-      - server_relative_path
+      - file_path
     input_mapping:
       path:
         type: variable
-        value: server_relative_path
+        value: file_path
     output:
       - document_content
     structured_output: true
@@ -119,7 +50,6 @@ nodes:
     type: llm
     model: gpt-4o-2024-11-20
     input:
-      - upload_result
       - document_content
       - error_indicators
     input_mapping:
@@ -131,24 +61,21 @@ nodes:
         value: |
           analyze the output from the 'read_document' tool execution.
 
-          tool executed: read_document (after uploading test file)
-          upload result: {upload_result}
+          tool executed: read_document
           document content: {document_content}
           error indicators: {error_indicators}
 
           expected behavior:
-          - file was uploaded successfully
           - read_document executes successfully without errors
           - returns file content (string or structured data)
           - content is not empty
           - no error messages in output
 
           evaluate:
-          1. was the file uploaded successfully?
-          2. did the read_document tool execute successfully?
-          3. are there any error indicators in the output?
-          4. is content returned (not null or empty)?
-          5. is the content in expected format?
+          1. did the read_document tool execute successfully?
+          2. are there any error indicators in the output?
+          3. is content returned (not null or empty)?
+          4. is the content in expected format?
 
           return a json object with:
           {{
