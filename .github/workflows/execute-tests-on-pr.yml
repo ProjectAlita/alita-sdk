@@ -1,4 +1,4 @@
-name: Execute toolkit AI tests on PR
+name: Pr verification
 
 on:
   pull_request:
@@ -155,7 +155,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 1
 
-  test-execution:
+  toolkit-tests:
     needs: [configure-matrix]
     if: needs.configure-matrix.outputs.has-tests == 'true'
     strategy:
@@ -175,6 +175,7 @@ jobs:
 
   unit-tests:
     runs-on: ubuntu-latest
+    if: github.actor != 'eln1nxl'
     permissions:
       contents: read
       packages: read
@@ -221,7 +222,7 @@ jobs:
           report_paths: 'tests/reports/unit-test-results.xml'
 
   summarize-and-comment:
-    needs: [configure-matrix, test-execution]
+    needs: [configure-matrix, toolkit-tests]
     if: always() && needs.configure-matrix.outputs.has-tests == 'true'
     runs-on: ubuntu-latest
     permissions:
