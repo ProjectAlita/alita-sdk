@@ -710,12 +710,10 @@ nodes:
         value: []
       system:
         type: fixed
-        value: |
-          You are a helpful assistant. Inform the user that the work item hierarchy data has been successfully fetched and saved.
+        value: You are a helpful assistant. Inform the user that the work item hierarchy data has been successfully fetched and saved.
       task:
         type: fstring
-        value: |
-          The data has been fetched and saved to artifact: {artifact_filepath}
+        value: The data has been fetched and saved to artifact: {artifact_filepath}
     output:
       - operation_result
     structured_output: false
