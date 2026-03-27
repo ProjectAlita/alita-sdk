@@ -174,11 +174,26 @@ nodes:
 
   # ── Error formatting ──────────────────────────────────────────────
   - id: FormatError
-    type: printer
+    type: llm
+    input:
+      - error_message
+      - feature_id
     input_mapping:
-      printer:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a helpful assistant. Present the error message clearly and concisely to the user.
+      task:
         type: fstring
-        value: "❌ Error fetching work item {feature_id}:\n{error_message}"
+        value: |
+          Failed to fetch work item {feature_id}.
+          Error: {error_message}
+    output:
+      - operation_result
+    structured_output: false
     transition: END
 
   # ── Cache check ───────────────────────────────────────────────────
@@ -686,9 +701,22 @@ nodes:
     toolkit_name: epic_artifacts
     transition: ReturnFilename
   - id: ReturnFilename
-    type: printer
+    type: llm
+    input:
+      - artifact_filepath
     input_mapping:
-      printer:
-        type: variable
-        value: artifact_filepath
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a helpful assistant. Inform the user that the work item hierarchy data has been successfully fetched and saved.
+      task:
+        type: fstring
+        value: |
+          The data has been fetched and saved to artifact: {artifact_filepath}
+    output:
+      - operation_result
+    structured_output: false
     transition: END
