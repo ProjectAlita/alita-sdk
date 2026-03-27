@@ -584,6 +584,7 @@ nodes:
                 remove_ado_links(item)
 
         description_raw = feature_data.get('System.Description', '')
+        feature_links = extract_links(description_raw)
 
         feature = {
             'id': feature_id,
@@ -595,7 +596,6 @@ nodes:
             'assigned_to': feature_data.get('System.AssignedTo', 'N/A'),
             'created_date': feature_data.get('System.CreatedDate', ''),
             'changed_date': feature_data.get('System.ChangedDate', ''),
-            'links': extract_links(description_raw),
             'children_ids': []
         }
 
@@ -658,15 +658,10 @@ nodes:
             if not updated:
                 break
 
-        max_level = max((d['level'] for d in dependencies.values()), default=0)
-
         hierarchy_data = {
             'feature': feature,
-            'dependencies': dependencies,
-            'metadata': {
-                'total_items': len(dependencies),
-                'max_level': max_level
-            }
+            'dependent_items': dependencies,
+            'dependent_links': feature_links,
         }
 
         {'hierarchy_data': hierarchy_data, 'hierarchy_json': json.dumps(hierarchy_data, indent=2, ensure_ascii=False)}
