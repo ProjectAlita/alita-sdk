@@ -174,25 +174,11 @@ nodes:
 
   # ── Error formatting ──────────────────────────────────────────────
   - id: FormatError
-    type: code
-    code:
-      type: fixed
-      value: |-
-        import json
-        error_message = alita_state.get('error_message', 'Unknown error')
-        feature_id = alita_state.get('feature_id', 0)
-        operation_result = json.dumps({
-            "status": "error",
-            "item_id": feature_id,
-            "error": error_message
-        })
-        {"operation_result": operation_result}
-    input:
-      - error_message
-      - feature_id
-    output:
-      - operation_result
-    structured_output: true
+    type: printer
+    input_mapping:
+      printer:
+        type: fstring
+        value: "❌ Error fetching work item {feature_id}:\n{error_message}"
     transition: END
 
   # ── Cache check ───────────────────────────────────────────────────
@@ -700,17 +686,9 @@ nodes:
     toolkit_name: epic_artifacts
     transition: ReturnFilename
   - id: ReturnFilename
-    type: code
-    code:
-      type: fixed
-      value: |-
-        import json
-        artifact_filepath = alita_state.get('artifact_filepath', '')
-        {"operation_result": json.dumps([artifact_filepath])}
-    input:
-      - artifact_filepath
-    output:
-      - operation_result
-    structured_output: true
+    type: printer
+    input_mapping:
+      printer:
+        type: variable
+        value: artifact_filepath
     transition: END
-  # operation_result is the output for agent-to-agent communication
