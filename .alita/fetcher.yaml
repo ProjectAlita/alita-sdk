@@ -52,6 +52,9 @@ state:
   hierarchy_data:
     type: dict
     value: {}
+  hierarchy_json:
+    type: string
+    value: ''
   operation_result:
     type: string
     value: ''
@@ -666,13 +669,14 @@ nodes:
             }
         }
 
-        {'hierarchy_data': hierarchy_data}
+        {'hierarchy_data': hierarchy_data, 'hierarchy_json': json.dumps(hierarchy_data, indent=2, ensure_ascii=False)}
     input:
       - feature_data
       - feature_id
       - all_fetched_items
     output:
       - hierarchy_data
+      - hierarchy_json
     structured_output: true
     transition: SaveOutput
 
@@ -680,15 +684,15 @@ nodes:
   - id: SaveOutput
     type: toolkit
     input:
-      - hierarchy_data
+      - hierarchy_json
       - artifact_filepath
     input_mapping:
       bucket_name:
         type: fixed
         value: null
       filedata:
-        type: fstring
-        value: '{hierarchy_data}'
+        type: variable
+        value: hierarchy_json
       filename:
         type: variable
         value: artifact_filepath
