@@ -120,14 +120,16 @@ GetFieldWithImageDescriptions = create_model(
     jira_issue_key=(str, Field(description="Jira issue key from which field with images will be extracted, e.g. TEST-1234")),
     field_name=(str, Field(description="Field name containing images to be processed. Common values are 'description', 'comment', or custom fields like 'customfield_10300'")),
     prompt=(Optional[str], Field(description="Custom prompt to use for image description generation. If not provided, a default prompt will be used", default=None)),
-    context_radius=(Optional[int], Field(description="Number of characters to include before and after each image for context. Default is 500", default=500))
+    context_radius=(Optional[int], Field(description="Number of characters to include before and after each image for context. Default is 500", default=500)),
+    process_images=(Optional[bool], Field(description="Whether to process images with LLM and replace references with descriptions. Set to False to return raw field content without image processing. Default is True", default=True))
 )
 
 GetCommentsWithImageDescriptions = create_model(
     "GetCommentsWithImageDescriptionsModel",
     jira_issue_key=(str, Field(description="Jira issue key from which comments with images will be extracted, e.g. TEST-1234")),
     prompt=(Optional[str], Field(description="Custom prompt to use for image description generation. If not provided, a default prompt will be used", default=None)),
-    context_radius=(Optional[int], Field(description="Number of characters to include before and after each image for context. Default is 500", default=500))
+    context_radius=(Optional[int], Field(description="Number of characters to include before and after each image for context. Default is 500", default=500)),
+    process_images=(Optional[bool], Field(description="Whether to process images with LLM and replace references with descriptions. Set to False to return raw comments without image processing. Default is True", default=True))
 )
 
 GetRemoteLinks = create_model(
@@ -1270,7 +1272,9 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             # Get the LLM instance
             llm = self.llm
             if not llm:
-                return "[LLM not available for image processing]"
+                raise ToolException(
+                    "LLM is required for image processing but is not configured in this toolkit instance."
+                )
 
             # Try to load and validate the image with PIL instead of using imghdr
             try:
@@ -1451,7 +1455,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         return f"Unsupported field content type: {type(field_data)}. Expected a string, list, or dict."
 
     def get_field_with_image_descriptions(self, jira_issue_key: str, field_name: str, prompt: Optional[str] = None,
-                                          context_radius: int = 500):
+                                          context_radius: int = 500, process_images: bool = True):
         """
         Get a field from Jira issue and augment any images in it with textual descriptions that include
         image names and contextual information from surrounding text.
@@ -1459,17 +1463,20 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         This method will:
         1. Extract the specified field content from Jira
         2. Detect images in the content
-        3. Retrieve and process each image with an LLM, providing surrounding context
-        4. Replace image references with the generated text descriptions
+        3. Retrieve and process each image with an LLM, providing surrounding context (if process_images=True)
+        4. Replace image references with the generated text descriptions (if process_images=True)
 
         Args:
             jira_issue_key: The Jira issue key to retrieve field from (e.g., 'TEST-1234')
             field_name: The field containing images (e.g., 'description')
             prompt: Custom prompt for the LLM when analyzing images. If None, a default prompt will be used.
             context_radius: Number of characters to include before and after each image for context. Default is 500.
+            process_images: Whether to process images with LLM. Set to False to return raw field content
+                            without image processing. Default is True.
 
         Returns:
-            The field content with image references replaced with contextual descriptions
+            The field content with image references replaced with contextual descriptions,
+            or raw field content when process_images=False
         """
         try:
             # Get the specified field from the Jira issue
@@ -1484,6 +1491,16 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
 
             # Handle multiple images or non-string content
             field_content = self._extract_image_data(field_content)
+
+            if not process_images:
+                logger.info(f"Image processing skipped for field '{field_name}' of issue '{jira_issue_key}' (process_images=False)")
+                return f"Field '{field_name}' from issue '{jira_issue_key}':\n\n{field_content}"
+
+            if not self.llm:
+                raise ToolException(
+                    "LLM is required for image processing but is not configured in this toolkit instance. "
+                    "Please configure an LLM in the toolkit settings or set process_images=False to skip image processing."
+                )
 
             # Regular expression to find image references in Jira markup
             image_pattern = r'!([^!|]+)(?:\|[^!]*)?!'
@@ -1594,7 +1611,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             logger.error(f"Error retrieving attachment {image_ref}: {str(e)}")
             return f"[Image: {image_ref} - Error: {str(e)}]"
 
-    def get_processed_comments_list_with_image_description(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500):
+    def get_processed_comments_list_with_image_description(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500, process_images: bool = True):
         # Retrieve all comments for the issue
         comments = self._client.issue_get_comments(jira_issue_key)
 
@@ -1619,10 +1636,13 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             comment_created = comment.get('created', 'Unknown date')
             comment_body = self._extract_image_data(comment_body)
 
-            # Process the comment body by replacing image references with descriptions
-            processed_body = re.sub(image_pattern,
-                                    lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
-                                    comment_body)
+            if process_images:
+                # Process the comment body by replacing image references with descriptions
+                processed_body = re.sub(image_pattern,
+                                        lambda match: self.process_image_match(match, comment_body, attachment_resolver, context_radius, prompt),
+                                        comment_body)
+            else:
+                processed_body = comment_body
 
             # Add the processed comment to our results
             processed_comments.append({
@@ -1635,28 +1655,37 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
         
         return processed_comments
 
-    def get_comments_with_image_descriptions(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500):
+    def get_comments_with_image_descriptions(self, jira_issue_key: str, prompt: Optional[str] = None, context_radius: int = 500, process_images: bool = True):
         """
         Get all comments from Jira issue and augment any images in them with textual descriptions.
 
         This method will:
         1. Extract all comments from the specified Jira issue
         2. Detect images in each comment
-        3. Retrieve and process each image with an LLM, providing surrounding context
-        4. Replace image references with the generated text descriptions
+        3. Retrieve and process each image with an LLM, providing surrounding context (if process_images=True)
+        4. Replace image references with the generated text descriptions (if process_images=True)
 
         Args:
             jira_issue_key: The Jira issue key to retrieve comments from (e.g., 'TEST-1234')
             prompt: Custom prompt for the LLM when analyzing images. If None, a default prompt will be used.
             context_radius: Number of characters to include before and after each image for context. Default is 500.
+            process_images: Whether to process images with LLM. Set to False to return raw comments without
+                            image processing. Default is True.
 
         Returns:
-            The comments with image references replaced with contextual descriptions
+            The comments with image references replaced with contextual descriptions,
+            or raw comments when process_images=False
         """
         try:
+            if process_images and not self.llm:
+                raise ToolException(
+                    "LLM is required for image processing but is not configured in this toolkit instance. "
+                    "Please configure an LLM in the toolkit settings or set process_images=False to skip image processing."
+                )
             processed_comments = self.get_processed_comments_list_with_image_description(jira_issue_key=jira_issue_key,
                                                                                          prompt=prompt,
-                                                                                         context_radius=context_radius)
+                                                                                         context_radius=context_radius,
+                                                                                         process_images=process_images)
             if not processed_comments:
                 return f"No comments found for issue '{jira_issue_key}'"
             # Format the output

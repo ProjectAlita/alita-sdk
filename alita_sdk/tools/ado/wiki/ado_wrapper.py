@@ -508,6 +508,11 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                 logger.error(f"Failed to initialize repos wrapper for wiki '{wiki_identified}': {str(e)}")
 
         for image_name, image_url in matches:
+            # BUG 1 fix: skip images with empty URLs — cannot fetch or resolve them
+            if not image_url:
+                logger.warning(f"Skipping image '{image_name}': empty URL, leaving original markdown unchanged.")
+                continue
+
             if image_url.startswith("/.attachments/"):
                 try:
                     if repos_wrapper is None:
@@ -517,26 +522,24 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
                                                           image_description_prompt=image_description_prompt,
                                                           repos_wrapper=repos_wrapper)
                 except Exception as e:
-                    logger.error(f"Error parsing attachment: {str(e)}")
-                    description = f"Error parsing attachment: {image_url}"
+                    # Skip rather than replace with a corrupted description
+                    logger.warning(f"Skipping image '{image_name}': error parsing attachment '{image_url}': {str(e)}")
+                    continue
             else:
-                if not image_url:
-                    logger.warning(f"Skipping image '{image_name}' with empty URL")
-                    description = "[Image could not be processed: empty URL]"
-                else:
-                    try:
-                        response = requests.get(image_url)
-                        response.raise_for_status()
-                        file_content = response.content
-                        description = parse_file_content(
-                            file_content=file_content,
-                            file_name="image.png",
-                            llm=self.llm,
-                            prompt=image_description_prompt
-                        )
-                    except Exception as e:
-                        logger.error(f"Error fetching external image: {str(e)}")
-                        description = f"Error fetching external image: {image_url}"
+                try:
+                    response = requests.get(image_url)
+                    response.raise_for_status()
+                    file_content = response.content
+                    description = parse_file_content(
+                        file_content=file_content,
+                        file_name="image.png",
+                        llm=self.llm,
+                        prompt=image_description_prompt
+                    )
+                except Exception as e:
+                    # BUG 2 fix: skip rather than replace with a corrupted literal description
+                    logger.warning(f"Skipping image '{image_name}': error fetching external image '{image_url}': {str(e)}")
+                    continue
 
             new_image_markdown = f"![{image_name}]({description})"
             page_content = page_content.replace(f"![{image_name}]({image_url})", new_image_markdown)
