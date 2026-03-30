@@ -61,7 +61,8 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
         file_paths: List[str],
         bucket_name: str = None,
         offset: Optional[int] = None,
-        limit: Optional[int] = None
+        limit: Optional[int] = None,
+        skip_size_check: bool = True
     ) -> dict:
         """
         Read multiple files in batch from an artifact bucket.
@@ -71,6 +72,7 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             bucket_name: Bucket name. If not provided, uses toolkit-configured default bucket.
             offset: Starting line number for all files (1-indexed)
             limit: Number of lines to read from offset for all files
+            skip_size_check: If True, skip content size limit check and return full content
 
         Returns:
             Dict mapping file paths to their content
@@ -85,10 +87,12 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
             try:
                 if path.startswith('/'):
                     content = self.read_file(filepath=path, bucket_name=bucket_name,
-                                            start_line=start_line, end_line=end_line)
+                                            start_line=start_line, end_line=end_line,
+                                            skip_size_check=skip_size_check)
                 else:
                     content = self.read_file(filename=path, bucket_name=bucket_name,
-                                            start_line=start_line, end_line=end_line)
+                                            start_line=start_line, end_line=end_line,
+                                            skip_size_check=skip_size_check)
                 results[path] = content
             except Exception as e:
                 results[path] = f"Error reading file: {str(e)}"
@@ -218,6 +222,10 @@ class ArtifactWrapper(NonCodeIndexerToolkit):
                 description="Number of lines to read from offset for all files",
                 default=None,
                 ge=1
+            )),
+            skip_size_check=(bool, Field(
+                description="If True, skip content size limit check and return full file content.",
+                default=True
             )),
         )
 
@@ -421,7 +429,8 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
                   excel_by_sheets: bool = False,
                   filepath: str = None,
                   start_line: int = None,
-                  end_line: int = None):
+                  end_line: int = None,
+                  skip_size_check: bool = True):
         """
         Read a file from the artifact bucket.
         
@@ -441,6 +450,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
             filepath: Full path in /{bucket}/{filename} format (alternative to filename+bucket_name)
             start_line: Starting line number (1-indexed, inclusive) for partial read
             end_line: Ending line number (1-indexed, inclusive) for partial read
+            skip_size_check: If True, skip content size limit check and return full content
             
         Returns:
             File content or error message if content exceeds size limit
@@ -482,7 +492,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
             content = apply_line_slice(content, offset=offset, limit=limit)
 
         # Check content size limit (after slicing if applicable)
-        if isinstance(content, str) and len(content) > self.max_single_read_size:
+        if not skip_size_check and isinstance(content, str) and len(content) > self.max_single_read_size:
             line_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
             if start_line is not None or end_line is not None:
                 return f"[Content ({line_count} lines) still exceeds size limit. Use smaller range.]"
@@ -510,7 +520,7 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
         Returns:
             File content as string
         """
-        return self.read_file(filename=file_path, bucket_name=bucket_name)
+        return self.read_file(filename=file_path, bucket_name=bucket_name, skip_size_check=True)
     
     def _write_file(
         self,
@@ -874,7 +884,10 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
                         default=None)),
                     sheet_name=(Optional[str], Field(
                         description="Specifies which sheet to read. If it is None, then full document will be read.",
-                        default=None))
+                        default=None)),
+                    skip_size_check=(bool, Field(
+                        description="If True, skip content size limit check and return full file content.",
+                        default=True))
                 )
             },
             {
