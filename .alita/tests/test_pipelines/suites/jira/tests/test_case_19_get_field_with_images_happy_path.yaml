@@ -42,6 +42,9 @@ nodes:
       field_name:
         type: variable
         value: field_name
+      process_images:
+        type: fixed
+        value: false
     output:
       - tool_result
     structured_output: true
