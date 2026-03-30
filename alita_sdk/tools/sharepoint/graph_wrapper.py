@@ -65,19 +65,32 @@ class SharepointGraphWrapper(BaseSharepointWrapper):
             "Content-Type": content_type,
         }
 
+    @staticmethod
+    def _raise_with_body(resp: "requests.Response") -> None:
+        """Call raise_for_status() and include the Graph API response body in the
+        exception message so callers can log the actual error code."""
+        if resp.ok:
+            return
+        try:
+            body = resp.json()
+        except Exception:
+            body = resp.text
+        logging.error("Graph API HTTP %s for %s: %s", resp.status_code, resp.url, body)
+        resp.raise_for_status()
+
     def _get(self, url: str, params: Optional[dict] = None) -> dict:
         resp = requests.get(url, headers=self._auth_headers(), params=params, timeout=60)
-        resp.raise_for_status()
+        self._raise_with_body(resp)
         return resp.json()
 
     def _post(self, url: str, payload: dict) -> dict:
         resp = requests.post(url, headers=self._auth_headers(), json=payload, timeout=60)
-        resp.raise_for_status()
+        self._raise_with_body(resp)
         return resp.json()
 
     def _delete(self, url: str) -> None:
         resp = requests.delete(url, headers=self._auth_headers(), timeout=30)
-        resp.raise_for_status()
+        self._raise_with_body(resp)
 
     # ------------------------------------------------------------------ #
     #  Site / Drive resolution (lazily cached)                            #

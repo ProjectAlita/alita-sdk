@@ -139,6 +139,7 @@ class SharepointConfiguration(BaseModel):
         oauth_discovery_endpoint: str,
         scopes: Optional[List[str]],
         status: Optional[int] = None,
+        configuration_uuid: Optional[str] = None,
     ) -> "McpAuthorizationRequired":
         """Build a ``McpAuthorizationRequired`` exception with the same rich metadata
         shape that the MCP OAuth flow produces, so upstream handlers can treat
@@ -217,6 +218,8 @@ class SharepointConfiguration(BaseModel):
         }
         if scopes:
             resource_metadata["scopes_supported"] = scopes
+        if configuration_uuid:
+            resource_metadata["configuration_uuid"] = configuration_uuid
         log.debug(f"SharePoint resource_metadata: {resource_metadata}")
         return McpAuthorizationRequired(
             message=message,
@@ -229,7 +232,7 @@ class SharepointConfiguration(BaseModel):
         )
 
     @staticmethod
-    def _call_graph_api(site_url: str, access_token: str, oauth_discovery_endpoint: Optional[str], scopes: Optional[List[str]] = None) -> str | None:
+    def _call_graph_api(site_url: str, access_token: str, oauth_discovery_endpoint: Optional[str], scopes: Optional[List[str]] = None, configuration_uuid: Optional[str] = None) -> str | None:
         """Health-check an access token using the Microsoft Graph API.
 
         Used by both the delegated flow (Azure AD delegated tokens) and the
@@ -289,6 +292,7 @@ class SharepointConfiguration(BaseModel):
                     oauth_discovery_endpoint=oauth_discovery_endpoint,
                     scopes=scopes,
                     status=401,
+                    configuration_uuid=configuration_uuid,
                 )
             elif resp.status_code == 403:
                 return "Access forbidden - token lacks required Microsoft Graph permissions for this site"
@@ -371,6 +375,7 @@ class SharepointConfiguration(BaseModel):
             return err
 
         scopes = settings.get("scopes")
+        configuration_uuid = settings.get("configuration_uuid")
         access_token = settings.get("access_token")
         if not access_token:
             raise SharepointConfiguration._build_mcp_authorization_required(
@@ -381,10 +386,13 @@ class SharepointConfiguration(BaseModel):
                 site_url=site_url,
                 oauth_discovery_endpoint=oauth_discovery_endpoint,
                 scopes=scopes,
+                configuration_uuid=configuration_uuid,
             )
 
         # Use Graph API for health-check — delegated tokens are Graph tokens
-        return SharepointConfiguration._call_graph_api(site_url, access_token, oauth_discovery_endpoint, scopes)
+        return SharepointConfiguration._call_graph_api(
+            site_url, access_token, oauth_discovery_endpoint, scopes, configuration_uuid
+        )
 
     @staticmethod
     def _check_connection_client_credentials(settings: dict) -> str | None:
