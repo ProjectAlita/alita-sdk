@@ -35,9 +35,6 @@ nodes:
       jira_issue_key:
         type: variable
         value: issue_key
-      process_images:
-        type: fixed
-        value: false
     output:
       - tool_result
     structured_output: true
@@ -55,27 +52,37 @@ nodes:
       task:
         type: fstring
         value: |
-          Analyze the output from the 'get_comments_with_image_descriptions' tool called with process_images=false.
+          Analyze the output from the 'get_comments_with_image_descriptions' tool.
 
           Tool Result: {tool_result}
 
           Perform the following checks:
           1. Confirm the tool executed successfully (result is not empty or null).
           2. Result should contain comments with text content.
-          3. Since process_images=false was used, image processing was intentionally skipped.
-             Raw image references (e.g. "!filename.jpg|alt=..." or "!filename.png!") in the output are CORRECT and EXPECTED behavior.
-             Do NOT fail the test because images were not described - that is by design when process_images=false.
-          4. Only fail if:
-             - The result is empty or null (tool did not return any data)
-             - The result contains system failure indicators:
+          3. For images in comments, verify descriptions are meaningful:
+             - meaningful descriptions contain actual content analysis (not just error messages)
+             - expected warning patterns that indicate acceptable behavior (check if message contains these keywords):
+               * "identify" + "image" + "format" - PIL cannot read the format
+               * "loading image" or "load" + "error" - file corruption or unsupported format
+               * "converting image" or "convert" + "error" - image processing failed
+               * "attachment not found" or "not found" - image reference doesn't exist
+               * "download failed" or "download" + "error" - network or authentication issue
+               * "image processing error" or "processing" + "error" - LLM temporarily unavailable
+               * "no content url" or "content" + "url" - attachment has no downloadable content
+             - unacceptable patterns indicating system failure:
                * "llm not available" - configuration issue
                * stack traces or unexpected python exceptions
-          5. If comments exist (with or without images), the tool succeeded.
+          4. If comments exist without images, the tool should still succeed.
+          5. If images have descriptions, they should describe the actual image content.
+
+          Look for keywords and patterns, not exact message matches.
+          Determine if warnings are expected processing limitations (acceptable) or system failures (test fails).
+          Expected warnings indicate proper error handling and are acceptable.
 
           Return a JSON object named test_results with the following structure:
 
           {{
-            "test_passed": boolean (true if tool returned comments successfully, regardless of image processing),
+            "test_passed": boolean (true if descriptions are meaningful or tool handles missing images correctly),
             "summary": "brief description of outcome",
             "error": "error details if failed, null if passed"
           }}

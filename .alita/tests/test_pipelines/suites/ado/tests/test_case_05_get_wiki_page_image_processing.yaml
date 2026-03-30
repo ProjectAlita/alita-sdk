@@ -43,9 +43,6 @@ nodes:
       recursion_level:
         type: fixed
         value: oneLevel
-      process_images:
-        type: fixed
-        value: false
     output:
       - tool_result
     structured_output: true
@@ -68,8 +65,7 @@ nodes:
       task:
         type: fstring
         value: |
-          Validate that the wiki page content was retrieved successfully.
-          Image processing is disabled in this test (process_images=false), so raw content is expected.
+          Validate that the wiki page content was retrieved successfully with image descriptions.
 
           Tool Result: {tool_result}
           Expected Page ID: {page_id}
@@ -84,16 +80,13 @@ nodes:
             - url: string
             - order: number
             - sub_pages: array (can be empty)
-            - content: string (raw markdown content — image references are NOT processed)
+            - content: string containing markdown with image descriptions (not raw attachment URLs)
 
           Validation requirements:
-          1. eTag must be present
-          2. page object must be present
-          3. page id must match 54
-          4. content field must be present and non-empty
-          5. Since process_images=false, raw image markdown (e.g., ![image.png]()) is acceptable
-          6. has_image_descriptions and content_contextual should be set to true only if
-             content contains actual descriptive text beyond raw image syntax
+          1. Content field must be present
+          2. Image descriptions should be contextual (e.g., describing laptop, workspace, desk)
+          3. Images should NOT be raw attachment URLs - they should be processed descriptions
+          4. Content should match the pattern: ![image.png](descriptive text about the image)
 
           Return JSON test_results:
           {{
