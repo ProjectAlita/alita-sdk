@@ -353,7 +353,7 @@ nodes:
         load_attachments = alita_state.get('load_attachments', True)
         file_exists = alita_state.get('file_exists', False)
 
-        # If not loading attachments and cache exists, copy relations from cached feature
+        # Always copy relations from cache if load_attachments is false and cache exists
         if not load_attachments and file_exists and cached_data_str:
             try:
                 cached = json.loads(cached_data_str) if isinstance(cached_data_str, str) else cached_data_str
@@ -710,11 +710,8 @@ nodes:
         value: []
       system:
         type: fixed
-        value: You are a helpful assistant. Inform the user that the work item hierarchy data has been successfully fetched and saved.
+        value: You are printer of data in json format. Convert any input to json and print only it with no other text.
       task:
         type: fstring
-        value: The data has been fetched and saved to artifact: {artifact_filepath}
-    output:
-      - operation_result
-    structured_output: false
+        value: Print {artifact_filepath} file name as wrapped in json list.
     transition: END
