@@ -26,7 +26,7 @@ from ...runtime.utils.content_appender import (
 )
 from ...runtime.utils.utils import IndexerKeywords
 
-DEFAULT_MAX_SINGLE_READ_SIZE = 60000
+DEFAULT_MAX_SINGLE_READ_SIZE = 200000
 
 BASIC_CREATE_FILE_DESCRIPTION = """Create a new file OR overwrite/replace an existing file entirely in the artifact bucket. Supports two modes:
 1. Create from content: Use 'filedata' parameter to create or fully overwrite files with text or rich formats
