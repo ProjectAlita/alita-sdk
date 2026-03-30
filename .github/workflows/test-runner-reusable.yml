@@ -89,7 +89,7 @@ jobs:
         PYTHONPATH: /app
         PYTHONDONTWRITEBYTECODE: "1"
         PYTHONUNBUFFERED: "1"
-        PGVECTOR_CONNECTION_STRING: postgresql://postgres:yourpassword@pgvector-db:5432/postgres
+        PGVECTOR_CONNECTION_STRING: postgresql+psycopg://postgres:yourpassword@pgvector-db:5432/postgres
 
     services:
       pgvector-db:

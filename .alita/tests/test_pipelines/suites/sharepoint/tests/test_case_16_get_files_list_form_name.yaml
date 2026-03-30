@@ -1,0 +1,99 @@
+name: "SP16 - get_files_list: Document library (form_name) filtering"
+priority: High
+description: |
+  Verify the SharePoint 'get_files_list' tool filters files by document library using form_name parameter.
+  
+  Objective: Test that form_name restricts results to a specific document library
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns only files from the specified document library
+  - Works with library names like 'Shared Documents', 'private_docs', etc.
+  - Must return at least one file (empty results indicate missing test data or incorrect library name)
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  form_name_shared:
+    type: str
+    value: "Shared Documents"
+  limit_files:
+    type: int
+    value: 50
+  files_result_shared:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_files_shared
+
+nodes:
+  - id: invoke_get_files_shared
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - form_name_shared
+      - limit_files
+    input_mapping:
+      form_name:
+        type: variable
+        value: form_name_shared
+      limit_files:
+        type: variable
+        value: limit_files
+    output:
+      - files_result_shared
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - files_result_shared
+      - form_name_shared
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the 'get_files_list' tool execution with form_name filter.
+
+          Test - Form name: '{form_name_shared}'
+          Result: {files_result_shared}
+
+          Expected behavior:
+          - Tool executes successfully without errors
+          - Returns array of file objects from the specified document library
+          - File paths should indicate they are from '{form_name_shared}' library
+          - Each file has Name, Path, Created, Modified fields
+          - Must return at least one file (test data should exist in library)
+
+          Validation rules:
+          1. Check result structure is valid (not error/exception)
+          2. Verify result is a non-empty array (if empty, test fails - missing test data)
+          3. Check each file has required fields (Name, Path, Created, Modified)
+          4. Verify Path contains the library name or is valid server-relative path
+          5. No errors or exceptions in response
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

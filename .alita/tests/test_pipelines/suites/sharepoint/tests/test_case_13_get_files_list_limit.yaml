@@ -1,0 +1,133 @@
+name: "SP13 - get_files_list: Limit parameter validation"
+priority: High
+description: |
+  Verify the SharePoint 'get_files_list' tool respects the limit_files parameter.
+  
+  Objective: Test that the limit parameter controls the maximum number of files returned
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns exactly N files where N = min(limit_files, total_files_available)
+  - Files are not duplicated
+  - Limit values of 1, 5, and 10 are properly respected
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+    value: ${SERVER_RELATIVE_PATH}
+  limit_small:
+    type: int
+    value: 2
+  limit_medium:
+    type: int
+    value: 5
+  files_result_small:
+    type: dict
+  files_result_medium:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_files_list_small
+
+nodes:
+  - id: invoke_get_files_list_small
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_small
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_small
+    output:
+      - files_result_small
+    structured_output: true
+    transition: invoke_get_files_list_medium
+
+  - id: invoke_get_files_list_medium
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_medium
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_medium
+    output:
+      - files_result_medium
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - files_result_small
+      - files_result_medium
+      - limit_small
+      - limit_medium
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the 'get_files_list' tool execution with different limit values.
+
+          Test 1 - Limit={limit_small}:
+          Result: {files_result_small}
+
+          Test 2 - Limit={limit_medium}:
+          Result: {files_result_medium}
+
+          Expected behavior:
+          - Both tool executions succeed without errors
+          - Both tests MUST return files (test data should exist in folder)
+          - Result 1 contains exactly {limit_small} files
+          - Result 2 contains exactly {limit_medium} files
+          - Result 2 should have >= files than Result 1 (if enough files exist)
+          - No file duplicates within each result
+          - Each file has Name, Path, Created, Modified fields
+
+          Validation rules:
+          1. Check result structure is valid (not error/exception)
+          2. Verify both results are non-empty (if empty, test fails - missing test data)
+          3. Count files in each result array
+          4. Verify count <= limit for each test
+          5. Verify Result 2 count >= Result 1 count (or both are same if folder has few files)
+          6. Check for duplicate file names within each result
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed",
+            "res_1": {files_result_small},
+            "res_2": {files_result_medium}
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

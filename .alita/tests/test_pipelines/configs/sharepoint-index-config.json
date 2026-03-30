@@ -1,0 +1,10 @@
+{
+  "type": "sharepoint",
+  "toolkit_name": "sp-index-test",
+  "selected_tools": [
+    "index_data",
+    "search_index",
+    "list_collections",
+    "remove_index"
+  ]
+}
