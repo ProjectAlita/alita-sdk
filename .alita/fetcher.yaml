@@ -61,6 +61,9 @@ state:
   operation_result:
     type: string
     value: ''
+  output_summary:
+    type: string
+    value: ''
 entry_point: ParseInput
 nodes:
   # ── Input validation ──────────────────────────────────────────────
@@ -781,8 +784,9 @@ nodes:
       system:
         type: fixed
         value: |
-          You are a helpful assistant. Present the extraction results clearly and conversationally.
-          Mention the artifact filename, whether dependent items were loaded, and any links found.
+          You are a helpful assistant. Present the extraction results clearly.
+          If dependent items are present, list them as "ID - Title" and mention they are already loaded and available in the artifact file.
+          If links are present, list them by category.
       task:
         type: fstring
         value: |
@@ -790,7 +794,10 @@ nodes:
           
           {output_summary}
           
-          Provide a clear, conversational summary of this data.
+          Provide a clear summary mentioning:
+          - The artifact filename
+          - If dependent items were loaded (list id-title pairs and mention they're available in the artifact)
+          - Any categorized links found
     output:
       - operation_result
     structured_output: false
