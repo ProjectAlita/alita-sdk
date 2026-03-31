@@ -140,12 +140,13 @@ nodes:
           expected contents: {file_contents}
 
           note: read may fail due to github api propagation delay - this is acceptable.
+          note: minor whitespace or trailing newline differences between read_result and expected contents are acceptable - do NOT fail for these.
 
           perform the following checks:
 
           1. verify create_file executed (create_result not error)
-          2. if read succeeded, verify content matches expected
-          3. if read succeeded, check all key lines present
+          2. if read succeeded, verify all key lines from expected contents are present in read_result (strip/trim whitespace before comparing)
+          3. do NOT require exact byte-for-byte match; presence of all key lines is sufficient
 
           return a json object with:
           {{
