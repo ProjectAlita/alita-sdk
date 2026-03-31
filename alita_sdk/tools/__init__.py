@@ -67,10 +67,14 @@ def _patch_tool_invoke(tool) -> None:
 
     def _invoke_with_metadata(self_tool, input, config=None, **kwargs):
         if self_tool.metadata:
-            if config is None:
-                config = {}
-            if 'metadata' not in config:
-                config['metadata'] = {}
+            # Copy config and its metadata dict before injecting to avoid mutating the
+            # caller's LangGraph run config. LangGraph builds per-tool configs via
+            # shallow copies (patch_config/merge_configs), so the metadata sub-dict is
+            # often the same object across sequential tool invocations in the same batch.
+            # In-place mutation would bleed one tool's metadata into the next tool's
+            # on_tool_start event, causing wrong parent_agent_name / agent_type on chips.
+            config = dict(config) if config is not None else {}
+            config['metadata'] = dict(config.get('metadata') or {})
             for key, value in self_tool.metadata.items():
                 if key not in config['metadata']:
                     config['metadata'][key] = value
