@@ -2,12 +2,12 @@ import copy
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from traceback import format_exc
 
 import requests
 from langchain_core.tools import ToolException
-from pydantic import Field, model_validator, create_model, SecretStr
+from pydantic import BaseModel, Field, field_validator, model_validator, create_model, SecretStr
 
 from ..elitea_base import BaseToolApiWrapper
 from .postman_analysis import PostmanAnalyzer
@@ -205,11 +205,22 @@ PostmanUpdateRequestHeaders = create_model(
                                     "Example: \"Content-Type: application/json\\nAuthorization: Bearer token123\". "))
 )
 
-PostmanUpdateRequestBody = create_model(
-    "PostmanUpdateRequestBody",
-    request_path=(str, Field(description="Path to the request (folder/requestName)")),
-    body=(Optional[Dict[str, Any]], Field(default=None, description="Request body."))
-)
+class PostmanUpdateRequestBody(BaseModel):
+    request_path: str = Field(description="Path to the request (folder/requestName)")
+    body: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description=(
+        "Request body object (dict or JSON string). "
+        "For raw JSON body: {\"mode\": \"raw\", \"raw\": \"{\\\"key\\\": \\\"value\\\"}\", \"options\": {\"raw\": {\"language\": \"json\"}}}. "
+        "For URL-encoded body: {\"mode\": \"urlencoded\", \"urlencoded\": [{\"key\": \"k\", \"value\": \"v\"}]}. "
+        "For form-data body: {\"mode\": \"formdata\", \"formdata\": [{\"key\": \"k\", \"value\": \"v\"}]}. "
+        "The `raw` field must be a JSON string, not an object."
+    ))
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def parse_body(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 PostmanUpdateRequestAuth = create_model(
     "PostmanUpdateRequestAuth",
@@ -1716,19 +1727,48 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update request '{request_path}' headers: {str(e)}")
 
-    def update_request_body(self, request_path: str, body: Dict[str, Any], **kwargs) -> str:
+    def update_request_body(self, request_path: str, body: Union[str, Dict[str, Any]], **kwargs) -> str:
         """Update request body."""
         try:
+            if isinstance(body, str):
+                body = json.loads(body)
             # Get request item and ID
             request_item, request_id, _ = self._get_request_item_and_id(request_path)
-            
-            # Create update payload
-            request_update = body
+
+            # Build update payload based on body mode
+            mode = body.get("mode", "raw")
+            request_update = {"dataMode": mode}
+
+            if mode == "raw":
+                raw_data = body.get("raw", "")
+                if not isinstance(raw_data, str):
+                    raw_data = json.dumps(raw_data)
+                request_update["rawModeData"] = raw_data
+                lang = body.get("options", {}).get("raw", {}).get("language", "json")
+                request_update["dataOptions"] = {"raw": {"language": lang}}
+            elif mode == "urlencoded":
+                request_update["data"] = body.get("urlencoded", [])
+            elif mode == "formdata":
+                request_update["data"] = body.get("formdata", [])
 
             # Update the body field
-            response = self._make_request('PUT', f'/collections/{self.collection_id}/requests/{request_id}',
-                                          json=request_update)
+            try:
+                response = self._make_request(
+                    'PUT',
+                    f'/collections/{self.collection_id}/requests/{request_id}',
+                    json=request_update
+                )
+            except Exception as e:
+                stacktrace = format_exc()
+                logger.error(f"Exception when calling Postman API to update request body: {stacktrace}")
+                raise ToolException(f"Postman API call failed while updating body of '{request_path}': {str(e)}")
+
+            if not response or response.get("meta", {}).get("action") != "update" or not response.get("data"):
+                raise ToolException(f"Request '{request_path}' body was not updated. Unexpected response: {response}")
+
             return json.dumps({"success": True, "message": f"Request '{request_path}' body updated successfully"}, indent=2)
+        except ToolException:
+            raise
         except Exception as e:
             stacktrace = format_exc()
             logger.error(f"Exception when updating request body: {stacktrace}")
