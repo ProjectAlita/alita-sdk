@@ -522,20 +522,21 @@ class AzureDevOpsApiWrapper(NonCodeIndexerToolkit):
             else:
                 if not image_url:
                     logger.warning(f"Skipping image '{image_name}' with empty URL")
-                    continue
-                try:
-                    response = requests.get(image_url)
-                    response.raise_for_status()
-                    file_content = response.content
-                    description = parse_file_content(
-                        file_content=file_content,
-                        file_name="image.png",
-                        llm=self.llm,
-                        prompt=image_description_prompt
-                    )
-                except Exception as e:
-                    logger.error(f"Error fetching external image: {str(e)}")
-                    description = f"Error fetching external image: {image_url}"
+                    description = "[Image could not be processed: empty URL]"
+                else:
+                    try:
+                        response = requests.get(image_url)
+                        response.raise_for_status()
+                        file_content = response.content
+                        description = parse_file_content(
+                            file_content=file_content,
+                            file_name="image.png",
+                            llm=self.llm,
+                            prompt=image_description_prompt
+                        )
+                    except Exception as e:
+                        logger.error(f"Error fetching external image: {str(e)}")
+                        description = f"Error fetching external image: {image_url}"
 
             new_image_markdown = f"![{image_name}]({description})"
             page_content = page_content.replace(f"![{image_name}]({image_url})", new_image_markdown)
