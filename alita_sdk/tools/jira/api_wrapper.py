@@ -1270,7 +1270,7 @@ class JiraApiWrapper(NonCodeIndexerToolkit):
             # Get the LLM instance
             llm = self.llm
             if not llm:
-                return "[LLM not available for image processing]"
+                raise ToolException("LLM is not configured. Image processing requires an LLM to be set up in the toolkit configuration.")
 
             # Try to load and validate the image with PIL instead of using imghdr
             try:
