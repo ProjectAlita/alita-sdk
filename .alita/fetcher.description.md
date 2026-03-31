@@ -15,7 +15,7 @@ Fetches a complete structured snapshot of an Azure DevOps feature and its full d
 | `id`                 | required  | ADO work item ID                        |
 | `force_reinit`       | `false`   | Re-fetch from ADO                       |
 | `load_attachments`   | `true`    | `false` = skip attachments              |
-| `load_dependent_items`| `true`   | `false` = skip child work items         |
+| `load_dependent_items`| `false`  | `true` = fetch child work items         |
 
 ## Output
 
@@ -33,7 +33,7 @@ Conversational confirmation, e.g.: *"The data has been fetched and saved to arti
 
 | Pattern                        | Input                                                      |
 |--------------------------------|------------------------------------------------------------|
-| Use cached copy (default)      | `{"id": 123}`                                             |
-| Feature only (no dependencies) | `{"id": 123, "load_dependent_items": false}`              |
+| Feature only (default)         | `{"id": 123}`                                             |
+| Full fetch with dependencies   | `{"id": 123, "load_dependent_items": true}`              |
 | Refresh fields, no attachments | `{"id": 123, "force_reinit": true, "load_attachments": false}` |
-| Full refresh                   | `{"id": 123, "force_reinit": true}`                      |
+| Full refresh with dependencies | `{"id": 123, "force_reinit": true, "load_dependent_items": true}` |

@@ -12,7 +12,7 @@ state:
     value: true
   load_dependent_items:
     type: bool
-    value: true
+    value: false
   artifact_filepath:
     type: string
     value: ''
@@ -81,7 +81,7 @@ nodes:
                 "feature_id": 0,
                 "force_reinit": False,
                 "load_attachments": True,
-                "load_dependent_items": True,
+                "load_dependent_items": False,
                 "artifact_filepath": ""
             }
         else:
@@ -123,7 +123,7 @@ nodes:
                         "feature_id": 0,
                         "force_reinit": bool(input_data.get('force_reinit', False)),
                         "load_attachments": bool(input_data.get('load_attachments', True)),
-                        "load_dependent_items": bool(input_data.get('load_dependent_items', True)),
+                        "load_dependent_items": bool(input_data.get('load_dependent_items', False)),
                         "artifact_filepath": ""
                     }
                 else:
@@ -150,7 +150,7 @@ nodes:
                             "feature_id": feature_id,
                             "force_reinit": bool(input_data.get('force_reinit', False)),
                             "load_attachments": bool(input_data.get('load_attachments', True)),
-                            "load_dependent_items": bool(input_data.get('load_dependent_items', True)),
+                            "load_dependent_items": bool(input_data.get('load_dependent_items', False)),
                             "artifact_filepath": f"{feature_id}_feature.json"
                         }
 
@@ -370,6 +370,9 @@ nodes:
                 if isinstance(cached, dict):
                     cached_relations = cached.get('feature', {}).get('relations')
                     if cached_relations is not None:
+                        # Filter out hierarchy relations
+                        if isinstance(cached_relations, list):
+                            cached_relations = [r for r in cached_relations if r.get('rel') != 'System.LinkTypes.Hierarchy-Forward']
                         feature_data['relations'] = cached_relations
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -626,7 +629,12 @@ nodes:
         }
 
         if 'relations' in feature_data:
-            feature['relations'] = feature_data['relations']
+            relations = feature_data['relations']
+            # Filter out hierarchy relations
+            if isinstance(relations, list):
+                relations = [r for r in relations if r.get('rel') != 'System.LinkTypes.Hierarchy-Forward']
+            if relations:  # Only add if not empty after filtering
+                feature['relations'] = relations
 
         parent_map = {}
         for item in all_fetched_items:
@@ -720,19 +728,70 @@ nodes:
     structured_output: true
     tool: createFile
     toolkit_name: epic_artifacts
+    transition: PrepareOutput
+  - id: PrepareOutput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        hierarchy_data = alita_state.get('hierarchy_data', {})
+        artifact_filepath = alita_state.get('artifact_filepath', '')
+        
+        # Extract dependent items summary (id and title only)
+        dependent_items = hierarchy_data.get('dependent_items', {})
+        items_summary = []
+        for item_id, item in dependent_items.items():
+            items_summary.append({
+                'id': item.get('id'),
+                'title': item.get('title')
+            })
+        
+        # Get links by group
+        dependent_links = hierarchy_data.get('dependent_links', {})
+        
+        # Prepare output structure
+        output_data = {
+            'artifact': artifact_filepath,
+            'dependent_items_count': len(items_summary),
+            'dependent_items': items_summary if items_summary else None,
+            'links': dependent_links if any(dependent_links.values()) else None
+        }
+        
+        # Remove None values for cleaner output
+        output_data = {k: v for k, v in output_data.items() if v is not None}
+        
+        {'output_summary': json.dumps(output_data, indent=2)}
+    input:
+      - hierarchy_data
+      - artifact_filepath
+    output:
+      - output_summary
+    structured_output: true
     transition: ReturnFilename
   - id: ReturnFilename
     type: llm
     input:
-      - artifact_filepath
+      - output_summary
     input_mapping:
       chat_history:
         type: fixed
         value: []
       system:
         type: fixed
-        value: You are printer of data in json format. Convert any input to json and print only it with no other text.
+        value: |
+          You are a helpful assistant. Present the extraction results clearly and conversationally.
+          Mention the artifact filename, whether dependent items were loaded, and any links found.
       task:
         type: fstring
-        value: Print {artifact_filepath} file name as wrapped in json list.
+        value: |
+          Here's the extraction result:
+          
+          {output_summary}
+          
+          Provide a clear, conversational summary of this data.
+    output:
+      - operation_result
+    structured_output: false
     transition: END
