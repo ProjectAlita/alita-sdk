@@ -91,12 +91,18 @@ class Application(BaseTool):
         if config is None:
             config = {}
 
-        # Inject tool metadata into config so it's passed to callbacks
-        # This ensures agent_type and other metadata are available in callback handlers
+        # Inject tool metadata into config so it's passed to callbacks.
+        # IMPORTANT: copy config and its metadata dict before injecting to avoid mutating
+        # the caller's LangGraph run config. LangGraph builds per-tool configs via shallow
+        # copies (patch_config/merge_configs), so config['metadata'] is often the same
+        # dict object across sequential tool invocations in the same batch. In-place
+        # mutation bleeds one tool's metadata into the next tool's on_tool_start event,
+        # causing wrong parent_agent_name / agent_type on chips when the parent agent has
+        # both agent-type and pipeline-type toolkits.
         if self.metadata:
-            if 'metadata' not in config:
-                config['metadata'] = {}
-            # Merge tool metadata into config metadata (config takes precedence)
+            config = dict(config)
+            config['metadata'] = dict(config.get('metadata') or {})
+            # Merge tool metadata into config metadata (config values take precedence)
             for key, value in self.metadata.items():
                 if key not in config['metadata']:
                     config['metadata'][key] = value
