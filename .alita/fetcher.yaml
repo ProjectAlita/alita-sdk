@@ -12,7 +12,7 @@ state:
     value: true
   load_dependent_items:
     type: bool
-    value: false
+    value: true
   artifact_filepath:
     type: string
     value: ''
@@ -693,8 +693,8 @@ nodes:
 
         hierarchy_data = {
             'feature': feature,
-            'dependent_items': dependencies,
             'dependent_links': feature_links,
+            'dependent_items': dependencies,
         }
 
         {'hierarchy_data': hierarchy_data, 'hierarchy_json': json.dumps(hierarchy_data, indent=2, ensure_ascii=False)}
@@ -796,7 +796,7 @@ nodes:
           
           Provide a clear summary mentioning:
           - The artifact filename
-          - If dependent items were loaded (list id-title pairs and mention they're available in the artifact)
+          - If dependent items were loaded, list id-title pairs and mention they're available in the artifact, else state dependent items were not loaded.
           - Any categorized links found
     output:
       - operation_result
