@@ -84,7 +84,7 @@ nodes:
                 "feature_id": 0,
                 "force_reinit": False,
                 "load_attachments": True,
-                "load_dependent_items": False,
+                "load_dependent_items": True,
                 "artifact_filepath": ""
             }
         else:
@@ -126,7 +126,7 @@ nodes:
                         "feature_id": 0,
                         "force_reinit": bool(input_data.get('force_reinit', False)),
                         "load_attachments": bool(input_data.get('load_attachments', True)),
-                        "load_dependent_items": bool(input_data.get('load_dependent_items', False)),
+                        "load_dependent_items": bool(input_data.get('load_dependent_items', True)),
                         "artifact_filepath": ""
                     }
                 else:
@@ -153,7 +153,7 @@ nodes:
                             "feature_id": feature_id,
                             "force_reinit": bool(input_data.get('force_reinit', False)),
                             "load_attachments": bool(input_data.get('load_attachments', True)),
-                            "load_dependent_items": bool(input_data.get('load_dependent_items', False)),
+                            "load_dependent_items": bool(input_data.get('load_dependent_items', True)),
                             "artifact_filepath": f"{feature_id}_feature.json"
                         }
 
