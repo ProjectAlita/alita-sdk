@@ -10,6 +10,9 @@ state:
   load_attachments:
     type: bool
     value: true
+  load_dependent_items:
+    type: bool
+    value: true
   artifact_filepath:
     type: string
     value: ''
@@ -78,6 +81,7 @@ nodes:
                 "feature_id": 0,
                 "force_reinit": False,
                 "load_attachments": True,
+                "load_dependent_items": True,
                 "artifact_filepath": ""
             }
         else:
@@ -97,6 +101,7 @@ nodes:
                         "feature_id": 0,
                         "force_reinit": False,
                         "load_attachments": True,
+                        "load_dependent_items": True,
                         "artifact_filepath": ""
                     }
 
@@ -108,6 +113,7 @@ nodes:
                         "feature_id": 0,
                         "force_reinit": False,
                         "load_attachments": True,
+                        "load_dependent_items": True,
                         "artifact_filepath": ""
                     }
                 elif 'id' not in input_data:
@@ -117,6 +123,7 @@ nodes:
                         "feature_id": 0,
                         "force_reinit": bool(input_data.get('force_reinit', False)),
                         "load_attachments": bool(input_data.get('load_attachments', True)),
+                        "load_dependent_items": bool(input_data.get('load_dependent_items', True)),
                         "artifact_filepath": ""
                     }
                 else:
@@ -132,6 +139,7 @@ nodes:
                             "feature_id": 0,
                             "force_reinit": False,
                             "load_attachments": True,
+                            "load_dependent_items": True,
                             "artifact_filepath": ""
                         }
 
@@ -142,6 +150,7 @@ nodes:
                             "feature_id": feature_id,
                             "force_reinit": bool(input_data.get('force_reinit', False)),
                             "load_attachments": bool(input_data.get('load_attachments', True)),
+                            "load_dependent_items": bool(input_data.get('load_dependent_items', True)),
                             "artifact_filepath": f"{feature_id}_feature.json"
                         }
 
@@ -154,6 +163,7 @@ nodes:
       - feature_id
       - force_reinit
       - load_attachments
+      - load_dependent_items
       - artifact_filepath
     structured_output: true
     transition: ValidationRouter
@@ -373,7 +383,23 @@ nodes:
     output:
       - feature_data
     structured_output: true
-    transition: InitializeFetch
+    transition: CheckShouldFetchDependencies
+
+  # ── Dependency fetch router ──────────────────────────────────────
+  - id: CheckShouldFetchDependencies
+    type: router
+    condition: |
+      {% if load_dependent_items %}
+        InitializeFetch
+      {% else %}
+        BuildOutput
+      {% endif %}
+    default_output: BuildOutput
+    input:
+      - load_dependent_items
+    routes:
+      - InitializeFetch
+      - BuildOutput
 
   # ── Dependency tree fetch (recursive) ─────────────────────────────
   - id: InitializeFetch
@@ -596,8 +622,7 @@ nodes:
             'description': strip_html(description_raw),
             'assigned_to': feature_data.get('System.AssignedTo', 'N/A'),
             'created_date': feature_data.get('System.CreatedDate', ''),
-            'changed_date': feature_data.get('System.ChangedDate', ''),
-            'children_ids': []
+            'changed_date': feature_data.get('System.ChangedDate', '')
         }
 
         if 'relations' in feature_data:
@@ -626,7 +651,6 @@ nodes:
                 'state': item.get('System.State', 'Unknown'),
                 'type': item.get('System.WorkItemType', 'Task'),
                 'parent_id': parent_id,
-                'children_ids': [],
                 'level': 0,
                 'description': strip_html(item.get('System.Description', '')),
                 'assigned_to': item.get('System.AssignedTo', 'N/A'),
@@ -640,13 +664,10 @@ nodes:
             pid = dep['parent_id']
             pid_str = str(pid)
             if pid == feature_id:
-                if dep['id'] not in feature['children_ids']:
-                    feature['children_ids'].append(dep['id'])
                 dep['level'] = 1
             elif pid_str in dependencies:
                 parent = dependencies[pid_str]
-                if dep['id'] not in parent['children_ids']:
-                    parent['children_ids'].append(dep['id'])
+                # Parent level will be calculated in next loop
 
         for _ in range(10):
             updated = False
