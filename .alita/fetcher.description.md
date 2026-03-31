@@ -15,7 +15,7 @@ Fetches a complete structured snapshot of an Azure DevOps feature and its full d
 | `id`                 | required  | ADO work item ID                        |
 | `force_reinit`       | `false`   | Re-fetch from ADO                       |
 | `load_attachments`   | `true`    | `false` = skip attachments              |
-| `load_dependent_items`| `false`  | `true` = fetch child work items         |
+| `load_dependent_items`| `true`   | `false` = skip child work items         |
 
 ## Output
 
@@ -26,14 +26,14 @@ Conversational confirmation, e.g.: *"The data has been fetched and saved to arti
 | Key              | Contents                                                                 |
 |------------------|-------------------------------------------------------------------------|
 | `feature`        | id, title, state, type, url, description, assigned_to, dates, relations |
-| `dependent_items`| All descendants keyed by ID — parent_id, level, title, state, type, description, dates, url (empty if `load_dependent_items: false`) |
 | `dependent_links`| URLs from feature description categorised as `wiki`, `item`, `figma`, `other` |
+| `dependent_items`| All descendants keyed by ID — parent_id, level, title, state, type, description, dates, url (empty if `load_dependent_items: false`) |
 
 ## Usage patterns
 
 | Pattern                        | Input                                                      |
 |--------------------------------|------------------------------------------------------------|
-| Feature only (default)         | `{"id": 123}`                                             |
-| Full fetch with dependencies   | `{"id": 123, "load_dependent_items": true}`              |
+| Full fetch with dependencies (default) | `{"id": 123}`                                     |
+| Feature only (no dependencies) | `{"id": 123, "load_dependent_items": false}`            |
 | Refresh fields, no attachments | `{"id": 123, "force_reinit": true, "load_attachments": false}` |
-| Full refresh with dependencies | `{"id": 123, "force_reinit": true, "load_dependent_items": true}` |
+| Full refresh with dependencies | `{"id": 123, "force_reinit": true}` |
