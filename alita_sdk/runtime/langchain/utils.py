@@ -261,13 +261,21 @@ def safe_format(template, mapping):
 def create_pydantic_model(model_name: str, variables: dict[str, dict]):
     fields = {}
     for var_name, var_data in variables.items():
+        # Ensure description is non-empty for Bedrock compatibility
+        # Bedrock requires all tool field descriptions to have at least 1 character
+        description = var_data.get('description') or f"Field: {var_name}"
         if 'default' in var_data:
             # allow user to define if it is required or not
             fields[var_name] = (parse_pydantic_type(var_data['type']),
-                                Field(description=var_data.get('description', None), default=var_data.get('default')))
+                                Field(description=description, default=var_data.get('default')))
         else:
-            fields[var_name] = (parse_pydantic_type(var_data['type']), Field(description=var_data.get('description', None)))
-    return create_model(model_name, **fields)
+            fields[var_name] = (parse_pydantic_type(var_data['type']), Field(description=description))
+    # Create model with a docstring for Bedrock compatibility
+    # Bedrock requires tool descriptions to have at least 1 character
+    # When LangChain converts this model to a function/tool, it uses the docstring as description
+    model = create_model(model_name, **fields)
+    model.__doc__ = f"Structured output model: {model_name}"
+    return model
 
 def parse_pydantic_type(type_name: str):
     t = (type_name or "any").strip().lower()

@@ -3,6 +3,7 @@ import logging
 from traceback import format_exc
 from typing import Any, Optional, List, Union, Literal, Dict, TYPE_CHECKING
 
+from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, ToolException
@@ -101,6 +102,41 @@ class LLMNode(BaseTool):
     )
     _meta_tools: Optional[List[BaseTool]] = None  # Cached meta-tools
 
+    @staticmethod
+    def _is_thinking_enabled(llm_client: Any) -> bool:
+        """Return True if the LLM client has extended thinking / reasoning enabled.
+
+        Thinking models cannot reliably use ``function_calling`` for structured
+        output because the model is not guaranteed to emit a tool call when
+        thinking blocks are present.  Callers should fall back to ``json_mode``
+        in that case.
+
+        Inspects the attributes used by the most common integrations:
+        - ``langchain-anthropic``: ``thinking={'type': 'enabled', 'budget_tokens': N}``
+        - LiteLLM / generic: ``model_kwargs``, ``additional_kwargs`` with
+          ``thinking``, ``budget_tokens``, or ``reasoning_effort`` keys.
+        """
+        if not llm_client:
+            return False
+
+        # langchain-anthropic passes thinking config as a top-level attribute
+        thinking = getattr(llm_client, 'thinking', None)
+        if isinstance(thinking, dict) and thinking.get('type') == 'enabled':
+            return True
+        # Some wrappers expose a boolean
+        if isinstance(thinking, bool) and thinking:
+            return True
+
+        # Check common kwargs dicts used by LiteLLM and other adapters
+        for attr in ('model_kwargs', 'additional_kwargs', 'default_headers', 'invocation_params'):
+            kwargs = getattr(llm_client, attr, None) or {}
+            if isinstance(kwargs, dict):
+                if (kwargs.get('thinking') or kwargs.get('budget_tokens')
+                        or kwargs.get('reasoning_effort')):
+                    return True
+
+        return False
+
     def _prepare_structured_output_params(self) -> dict:
         """
         Prepare structured output parameters from structured_output_dict.
@@ -118,7 +154,8 @@ class LLMNode(BaseTool):
             # Allow either a plain type string or a dict with details
             if isinstance(value, dict):
                 type_str = str(value.get("type") or "any")
-                desc = value.get("description", "") or ""
+                # Provide fallback description for Bedrock compatibility (requires non-empty descriptions)
+                desc = value.get("description") or f"Output field: {key}"
                 entry: dict = {"type": type_str, "description": desc}
                 if "default" in value:
                     entry["default"] = value["default"]
@@ -130,7 +167,8 @@ class LLMNode(BaseTool):
                     # If it's already a type object, convert to string representation
                     type_str = getattr(value, '__name__', 'any')
 
-                entry = {"type": type_str, "description": ""}
+                # Provide fallback description for Bedrock compatibility (requires non-empty descriptions)
+                entry = {"type": type_str, "description": f"Output field: {key}"}
 
             struct_params[key] = entry
 
@@ -156,6 +194,16 @@ class LLMNode(BaseTool):
         Returns:
             Tuple of (completion, initial_completion, final_messages)
         """
+        # Thinking models are NOT guaranteed to emit a tool call, so
+        # function_calling (the default) will raise OutputParserException.
+        # Use json_mode instead when thinking is enabled.
+        method = "json_mode" if self._is_thinking_enabled(llm_client) else "function_calling"
+        if method == "json_mode":
+            logger.debug(
+                "[StructuredOutput] Thinking/reasoning detected on LLM client — "
+                "using json_mode instead of function_calling to avoid OutputParserException"
+            )
+
         initial_completion = llm_client.invoke(messages, config=config)
 
         if hasattr(initial_completion, 'tool_calls') and initial_completion.tool_calls:
@@ -163,12 +211,12 @@ class LLMNode(BaseTool):
             new_messages, _ = self._run_async_in_sync_context(
                 self.__perform_tool_calling(initial_completion, messages, llm_client, config)
             )
-            llm = self.__get_struct_output_model(llm_client, struct_model)
+            llm = self.__get_struct_output_model(llm_client, struct_model, method=method)
             completion = llm.invoke(new_messages, config=config)
             return completion, initial_completion, new_messages
         else:
             # Direct structured output without tool calls
-            llm = self.__get_struct_output_model(llm_client, struct_model)
+            llm = self.__get_struct_output_model(llm_client, struct_model, method=method)
             completion = llm.invoke(messages, config=config)
             return completion, initial_completion, messages
 
@@ -227,7 +275,8 @@ class LLMNode(BaseTool):
 
         Tries fallback methods in order:
         1. json_mode with explicit instructions
-        2. function_calling method
+        2. function_calling method (skipped when thinking is enabled — it is
+           guaranteed to raise OutputParserException on thinking models)
         3. Plain text with JSON extraction
 
         Args:
@@ -235,7 +284,7 @@ class LLMNode(BaseTool):
             messages: Original conversation messages
             struct_model: Pydantic model for structured output
             config: Runnable configuration
-            original_error: The original ValueError that triggered fallback
+            original_error: The original exception that triggered fallback
 
         Returns:
             Completion with structured output (best effort)
@@ -245,6 +294,8 @@ class LLMNode(BaseTool):
         """
         logger.error(f"Error invoking structured output model: {format_exc()}")
         logger.info("Attempting to fall back to json mode")
+
+        thinking_active = self._is_thinking_enabled(llm_client)
 
         # Build JSON instruction once
         json_instruction = self._build_json_instruction(struct_model)
@@ -266,39 +317,48 @@ class LLMNode(BaseTool):
             return completion
         except Exception as json_mode_error:
             logger.warning(f"json_mode also failed: {json_mode_error}")
-            logger.info("Falling back to function_calling method")
 
-            # Try function_calling as a third fallback
-            try:
-                completion = self.__get_struct_output_model(
-                    llm_client, struct_model, method="function_calling"
-                ).invoke(modified_messages, config=config)
-                return completion
-            except Exception as function_calling_error:
-                logger.error(f"function_calling also failed: {function_calling_error}")
-                logger.info("Final fallback: using plain LLM response")
+            # Skip function_calling fallback for thinking models: it will always
+            # raise OutputParserException because the model is not guaranteed to
+            # emit a tool call when extended thinking is enabled.
+            if not thinking_active:
+                logger.info("Falling back to function_calling method")
+                try:
+                    completion = self.__get_struct_output_model(
+                        llm_client, struct_model, method="function_calling"
+                    ).invoke(modified_messages, config=config)
+                    return completion
+                except Exception as function_calling_error:
+                    logger.error(f"function_calling also failed: {function_calling_error}")
+            else:
+                logger.info(
+                    "Skipping function_calling fallback because thinking/reasoning is enabled "
+                    "— it would always raise OutputParserException"
+                )
 
-                # Last resort: get plain text response and wrap in structure
-                plain_completion = llm_client.invoke(modified_messages, config=config)
-                content = plain_completion.content.strip() if hasattr(plain_completion, 'content') else str(plain_completion)
+            logger.info("Final fallback: using plain LLM response")
 
-                # Try to extract JSON from the response
-                import json
-                import re
+            # Last resort: get plain text response and wrap in structure
+            plain_completion = llm_client.invoke(modified_messages, config=config)
+            content = plain_completion.content.strip() if hasattr(plain_completion, 'content') else str(plain_completion)
 
-                json_match = re.search(r'\{.*\}', content, re.DOTALL)
-                if json_match:
-                    try:
-                        parsed_json = json.loads(json_match.group(0))
-                        # Validate it has expected fields and wrap in pydantic model
-                        completion = struct_model(**parsed_json)
-                        return completion
-                    except (json.JSONDecodeError, Exception) as parse_error:
-                        logger.warning(f"Could not parse extracted JSON: {parse_error}")
-                        return self._create_fallback_completion(content, struct_model)
-                else:
-                    # No JSON found, create response with content in elitea_response
+            # Try to extract JSON from the response
+            import json
+            import re
+
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                try:
+                    parsed_json = json.loads(json_match.group(0))
+                    # Validate it has expected fields and wrap in pydantic model
+                    completion = struct_model(**parsed_json)
+                    return completion
+                except (json.JSONDecodeError, Exception) as parse_error:
+                    logger.warning(f"Could not parse extracted JSON: {parse_error}")
                     return self._create_fallback_completion(content, struct_model)
+            else:
+                # No JSON found, create response with content in elitea_response
+                return self._create_fallback_completion(content, struct_model)
 
     def _format_structured_output_result(self, result: dict, messages: List, initial_completion: Any) -> dict:
         """
@@ -643,8 +703,10 @@ class LLMNode(BaseTool):
                     completion, initial_completion, final_messages = self._invoke_with_structured_output(
                         llm_client, messages, struct_model, config
                     )
-                except ValueError as e:
-                    # Handle fallback for structured output failures
+                except (ValueError, OutputParserException) as e:
+                    # Handle fallback for structured output failures.
+                    # OutputParserException is raised by with_structured_output(method="function_calling")
+                    # when thinking is enabled and the model returns no tool call.
                     completion = self._handle_structured_output_fallback(
                         llm_client, messages, struct_model, config, e
                     )
@@ -1112,7 +1174,12 @@ class LLMNode(BaseTool):
                     'expected `redacted_thinking`',
                     'thinking block',
                     'must start with a thinking block',
-                    'when `thinking` is enabled'
+                    'when `thinking` is enabled',
+                    # OutputParserException raised by with_structured_output(method="function_calling")
+                    # when thinking is enabled and the model emits no tool call
+                    'outputparserexception',
+                    'structured output via forced tool calling',
+                    'not guaranteed when',
                 ])
                 
                 # Check for non-recoverable errors that should fail immediately
