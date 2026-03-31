@@ -2,12 +2,12 @@ import copy
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from traceback import format_exc
 
 import requests
 from langchain_core.tools import ToolException
-from pydantic import Field, model_validator, create_model, SecretStr
+from pydantic import BaseModel, Field, field_validator, model_validator, create_model, SecretStr
 
 from ..elitea_base import BaseToolApiWrapper
 from .postman_analysis import PostmanAnalyzer
@@ -205,17 +205,22 @@ PostmanUpdateRequestHeaders = create_model(
                                     "Example: \"Content-Type: application/json\\nAuthorization: Bearer token123\". "))
 )
 
-PostmanUpdateRequestBody = create_model(
-    "PostmanUpdateRequestBody",
-    request_path=(str, Field(description="Path to the request (folder/requestName)")),
-    body=(Optional[Dict[str, Any]], Field(default=None, description=(
-        "Request body object. "
+class PostmanUpdateRequestBody(BaseModel):
+    request_path: str = Field(description="Path to the request (folder/requestName)")
+    body: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description=(
+        "Request body object (dict or JSON string). "
         "For raw JSON body: {\"mode\": \"raw\", \"raw\": \"{\\\"key\\\": \\\"value\\\"}\", \"options\": {\"raw\": {\"language\": \"json\"}}}. "
         "For URL-encoded body: {\"mode\": \"urlencoded\", \"urlencoded\": [{\"key\": \"k\", \"value\": \"v\"}]}. "
         "For form-data body: {\"mode\": \"formdata\", \"formdata\": [{\"key\": \"k\", \"value\": \"v\"}]}. "
         "The `raw` field must be a JSON string, not an object."
-    )))
-)
+    ))
+
+    @field_validator("body", mode="before")
+    @classmethod
+    def parse_body(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
 PostmanUpdateRequestAuth = create_model(
     "PostmanUpdateRequestAuth",
@@ -1722,9 +1727,11 @@ class PostmanApiWrapper(BaseToolApiWrapper):
             raise ToolException(
                 f"Unable to update request '{request_path}' headers: {str(e)}")
 
-    def update_request_body(self, request_path: str, body: Dict[str, Any], **kwargs) -> str:
+    def update_request_body(self, request_path: str, body: Union[str, Dict[str, Any]], **kwargs) -> str:
         """Update request body."""
         try:
+            if isinstance(body, str):
+                body = json.loads(body)
             # Get request item and ID
             request_item, request_id, _ = self._get_request_item_and_id(request_path)
 
