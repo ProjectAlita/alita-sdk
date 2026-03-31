@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import mimetypes
 import re
 from typing import Any, Optional, Generator, List
 
@@ -404,12 +405,17 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
             event_meta["source_filepath"] = source_filepath
             event_meta["operation"] = "copy"
 
+        # Detect media type from filename for thumbnail generation
+        mime_type, _ = mimetypes.guess_type(filename)
+        media_type = "image" if mime_type and mime_type.startswith('image/') else None
+
         dispatch_custom_event("file_modified", {
             "message": f"File '{filename}' {'copied' if operation_type == 'copy' else 'created'} successfully",
             "filepath": new_filepath,
             "tool_name": "createFile",
             "toolkit": "artifact",
             "operation_type": operation_type,
+            "media_type": media_type,
             "meta": event_meta
         })
 
@@ -549,12 +555,17 @@ Multiple OLD/NEW pairs can be provided for multiple edits.""", json_schema_extra
             message = f"File '{sanitized_filename}' {'updated' if file_exists else 'created'} successfully"
             return_msg = f"{'Updated' if file_exists else 'Created'} file {sanitized_filename}"
 
+            # Detect media type from filename for thumbnail generation
+            mime_type, _ = mimetypes.guess_type(file_path)
+            media_type = "image" if mime_type and mime_type.startswith('image/') else None
+
             dispatch_custom_event("file_modified", {
                 "message": message,
                 "filepath": new_filepath,
                 "tool_name": "edit_file",
                 "toolkit": "artifact",
                 "operation_type": operation_type,
+                "media_type": media_type,
                 "meta": {
                     "bucket": target_bucket,
                     "file_size": len(content),
