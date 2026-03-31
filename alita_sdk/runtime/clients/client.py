@@ -117,35 +117,27 @@ class AlitaClient:
         self.model_image_generation = kwargs.get('model_image_generation')
 
     def get_mcp_toolkits(self):
-        if user_id := self._get_real_user_id():
-            url = f"{self.mcp_tools_list}/{user_id}"
-            data = requests.get(url, headers=self.headers, verify=False).json()
-            return data
-        else:
-            return []
+        data = requests.get(self.mcp_tools_list, headers=self.headers, verify=False).json()
+        return data
 
     def mcp_tool_call(self, params: dict[str, Any]):
-        if user_id := self._get_real_user_id():
-            url = f"{self.mcp_tools_call}/{user_id}"
-            #
-            # This loop iterates over each key-value pair in the arguments dictionary,
-            # and if a value is a Pydantic object, it replaces it with its dictionary representation using .dict().
-            for arg_name, arg_value in params.get('params', {}).get('arguments', {}).items():
-                if isinstance(arg_value, list):
-                    params['params']['arguments'][arg_name] = [
-                        item.dict() if hasattr(item, "dict") and callable(item.dict) else item
-                        for item in arg_value
-                    ]
-                elif hasattr(arg_value, "dict") and callable(arg_value.dict):
-                    params['params']['arguments'][arg_name] = arg_value.dict()
-            #
-            response = requests.post(url, headers=self.headers, json=params, verify=False)
-            try:
-                return response.json()
-            except (ValueError, TypeError):
-                return response.text
-        else:
-            return f"Error: Could not determine user ID for MCP tool call"
+        #
+        # This loop iterates over each key-value pair in the arguments dictionary,
+        # and if a value is a Pydantic object, it replaces it with its dictionary representation using .dict().
+        for arg_name, arg_value in params.get('params', {}).get('arguments', {}).items():
+            if isinstance(arg_value, list):
+                params['params']['arguments'][arg_name] = [
+                    item.dict() if hasattr(item, "dict") and callable(item.dict) else item
+                    for item in arg_value
+                ]
+            elif hasattr(arg_value, "dict") and callable(arg_value.dict):
+                params['params']['arguments'][arg_name] = arg_value.dict()
+        #
+        response = requests.post(self.mcp_tools_call, headers=self.headers, json=params, verify=False)
+        try:
+            return response.json()
+        except (ValueError, TypeError):
+            return response.text
 
     def get_app_details(self, application_id: int, version_name: Optional[str] = None):
         url = f"{self.app}/{application_id}" if version_name is None else f"{self.app}/{application_id}/{version_name}"
@@ -1221,15 +1213,6 @@ class AlitaClient:
         except TypeError:
             logger.error(f"TypeError in response of predict: {response.content}")
             raise
-
-    def _get_real_user_id(self):
-        try:
-            import tasknode_task # pylint: disable=E0401
-            monitoring_meta = tasknode_task.meta.get("monitoring", {})
-            return monitoring_meta["user_id"]
-        except Exception as e:
-            logger.debug(f"Error: Could not determine user ID for MCP tool: {e}")
-            return None
 
     def predict_agent(self, llm: ChatOpenAI, instructions: str = "You are a helpful assistant.",
                       tools: Optional[list] = None, chat_history: Optional[List[Any]] = None,
