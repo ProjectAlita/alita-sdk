@@ -283,6 +283,10 @@ def get_tools(tools_list, alita, llm, store: Optional[BaseStore] = None, *args, 
                 if indexer_tools:
                     logger.warning(f"[TOOLS_LOAD] Indexer tools present in {tool_type}: {indexer_tools}")
             except Exception as e:
+                # Re-raise McpAuthorizationRequired so callers can handle OAuth flows
+                from alita_sdk.runtime.utils.mcp_oauth import McpAuthorizationRequired
+                if isinstance(e, McpAuthorizationRequired):
+                    raise
                 logger.error(f"Error getting tools for {tool_type}: {e}")
                 raise ToolException(f"Error getting tools for {tool_type}: {e}")
         elif settings.get("module"):

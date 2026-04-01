@@ -68,10 +68,12 @@ class SharepointToolkit(BaseToolkit):
         }
 
         # handle OAuth flow: specific for Sharepoint (dependent on oauth_discovery_endpoint), can be extended to other tools in the future if needed
-        if kwargs.get('tokens') and kwargs['sharepoint_configuration'].get('oauth_discovery_endpoint'):
+        sp_config = kwargs.get('sharepoint_configuration', {})
+        logger.debug(f"[SP OAuth] tokens keys={list(kwargs.get('tokens', {}).keys())}, sp_config site_url={sp_config.get('site_url')}, oauth_endpoint={sp_config.get('oauth_discovery_endpoint')}, config_uuid={sp_config.get('configuration_uuid')}")
+        if kwargs.get('tokens') and sp_config.get('oauth_discovery_endpoint'):
             logger.debug(f"Sharepoint configuration includes OAuth discovery endpoint and tokens are provided. Attempting to retrieve access token.")
-            oauth_endpoint = kwargs['sharepoint_configuration']['oauth_discovery_endpoint']
-            config_uuid = kwargs['sharepoint_configuration'].get('configuration_uuid')
+            oauth_endpoint = sp_config['oauth_discovery_endpoint']
+            config_uuid = sp_config.get('configuration_uuid')
             # Try credential-specific key first ("<configuration_uuid>:<oauth_discovery_endpoint>").
             # The frontend stores tokens under this composite key so that two SharePoint
             # credentials sharing the same oauth_discovery_endpoint (same Azure AD tenant)
@@ -83,8 +85,38 @@ class SharepointToolkit(BaseToolkit):
             # (legacy sessions or toolkit-level flows that don't use credential UUIDs).
             if token is None:
                 token = kwargs['tokens'].get(oauth_endpoint)
+            # Fallback to site_url key: the frontend may store the token under the
+            # SharePoint site URL when tokenStorageKey is not explicitly overridden
+            # (e.g. when the auth modal opens without a pre-configured storage key).
+            if token is None:
+                site_url_key = sp_config.get('site_url', '')
+                if site_url_key:
+                    token = kwargs['tokens'].get(site_url_key)
             if token is not None:
                 wrapper_payload['token'] = token.get('access_token') if isinstance(token, dict) else token
+                # Delegated tokens from mcp_tokens are always Azure AD Graph tokens.
+                # Ensure 'scopes' is non-empty so validate_toolkit selects
+                # SharepointGraphWrapper (token + scopes path) rather than
+                # SharepointRestWrapper (token-only path), which does not use the
+                # delegated token for Graph calls and falls back to app-only auth.
+                if not wrapper_payload.get('scopes'):
+                    wrapper_payload['scopes'] = ['https://graph.microsoft.com/.default']
+
+        # Proactive OAuth guard: if delegated flow is configured but no token was resolved,
+        # raise McpAuthorizationRequired immediately so Chat/agents surface a clean login
+        # prompt instead of failing deep inside a tool call with a cryptic error.
+        if sp_config.get('oauth_discovery_endpoint') and not wrapper_payload.get('token'):
+            logger.debug("SharePoint OAuth mode active but no token found — raising McpAuthorizationRequired.")
+            raise SharepointConfiguration._build_mcp_authorization_required(
+                message=(
+                    f"SharePoint site {sp_config.get('site_url', '')} requires OAuth authorization. "
+                    "Please log in to continue."
+                ),
+                site_url=sp_config.get('site_url', ''),
+                oauth_discovery_endpoint=sp_config['oauth_discovery_endpoint'],
+                scopes=sp_config.get('scopes'),
+                configuration_uuid=sp_config.get('configuration_uuid'),
+            )
 
         sharepoint_api_wrapper = SharepointApiWrapper(**wrapper_payload)
         available_tools = sharepoint_api_wrapper.get_available_tools()
