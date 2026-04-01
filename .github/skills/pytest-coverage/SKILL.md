@@ -1,6 +1,6 @@
 ---
 name: "pytest-coverage"
-description: "Run branch coverage reports for Python modules using coverage.py with pytest, interpret missing lines and partial branches, and identify gaps to target with new tests"
+description: "Run coverage.py with pytest to measure Python source code execution (line and branch coverage). Use ONLY when asked to run coverage.py, check which Python lines/branches are executed, or generate a coverage.py HTML report. Do NOT use for tracking which toolkit tools have YAML test cases — use coverage-calculator for that."
 ---
 
 # Pytest Coverage Skill

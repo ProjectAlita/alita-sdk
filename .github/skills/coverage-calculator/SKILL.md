@@ -1,6 +1,6 @@
 ---
-name: "Coverage Calculator"
-description: "Calculate and update test coverage metrics for ALITA SDK toolkits"
+name: "coverage-calculator"
+description: "Calculate which toolkit API-wrapper tools have YAML test cases in .alita/tests/test_pipelines/suites/, update test_coverage.md, and identify untested tools. Use ONLY for toolkit-level tool coverage (counting tools vs test cases). Do NOT use for running coverage.py or measuring Python code execution — use pytest-coverage for that."
 ---
 
 # Coverage Calculator Skill
