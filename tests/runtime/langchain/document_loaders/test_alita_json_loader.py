@@ -35,12 +35,4 @@ def test_loader(
     file_path: Path,
     baseline_path: Path,
 ) -> None:
-    _SKIP = {
-        ("json_large", 0),
-        ("json_large", 1),
-        ("json_large", 2),
-        ("json_nested", 1),
-    }
-    if (input_name, config_index) in _SKIP:
-        pytest.skip(f"{input_name} config{config_index}: known failure — pending fix")
     run_loader_assert(_LOADER_NAME, tmp_path, input_name, config_index, config, file_path, baseline_path)

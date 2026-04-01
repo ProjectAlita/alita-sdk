@@ -4,14 +4,14 @@
   "configs": [
     {
       "_name": "ocr_only",
-      "use_llm": false,
-      "max_tokens": 2048
+      "_use_llm": false,
+      "_max_tokens": 2048
     },
     {
       "_name": "llm_default_prompt",
-      "use_llm": true,
-      "prompt_default": true,
-      "max_tokens": 2048
+      "_use_llm": true,
+      "_prompt_default": true,
+      "_max_tokens": 2048
     }
   ]
 }

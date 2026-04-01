@@ -78,8 +78,8 @@ def _get_llm_for_tests():
     
     Requires environment variables:
     - DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: Model name
-    - DEPLOYMENT_URL: Alita deployment URL
-    - PROJECT_ID: Project ID
+    - ELITEA_DEPLOYMENT_URL: Alita deployment URL
+    - ELITEA_PROJECT_ID: Project ID
     - ELITEA_TOKEN: API key
     """
     model_name = os.getenv('DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS')
@@ -87,12 +87,12 @@ def _get_llm_for_tests():
         return None
     
     # Check if required client credentials are available
-    deployment_url = os.getenv('DEPLOYMENT_URL')
-    project_id = os.getenv('PROJECT_ID')
+    deployment_url = os.getenv('ELITEA_DEPLOYMENT_URL')
+    project_id = os.getenv('ELITEA_PROJECT_ID')
     api_key = os.getenv('ELITEA_TOKEN')
     
     if not all([deployment_url, project_id, api_key]):
-        _rp_log(f"Warning: Cannot create LLM - missing credentials (DEPLOYMENT_URL, PROJECT_ID, or ALITA_API_KEY)")
+        _rp_log(f"Warning: Cannot create LLM - missing credentials (ELITEA_DEPLOYMENT_URL, ELITEA_PROJECT_ID, or ELITEA_TOKEN)")
         return None
     
     try:
@@ -116,47 +116,30 @@ def _get_llm_for_tests():
         return None
 
 
-def _load_documents_with_production_config(file_path: Path, config: Dict[str, Any], llm=None) -> List:
-    """Load documents using production configuration logic.
-    
-    This replicates the logic from process_content_by_type but uses the actual
-    file path instead of creating a temp file, so metadata contains correct paths.
-    
-    Args:
-        file_path: Path to the file to load
-        config: Configuration dict from test input
-        llm: Optional LLM instance for image/multimodal loaders
+def _load_documents_directly(loader_name: str, file_path: Path, config: Dict[str, Any], llm=None) -> List:
+    """Instantiate loader class directly with config as constructor kwargs.
+
+    Config values from input JSON are passed as-is to the loader constructor.
+    No intermediary transformations through loaders_map or allowed_to_override.
+
+    Keys starting with '_' are stripped (reserved for test metadata like _name).
     """
-    from alita_sdk.runtime.langchain.document_loaders.constants import loaders_map, LoaderProperties
-    
-    extension = file_path.suffix.lower()
-    loader_config = loaders_map.get(extension)
-    if not loader_config:
-        raise ValueError(f"No loader found for extension: {extension}")
-    
-    loader_cls = loader_config['class']
-    loader_kwargs = dict(loader_config.get('kwargs', {}))
-    
-    # Apply chunking_config override logic (same as process_content_by_type)
-    allowed_to_override = loader_config.get('allowed_to_override', loader_kwargs)
-    
-    # Start with production defaults from allowed_to_override
-    loader_kwargs.update(allowed_to_override)
-    
-    # Apply user overrides (filtered by allowed_to_override keys)
-    if config:
-        for key in set(config.keys()) & set(allowed_to_override.keys()):
-            loader_kwargs[key] = config[key]
-    
-    # Handle LLM and prompt placeholders
-    if LoaderProperties.LLM.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.LLM.value):
-        loader_kwargs['llm'] = llm  # Use provided LLM instance
-    if LoaderProperties.PROMPT_DEFAULT.value in loader_kwargs and loader_kwargs.pop(LoaderProperties.PROMPT_DEFAULT.value):
-        from alita_sdk.tools.utils.content_parser import image_processing_prompt
-        loader_kwargs[LoaderProperties.PROMPT.value] = image_processing_prompt
-    
-    # Instantiate and load
-    loader = loader_cls(file_path=str(file_path), **loader_kwargs)
+    import importlib
+    module = importlib.import_module(f'alita_sdk.runtime.langchain.document_loaders.{loader_name}')
+    loader_cls = getattr(module, loader_name)
+
+    kwargs = {k: v for k, v in config.items() if not k.startswith('_')}
+    kwargs['file_path'] = str(file_path)
+
+    if llm is not None:
+        kwargs['llm'] = llm
+        # If config specifies default prompt and no explicit prompt provided, inject image_processing_prompt
+        # This mirrors the logic in content_parser.process_content_by_type for consistency
+        if config.get('_prompt_default') and 'prompt' not in kwargs:
+            from alita_sdk.tools.utils.content_parser import image_processing_prompt
+            kwargs['prompt'] = image_processing_prompt
+
+    loader = loader_cls(**kwargs)
     return list(loader.load())
 
 
@@ -176,11 +159,13 @@ def _load_expected_documents_for_test(baseline_path: Path) -> List:
         return docs
 
 
-def _load_actual_documents_for_test(file_path: Path, config: Dict[str, Any], llm=None) -> List:
+def _load_actual_documents_for_test(file_path: Path, config: Dict[str, Any], loader_name: str, llm=None) -> List:
     with rp_step(f"Load actual documents from source {file_path}"):
         from loader_test_utils import serialize_documents
-        docs = _load_documents_with_production_config(file_path, config, llm=llm)
-        llm_info = f" with LLM={type(llm).__name__}" if llm else ""
+        # Only pass LLM if config explicitly requests it
+        actual_llm = llm if config.get('_use_llm') else None
+        docs = _load_documents_directly(loader_name, file_path, config, llm=actual_llm)
+        llm_info = f" with LLM={type(actual_llm).__name__}" if actual_llm else " (OCR only)"
         _rp_log(f"Loaded {len(docs)} actual document(s) with config: {config or {}}{llm_info}")
         _rp_log(
             f"Actual documents ({len(docs)})",
@@ -325,8 +310,7 @@ def run_single_config_test(
         return result
 
     try:
-        # Use production configuration logic while preserving file paths
-        actual_docs = _load_actual_documents_for_test(file_path, config, llm=llm)
+        actual_docs = _load_actual_documents_for_test(file_path, config, loader_name=loader_name, llm=llm)
         result.actual_doc_count = len(actual_docs)
     except Exception as exc:
         result.error = f"Loader exception: {exc}"
@@ -339,23 +323,23 @@ def run_single_config_test(
         logger.warning(f"Could not save actual output to {actual_output_path}: {exc}")
 
     # Only use LLM for comparison if config explicitly uses LLM for loading
-    # This ensures OCR-only configs (use_llm: false) use similarity-based comparison
+    # This ensures OCR-only configs (_use_llm: false) use similarity-based comparison
     comparison_llm = None
     debug_log_path = None
     input_context = None
-    
-    if config.get("use_llm"):
+
+    if config.get("_use_llm"):
         # Config uses LLM - use LLM for semantic validation in comparison
         comparison_llm = llm
-        
+
         # Construct debug log path for LLM validation comparison
         if llm is not None:
             debug_log_path = str(actual_output_path.parent / f"llm_validation_debug_{input_name}_config_{config_index}.jsonl")
-        
+
         # Extract input context (prompt) from config for better LLM validation
         if "prompt" in config:
             input_context = config["prompt"]
-        elif config.get("prompt_default"):
+        elif config.get("_prompt_default"):
             from alita_sdk.tools.utils.content_parser import image_processing_prompt
             input_context = image_processing_prompt
 

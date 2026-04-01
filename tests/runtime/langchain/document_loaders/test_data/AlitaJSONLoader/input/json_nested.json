@@ -2,7 +2,7 @@
   "tags": ["loader:json", "content:nested", "feature:chunking"],
   "file_path": "../files/json_nested.json",
   "configs": [
-    {},
+    {"max_tokens": 512},
     {"max_tokens": 256},
     {"max_tokens": 1024}
   ]

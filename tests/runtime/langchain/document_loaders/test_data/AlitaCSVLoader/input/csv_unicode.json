@@ -2,7 +2,7 @@
     "tags": ["loader:csv", "content:unicode", "edge:encoding"],
     "file_path": "../files/csv_unicode.csv",
     "configs": [
-        {},
-        {"max_tokens": 1024}
+        {"encoding": "utf-8", "raw_content": true, "cleanse": false},
+        {"encoding": "utf-8", "raw_content": true, "cleanse": false}
     ]
 }
