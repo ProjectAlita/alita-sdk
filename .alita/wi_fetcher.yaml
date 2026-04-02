@@ -413,14 +413,14 @@ nodes:
       {% if parent_relation %}
         FetchParent
       {% else %}
-        SkipParent
+        CheckPredecessors
       {% endif %}
-    default_output: SkipParent
+    default_output: CheckPredecessors
     input:
       - parent_relation
     routes:
       - FetchParent
-      - SkipParent
+      - CheckPredecessors
 
   - id: FetchParent
     type: code
@@ -594,17 +594,6 @@ nodes:
     structured_output: true
     transition: CheckPredecessors
 
-  - id: SkipParent
-    type: code
-    code:
-      type: fixed
-      value: |-
-        {"parent_work_item": {}}
-    input: []
-    output:
-      - parent_work_item
-    structured_output: true
-    transition: CheckPredecessors
 
   # ── Fetch predecessors if present ─────────────────────────────────
   - id: CheckPredecessors
@@ -613,14 +602,14 @@ nodes:
       {% if predecessor_relations and predecessor_relations|length > 0 %}
         InitPredecessorsFetch
       {% else %}
-        SkipPredecessors
+        BuildOutput
       {% endif %}
-    default_output: SkipPredecessors
+    default_output: BuildOutput
     input:
       - predecessor_relations
     routes:
       - InitPredecessorsFetch
-      - SkipPredecessors
+      - BuildOutput
 
   - id: InitPredecessorsFetch
     type: code
@@ -848,18 +837,6 @@ nodes:
       - current_predecessor_index
     structured_output: true
     transition: FetchPredecessorLoop
-
-  - id: SkipPredecessors
-    type: code
-    code:
-      type: fixed
-      value: |-
-        {"predecessors": []}
-    input: []
-    output:
-      - predecessors
-    structured_output: true
-    transition: BuildOutput
 
   # ── Build output JSON ─────────────────────────────────────────────
   - id: BuildOutput
