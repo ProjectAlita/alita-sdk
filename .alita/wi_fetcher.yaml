@@ -1,6 +1,9 @@
 state:
   input:
     type: string
+  messages:
+    type: list
+    value: []
   work_item_id:
     type: int
     value: 0
@@ -198,26 +201,28 @@ nodes:
 
   # ── Error formatting ──────────────────────────────────────────────
   - id: FormatError
-    type: llm
+    type: code
+    code:
+      type: fixed
+      value: |-
+        error_message = alita_state.get('error_message', '')
+        work_item_id = alita_state.get('work_item_id', 0)
+        
+        report = f"""❌ Failed to fetch work item{' ' + str(work_item_id) if work_item_id else ''}.
+
+**Error:** {error_message}
+
+Please check the input and try again."""
+        
+        msgs = list(alita_state.get('messages', []))
+        msgs.append({"role": "assistant", "content": report})
+        {"messages": msgs}
     input:
       - error_message
       - work_item_id
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |
-          You are a helpful assistant. Present the error message clearly and concisely to the user.
-      task:
-        type: fstring
-        value: |
-          Failed to fetch work item {work_item_id}.
-          Error: {error_message}
     output:
-      - output_str
-    structured_output: false
+      - messages
+    structured_output: true
     transition: END
 
   # ── Fetch root work item ──────────────────────────────────────────
@@ -907,36 +912,82 @@ nodes:
 
   # ── Format and return output ──────────────────────────────────────
   - id: FormatOutput
-    type: llm
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        output_json = alita_state.get('output_json', {})
+        artifact_filename = alita_state.get('artifact_filename', '')
+        work_item_id = alita_state.get('work_item_id', 0)
+        
+        # Extract summary data
+        work_item = output_json.get('work_item', {})
+        parent = output_json.get('parent', {})
+        predecessors = output_json.get('predecessors', [])
+        comments = output_json.get('comments', [])
+        links = output_json.get('links', {})
+        
+        # Build report
+        report_lines = [
+            f"✅ Successfully fetched work item and saved to artifact: **{artifact_filename}**",
+            "",
+            "## Work Item Summary",
+            "",
+            f"**ID:** {work_item.get('id', 'N/A')}",
+            f"**Title:** {work_item.get('title', 'N/A')}",
+            f"**State:** {work_item.get('state', 'N/A')}",
+            f"**Type:** {work_item.get('work_item_type', 'N/A')}",
+            "",
+            "## Extracted Data",
+            ""
+        ]
+        
+        # Parent
+        if parent and parent != {}:
+            report_lines.append(f"✓ **Parent:** Found (ID: {parent.get('id', 'N/A')})")
+        else:
+            report_lines.append("✗ **Parent:** None")
+        
+        # Predecessors
+        if predecessors:
+            report_lines.append(f"✓ **Predecessors:** {len(predecessors)} found")
+        else:
+            report_lines.append("✗ **Predecessors:** None")
+        
+        # Comments
+        if comments:
+            report_lines.append(f"✓ **Comments:** {len(comments)} found")
+        else:
+            report_lines.append("✗ **Comments:** None")
+        
+        # Links
+        report_lines.append("")
+        report_lines.append("## Links Found")
+        total_links = sum(len(v) for v in links.values() if isinstance(v, list))
+        if total_links > 0:
+            if links.get('wiki'):
+                report_lines.append(f"  - Wiki: {len(links['wiki'])}")
+            if links.get('item'):
+                report_lines.append(f"  - Work Items: {len(links['item'])}")
+            if links.get('figma'):
+                report_lines.append(f"  - Figma: {len(links['figma'])}")
+            if links.get('other'):
+                report_lines.append(f"  - Other: {len(links['other'])}")
+        else:
+            report_lines.append("  None")
+        
+        report = "\n".join(report_lines)
+        
+        msgs = list(alita_state.get('messages', []))
+        msgs.append({"role": "assistant", "content": report})
+        {"messages": msgs}
     input:
-      - output_str
-      - work_item_id
+      - output_json
       - artifact_filename
-    input_mapping:
-      chat_history:
-        type: fixed
-        value: []
-      system:
-        type: fixed
-        value: |
-          You are a helpful assistant. Present the work item extraction results in a clear, structured format.
-          Summarize the key information including:
-          - The artifact filename where data was saved
-          - Work item ID, title and state
-          - Whether parent was found
-          - Number of predecessors found
-          - Number of comments
-          - Links found by category
-      task:
-        type: fstring
-        value: |
-          Successfully fetched work item {work_item_id} and saved to artifact: {artifact_filename}
-          
-          Extraction results:
-          {output_str}
-          
-          Provide a clear, concise summary mentioning the artifact filename and what was extracted.
+      - work_item_id
     output:
-      - output_str
-    structured_output: false
+      - messages
+    structured_output: true
     transition: END
