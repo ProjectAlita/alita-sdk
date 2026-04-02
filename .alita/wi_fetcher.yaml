@@ -1,0 +1,1049 @@
+state:
+  input:
+    type: string
+  work_item_id:
+    type: int
+    value: 0
+  relations_include:
+    type: list
+    value: []
+  relations_exclude:
+    type: list
+    value: []
+  validation_passed:
+    type: bool
+    value: false
+  error_message:
+    type: string
+    value: ''
+  root_work_item:
+    type: dict
+    value: {}
+  parent_relation:
+    type: dict
+    value: {}
+  predecessor_relations:
+    type: list
+    value: []
+  parent_id:
+    type: int
+    value: 0
+  parent_work_item_raw:
+    type: dict
+    value: {}
+  parent_work_item:
+    type: dict
+    value: {}
+  parent_needs_comments:
+    type: bool
+    value: false
+  parent_comments:
+    type: list
+    value: []
+  predecessor_ids:
+    type: list
+    value: []
+  current_predecessor_index:
+    type: int
+    value: 0
+  current_pred_id:
+    type: int
+    value: 0
+  predecessor_work_item_raw:
+    type: dict
+    value: {}
+  current_predecessor:
+    type: dict
+    value: {}
+  pred_needs_comments:
+    type: bool
+    value: false
+  pred_comments:
+    type: list
+    value: []
+  predecessors:
+    type: list
+    value: []
+  other_relations:
+    type: list
+    value: []
+  links:
+    type: dict
+    value: {}
+  comments:
+    type: list
+    value: []
+  output_json:
+    type: dict
+    value: {}
+  output_str:
+    type: string
+    value: ''
+  artifact_filename:
+    type: string
+    value: ''
+entry_point: ParseInput
+nodes:
+  # ── Input validation ──────────────────────────────────────────────
+  - id: ParseInput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        import re
+
+        input_str = alita_state.get('input', '').strip()
+
+        if not input_str:
+            result = {
+                "validation_passed": False,
+                "error_message": "Input required. Provide JSON: {\"id\": 123}",
+                "work_item_id": 0,
+                "relations_include": [],
+                "relations_exclude": ["System.LinkTypes.Hierarchy-Forward", "System.LinkTypes.Dependency-Forward", "System.LinkTypes.Related"]
+            }
+        else:
+            parse_failed = False
+            try:
+                input_data = json.loads(input_str)
+            except json.JSONDecodeError:
+                # Try to fix Python-style booleans
+                fixed = re.sub(r':\s*True\b', ': true', input_str)
+                fixed = re.sub(r':\s*False\b', ': false', fixed)
+                try:
+                    input_data = json.loads(fixed)
+                except json.JSONDecodeError:
+                    parse_failed = True
+                    result = {
+                        "validation_passed": False,
+                        "error_message": f"Invalid JSON. Expected: {{\"id\": 123}}\nReceived: \"{input_str}\"",
+                        "work_item_id": 0,
+                        "relations_include": [],
+                        "relations_exclude": ["System.LinkTypes.Hierarchy-Forward", "System.LinkTypes.Dependency-Forward", "System.LinkTypes.Related"]
+                    }
+
+            if not parse_failed:
+                if not isinstance(input_data, dict):
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Input must be a JSON object.",
+                        "work_item_id": 0,
+                        "relations_include": [],
+                        "relations_exclude": ["System.LinkTypes.Hierarchy-Forward", "System.LinkTypes.Dependency-Forward", "System.LinkTypes.Related"]
+                    }
+                elif 'id' not in input_data:
+                    result = {
+                        "validation_passed": False,
+                        "error_message": "Missing required field 'id'. Expected: {\"id\": 123}",
+                        "work_item_id": 0,
+                        "relations_include": input_data.get('relations_include', []),
+                        "relations_exclude": input_data.get('relations_exclude', ["System.LinkTypes.Hierarchy-Forward", "System.LinkTypes.Dependency-Forward", "System.LinkTypes.Related"])
+                    }
+                else:
+                    try:
+                        work_item_id = int(input_data['id'])
+                        if work_item_id <= 0:
+                            raise ValueError()
+                    except (ValueError, TypeError):
+                        work_item_id = None
+                        result = {
+                            "validation_passed": False,
+                            "error_message": f"Invalid ID: {input_data['id']}. Must be a positive integer.",
+                            "work_item_id": 0,
+                            "relations_include": [],
+                            "relations_exclude": ["System.LinkTypes.Hierarchy-Forward", "System.LinkTypes.Dependency-Forward", "System.LinkTypes.Related"]
+                        }
+
+                    if work_item_id:
+                        # Default exclude: Children, Successors, Related
+                        # Default keep: Predecessors, Parent
+                        default_exclude = ["System.LinkTypes.Hierarchy-Forward", "System.LinkTypes.Dependency-Forward", "System.LinkTypes.Related"]
+                        result = {
+                            "validation_passed": True,
+                            "error_message": "",
+                            "work_item_id": work_item_id,
+                            "relations_include": input_data.get('relations_include', []),
+                            "relations_exclude": input_data.get('relations_exclude', default_exclude),
+                            "artifact_filename": f"{work_item_id}_work_item.json"
+                        }
+
+        result
+    input:
+      - input
+    output:
+      - validation_passed
+      - error_message
+      - work_item_id
+      - relations_include
+      - relations_exclude
+      - artifact_filename
+    structured_output: true
+    transition: ValidationRouter
+  
+  - id: ValidationRouter
+    type: router
+    condition: |
+      {% if validation_passed %}
+        FetchRootWorkItem
+      {% else %}
+        FormatError
+      {% endif %}
+    default_output: FormatError
+    input:
+      - validation_passed
+    routes:
+      - FetchRootWorkItem
+      - FormatError
+
+  # ── Error formatting ──────────────────────────────────────────────
+  - id: FormatError
+    type: llm
+    input:
+      - error_message
+      - work_item_id
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a helpful assistant. Present the error message clearly and concisely to the user.
+      task:
+        type: fstring
+        value: |
+          Failed to fetch work item {work_item_id}.
+          Error: {error_message}
+    output:
+      - output_str
+    structured_output: false
+    transition: END
+
+  # ── Fetch root work item ──────────────────────────────────────────
+  - id: FetchRootWorkItem
+    type: toolkit
+    input:
+      - work_item_id
+    input_mapping:
+      id:
+        type: variable
+        value: work_item_id
+      expand:
+        type: fixed
+        value: All
+    on_error:
+      transition: HandleFetchError
+    output:
+      - root_work_item
+    structured_output: true
+    tool: get_work_item
+    toolkit_name: LFAADOBoardReader
+    transition: ProcessRootWorkItem
+  
+  - id: HandleFetchError
+    type: code
+    code:
+      type: fixed
+      value: |-
+        work_item_id = alita_state.get('work_item_id')
+        {
+            "validation_passed": False,
+            "error_message": f"Failed to fetch work item {work_item_id}. Item may not exist or access denied."
+        }
+    input:
+      - work_item_id
+    output:
+      - validation_passed
+      - error_message
+    structured_output: true
+    transition: FormatError
+
+  # ── Process root work item ────────────────────────────────────────
+  - id: ProcessRootWorkItem
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        import re
+        import html as _html
+
+        root_work_item = alita_state.get('root_work_item', {})
+        work_item_id = alita_state.get('work_item_id')
+        relations_include = alita_state.get('relations_include', [])
+        relations_exclude = alita_state.get('relations_exclude', [])
+
+        def simplify_user(user_obj):
+            """Extract only name and email from user object"""
+            if not user_obj or not isinstance(user_obj, dict):
+                return None
+            return {
+                'name': user_obj.get('displayName', 'Unknown'),
+                'email': user_obj.get('uniqueName', '')
+            }
+
+        def strip_html(text):
+            """Remove HTML tags from text"""
+            if not text:
+                return ''
+            text = _html.unescape(text)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = text.replace('\xa0', ' ')
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
+
+        def extract_links(text):
+            """Extract and categorize links from HTML text"""
+            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
+            if not text:
+                return links
+            urls = []
+            # Extract from href attributes
+            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
+            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
+            # Extract plain URLs
+            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
+            
+            seen = set()
+            for url in urls:
+                if url in seen:
+                    continue
+                seen.add(url)
+                if 'figma.com' in url:
+                    links['figma'].append(url)
+                elif '/_wiki/' in url or '/wiki/' in url:
+                    links['wiki'].append(url)
+                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
+                    links['item'].append(url)
+                else:
+                    links['other'].append(url)
+            return links
+
+        def filter_relations(relations, include_list, exclude_list):
+            """Filter relations based on include/exclude lists"""
+            if not relations:
+                return {'parent': None, 'predecessors': [], 'other': []}
+            
+            filtered = {'parent': None, 'predecessors': [], 'other': []}
+            
+            for relation in relations:
+                rel_type = relation.get('rel', '')
+                
+                # Skip if in exclude list
+                if exclude_list and rel_type in exclude_list:
+                    continue
+                
+                # If include list is specified, only keep those in the list
+                if include_list and rel_type not in include_list:
+                    continue
+                
+                # Categorize relation
+                if rel_type == 'System.LinkTypes.Hierarchy-Reverse':  # Parent
+                    filtered['parent'] = relation
+                elif rel_type == 'System.LinkTypes.Dependency-Reverse':  # Predecessor
+                    filtered['predecessors'].append(relation)
+                else:
+                    filtered['other'].append(relation)
+            
+            return filtered
+
+        # Extract core fields
+        processed_item = {
+            'id': root_work_item.get('id') or root_work_item.get('System.Id'),
+            'url': root_work_item.get('url', ''),
+            'title': root_work_item.get('System.Title', 'Untitled'),
+            'state': root_work_item.get('System.State', 'Unknown'),
+            'work_item_type': root_work_item.get('System.WorkItemType', 'Unknown'),
+            'description': strip_html(root_work_item.get('System.Description', '')),
+            'acceptance_criteria': strip_html(root_work_item.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
+            'assigned_to': simplify_user(root_work_item.get('System.AssignedTo')),
+            'created_by': simplify_user(root_work_item.get('System.CreatedBy')),
+            'changed_by': simplify_user(root_work_item.get('System.ChangedBy')),
+            'created_date': root_work_item.get('System.CreatedDate', ''),
+            'changed_date': root_work_item.get('System.ChangedDate', ''),
+            'comment_count': root_work_item.get('System.CommentCount', 0)
+        }
+
+        # Parse links from description
+        description_html = root_work_item.get('System.Description', '')
+        links = extract_links(description_html)
+
+        # Filter relations
+        raw_relations = root_work_item.get('relations', [])
+        filtered_relations = filter_relations(raw_relations, relations_include, relations_exclude)
+
+        {
+            'root_work_item': processed_item,
+            'links': links,
+            'other_relations': filtered_relations['other'],
+            'parent_relation': filtered_relations['parent'],
+            'predecessor_relations': filtered_relations['predecessors']
+        }
+    input:
+      - root_work_item
+      - work_item_id
+      - relations_include
+      - relations_exclude
+    output:
+      - root_work_item
+      - links
+      - other_relations
+      - parent_relation
+      - predecessor_relations
+    structured_output: true
+    transition: CheckComments
+
+  # ── Fetch comments if count > 0 ───────────────────────────────────
+  - id: CheckComments
+    type: router
+    condition: |
+      {% if root_work_item.comment_count > 0 %}
+        FetchComments
+      {% else %}
+        SkipComments
+      {% endif %}
+    default_output: SkipComments
+    input:
+      - root_work_item
+    routes:
+      - FetchComments
+      - SkipComments
+
+  - id: FetchComments
+    type: toolkit
+    input:
+      - work_item_id
+    input_mapping:
+      work_item_id:
+        type: variable
+        value: work_item_id
+    on_error:
+      transition: SkipComments
+    output:
+      - comments
+    structured_output: true
+    tool: get_comments
+    toolkit_name: LFAADOBoardReader
+    transition: CheckParent
+
+  - id: SkipComments
+    type: code
+    code:
+      type: fixed
+      value: |-
+        {"comments": []}
+    input: []
+    output:
+      - comments
+    structured_output: true
+    transition: CheckParent
+
+  # ── Fetch parent if present ───────────────────────────────────────
+  - id: CheckParent
+    type: router
+    condition: |
+      {% if parent_relation %}
+        FetchParent
+      {% else %}
+        SkipParent
+      {% endif %}
+    default_output: SkipParent
+    input:
+      - parent_relation
+    routes:
+      - FetchParent
+      - SkipParent
+
+  - id: FetchParent
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        
+        parent_relation = alita_state.get('parent_relation', {})
+        parent_url = parent_relation.get('url', '')
+        
+        # Extract ID from URL
+        match = re.search(r'/workItems/(\d+)$', parent_url)
+        if match:
+            parent_id = int(match.group(1))
+        else:
+            parent_id = None
+        
+        {'parent_id': parent_id}
+    input:
+      - parent_relation
+    output:
+      - parent_id
+    structured_output: true
+    transition: FetchParentWorkItem
+
+  - id: FetchParentWorkItem
+    type: toolkit
+    input:
+      - parent_id
+    input_mapping:
+      id:
+        type: variable
+        value: parent_id
+      expand:
+        type: fixed
+        value: All
+    on_error:
+      transition: SkipParent
+    output:
+      - parent_work_item_raw
+    structured_output: true
+    tool: get_work_item
+    toolkit_name: LFAADOBoardReader
+    transition: ProcessParent
+
+  - id: ProcessParent
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        import html as _html
+
+        parent_work_item_raw = alita_state.get('parent_work_item_raw', {})
+
+        def simplify_user(user_obj):
+            if not user_obj or not isinstance(user_obj, dict):
+                return None
+            return {
+                'name': user_obj.get('displayName', 'Unknown'),
+                'email': user_obj.get('uniqueName', '')
+            }
+
+        def strip_html(text):
+            if not text:
+                return ''
+            text = _html.unescape(text)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = text.replace('\xa0', ' ')
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
+
+        def extract_links(text):
+            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
+            if not text:
+                return links
+            urls = []
+            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
+            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
+            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
+            
+            seen = set()
+            for url in urls:
+                if url in seen:
+                    continue
+                seen.add(url)
+                if 'figma.com' in url:
+                    links['figma'].append(url)
+                elif '/_wiki/' in url or '/wiki/' in url:
+                    links['wiki'].append(url)
+                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
+                    links['item'].append(url)
+                else:
+                    links['other'].append(url)
+            return links
+
+        processed_parent = {
+            'id': parent_work_item_raw.get('id') or parent_work_item_raw.get('System.Id'),
+            'url': parent_work_item_raw.get('url', ''),
+            'title': parent_work_item_raw.get('System.Title', 'Untitled'),
+            'state': parent_work_item_raw.get('System.State', 'Unknown'),
+            'work_item_type': parent_work_item_raw.get('System.WorkItemType', 'Unknown'),
+            'description': strip_html(parent_work_item_raw.get('System.Description', '')),
+            'acceptance_criteria': strip_html(parent_work_item_raw.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
+            'assigned_to': simplify_user(parent_work_item_raw.get('System.AssignedTo')),
+            'created_by': simplify_user(parent_work_item_raw.get('System.CreatedBy')),
+            'changed_by': simplify_user(parent_work_item_raw.get('System.ChangedBy')),
+            'created_date': parent_work_item_raw.get('System.CreatedDate', ''),
+            'changed_date': parent_work_item_raw.get('System.ChangedDate', ''),
+            'comment_count': parent_work_item_raw.get('System.CommentCount', 0),
+            'links': extract_links(parent_work_item_raw.get('System.Description', ''))
+        }
+
+        # Fetch comments if needed
+        parent_needs_comments = processed_parent['comment_count'] > 0
+
+        {'parent_work_item': processed_parent, 'parent_needs_comments': parent_needs_comments}
+    input:
+      - parent_work_item_raw
+    output:
+      - parent_work_item
+      - parent_needs_comments
+    structured_output: true
+    transition: CheckParentComments
+
+  - id: CheckParentComments
+    type: router
+    condition: |
+      {% if parent_needs_comments %}
+        FetchParentComments
+      {% else %}
+        SkipParentComments
+      {% endif %}
+    default_output: SkipParentComments
+    input:
+      - parent_needs_comments
+    routes:
+      - FetchParentComments
+      - SkipParentComments
+
+  - id: FetchParentComments
+    type: toolkit
+    input:
+      - parent_id
+    input_mapping:
+      work_item_id:
+        type: variable
+        value: parent_id
+    on_error:
+      transition: SkipParentComments
+    output:
+      - parent_comments
+    structured_output: true
+    tool: get_comments
+    toolkit_name: LFAADOBoardReader
+    transition: AddParentComments
+
+  - id: AddParentComments
+    type: code
+    code:
+      type: fixed
+      value: |-
+        parent_work_item = alita_state.get('parent_work_item', {})
+        parent_comments = alita_state.get('parent_comments', [])
+        parent_work_item['comments'] = parent_comments
+        {'parent_work_item': parent_work_item}
+    input:
+      - parent_work_item
+      - parent_comments
+    output:
+      - parent_work_item
+    structured_output: true
+    transition: CheckPredecessors
+
+  - id: SkipParentComments
+    type: code
+    code:
+      type: fixed
+      value: |-
+        parent_work_item = alita_state.get('parent_work_item', {})
+        parent_work_item['comments'] = []
+        {'parent_work_item': parent_work_item}
+    input:
+      - parent_work_item
+    output:
+      - parent_work_item
+    structured_output: true
+    transition: CheckPredecessors
+
+  - id: SkipParent
+    type: code
+    code:
+      type: fixed
+      value: |-
+        {"parent_work_item": {}}
+    input: []
+    output:
+      - parent_work_item
+    structured_output: true
+    transition: CheckPredecessors
+
+  # ── Fetch predecessors if present ─────────────────────────────────
+  - id: CheckPredecessors
+    type: router
+    condition: |
+      {% if predecessor_relations and predecessor_relations|length > 0 %}
+        InitPredecessorsFetch
+      {% else %}
+        SkipPredecessors
+      {% endif %}
+    default_output: SkipPredecessors
+    input:
+      - predecessor_relations
+    routes:
+      - InitPredecessorsFetch
+      - SkipPredecessors
+
+  - id: InitPredecessorsFetch
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        
+        predecessor_relations = alita_state.get('predecessor_relations', [])
+        predecessor_ids = []
+        
+        for pred_rel in predecessor_relations:
+            pred_url = pred_rel.get('url', '')
+            match = re.search(r'/workItems/(\d+)$', pred_url)
+            if match:
+                predecessor_ids.append(int(match.group(1)))
+        
+        {'predecessor_ids': predecessor_ids, 'current_predecessor_index': 0, 'predecessors': []}
+    input:
+      - predecessor_relations
+    output:
+      - predecessor_ids
+      - current_predecessor_index
+      - predecessors
+    structured_output: true
+    transition: FetchPredecessorLoop
+
+  - id: FetchPredecessorLoop
+    type: router
+    condition: |
+      {% if current_predecessor_index < predecessor_ids|length %}
+        FetchSinglePredecessor
+      {% else %}
+        BuildOutput
+      {% endif %}
+    default_output: BuildOutput
+    input:
+      - current_predecessor_index
+      - predecessor_ids
+    routes:
+      - FetchSinglePredecessor
+      - BuildOutput
+
+  - id: FetchSinglePredecessor
+    type: code
+    code:
+      type: fixed
+      value: |-
+        predecessor_ids = alita_state.get('predecessor_ids', [])
+        current_predecessor_index = alita_state.get('current_predecessor_index', 0)
+        current_pred_id = predecessor_ids[current_predecessor_index]
+        {'current_pred_id': current_pred_id}
+    input:
+      - predecessor_ids
+      - current_predecessor_index
+    output:
+      - current_pred_id
+    structured_output: true
+    transition: FetchPredecessorWorkItem
+
+  - id: FetchPredecessorWorkItem
+    type: toolkit
+    input:
+      - current_pred_id
+    input_mapping:
+      id:
+        type: variable
+        value: current_pred_id
+      expand:
+        type: fixed
+        value: All
+    on_error:
+      transition: SkipThisPredecessor
+    output:
+      - predecessor_work_item_raw
+    structured_output: true
+    tool: get_work_item
+    toolkit_name: LFAADOBoardReader
+    transition: ProcessPredecessor
+
+  - id: ProcessPredecessor
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+        import html as _html
+
+        predecessor_work_item_raw = alita_state.get('predecessor_work_item_raw', {})
+
+        def simplify_user(user_obj):
+            if not user_obj or not isinstance(user_obj, dict):
+                return None
+            return {
+                'name': user_obj.get('displayName', 'Unknown'),
+                'email': user_obj.get('uniqueName', '')
+            }
+
+        def strip_html(text):
+            if not text:
+                return ''
+            text = _html.unescape(text)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = text.replace('\xa0', ' ')
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
+
+        def extract_links(text):
+            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
+            if not text:
+                return links
+            urls = []
+            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
+            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
+            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
+            
+            seen = set()
+            for url in urls:
+                if url in seen:
+                    continue
+                seen.add(url)
+                if 'figma.com' in url:
+                    links['figma'].append(url)
+                elif '/_wiki/' in url or '/wiki/' in url:
+                    links['wiki'].append(url)
+                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
+                    links['item'].append(url)
+                else:
+                    links['other'].append(url)
+            return links
+
+        processed_predecessor = {
+            'id': predecessor_work_item_raw.get('id') or predecessor_work_item_raw.get('System.Id'),
+            'url': predecessor_work_item_raw.get('url', ''),
+            'title': predecessor_work_item_raw.get('System.Title', 'Untitled'),
+            'state': predecessor_work_item_raw.get('System.State', 'Unknown'),
+            'work_item_type': predecessor_work_item_raw.get('System.WorkItemType', 'Unknown'),
+            'description': strip_html(predecessor_work_item_raw.get('System.Description', '')),
+            'acceptance_criteria': strip_html(predecessor_work_item_raw.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
+            'assigned_to': simplify_user(predecessor_work_item_raw.get('System.AssignedTo')),
+            'created_by': simplify_user(predecessor_work_item_raw.get('System.CreatedBy')),
+            'changed_by': simplify_user(predecessor_work_item_raw.get('System.ChangedBy')),
+            'created_date': predecessor_work_item_raw.get('System.CreatedDate', ''),
+            'changed_date': predecessor_work_item_raw.get('System.ChangedDate', ''),
+            'comment_count': predecessor_work_item_raw.get('System.CommentCount', 0),
+            'links': extract_links(predecessor_work_item_raw.get('System.Description', ''))
+        }
+
+        pred_needs_comments = processed_predecessor['comment_count'] > 0
+
+        {'current_predecessor': processed_predecessor, 'pred_needs_comments': pred_needs_comments}
+    input:
+      - predecessor_work_item_raw
+    output:
+      - current_predecessor
+      - pred_needs_comments
+    structured_output: true
+    transition: CheckPredecessorComments
+
+  - id: CheckPredecessorComments
+    type: router
+    condition: |
+      {% if pred_needs_comments %}
+        FetchPredecessorComments
+      {% else %}
+        SkipPredecessorComments
+      {% endif %}
+    default_output: SkipPredecessorComments
+    input:
+      - pred_needs_comments
+    routes:
+      - FetchPredecessorComments
+      - SkipPredecessorComments
+
+  - id: FetchPredecessorComments
+    type: toolkit
+    input:
+      - current_pred_id
+    input_mapping:
+      work_item_id:
+        type: variable
+        value: current_pred_id
+    on_error:
+      transition: SkipPredecessorComments
+    output:
+      - pred_comments
+    structured_output: true
+    tool: get_comments
+    toolkit_name: LFAADOBoardReader
+    transition: AddPredecessorComments
+
+  - id: AddPredecessorComments
+    type: code
+    code:
+      type: fixed
+      value: |-
+        current_predecessor = alita_state.get('current_predecessor', {})
+        pred_comments = alita_state.get('pred_comments', [])
+        current_predecessor['comments'] = pred_comments
+        {'current_predecessor': current_predecessor}
+    input:
+      - current_predecessor
+      - pred_comments
+    output:
+      - current_predecessor
+    structured_output: true
+    transition: AddToPredecessorsList
+
+  - id: SkipPredecessorComments
+    type: code
+    code:
+      type: fixed
+      value: |-
+        current_predecessor = alita_state.get('current_predecessor', {})
+        current_predecessor['comments'] = []
+        {'current_predecessor': current_predecessor}
+    input:
+      - current_predecessor
+    output:
+      - current_predecessor
+    structured_output: true
+    transition: AddToPredecessorsList
+
+  - id: SkipThisPredecessor
+    type: code
+    code:
+      type: fixed
+      value: |-
+        current_predecessor_index = alita_state.get('current_predecessor_index', 0)
+        {'current_predecessor_index': current_predecessor_index + 1}
+    input:
+      - current_predecessor_index
+    output:
+      - current_predecessor_index
+    structured_output: true
+    transition: FetchPredecessorLoop
+
+  - id: AddToPredecessorsList
+    type: code
+    code:
+      type: fixed
+      value: |-
+        predecessors = alita_state.get('predecessors', [])
+        current_predecessor = alita_state.get('current_predecessor', {})
+        current_predecessor_index = alita_state.get('current_predecessor_index', 0)
+        
+        predecessors.append(current_predecessor)
+        
+        {'predecessors': predecessors, 'current_predecessor_index': current_predecessor_index + 1}
+    input:
+      - predecessors
+      - current_predecessor
+      - current_predecessor_index
+    output:
+      - predecessors
+      - current_predecessor_index
+    structured_output: true
+    transition: FetchPredecessorLoop
+
+  - id: SkipPredecessors
+    type: code
+    code:
+      type: fixed
+      value: |-
+        {"predecessors": []}
+    input: []
+    output:
+      - predecessors
+    structured_output: true
+    transition: BuildOutput
+
+  # ── Build output JSON ─────────────────────────────────────────────
+  - id: BuildOutput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+
+        root_work_item = alita_state.get('root_work_item', {})
+        parent_work_item = alita_state.get('parent_work_item', {})
+        predecessors = alita_state.get('predecessors', [])
+        other_relations = alita_state.get('other_relations', [])
+        links = alita_state.get('links', {})
+        comments = alita_state.get('comments', [])
+
+        # Build final output structure
+        output_json = {
+            'work_item': root_work_item,
+            'parent': parent_work_item if parent_work_item else None,
+            'predecessors': predecessors if predecessors else [],
+            'other_relations': other_relations if other_relations else [],
+            'links': links,
+            'comments': comments
+        }
+
+        # Remove None values for cleaner output
+        output_json = {k: v for k, v in output_json.items() if v is not None and v != [] and v != {}}
+
+        {'output_json': output_json, 'output_str': json.dumps(output_json, indent=2, ensure_ascii=False)}
+    input:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+      - other_relations
+      - links
+      - comments
+    output:
+      - output_json
+      - output_str
+    structured_output: true
+    transition: SaveToArtifact
+
+  # ── Save to artifact ──────────────────────────────────────────────
+  - id: SaveToArtifact
+    type: toolkit
+    input:
+      - output_str
+      - artifact_filename
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filedata:
+        type: variable
+        value: output_str
+      filename:
+        type: variable
+        value: artifact_filename
+      filepath:
+        type: fixed
+        value: null
+    output: []
+    structured_output: true
+    tool: createFile
+    toolkit_name: ADOartifactstorage
+    transition: FormatOutput
+
+  # ── Format and return output ──────────────────────────────────────
+  - id: FormatOutput
+    type: llm
+    input:
+      - output_str
+      - work_item_id
+      - artifact_filename
+    input_mapping:
+      chat_history:
+        type: fixed
+        value: []
+      system:
+        type: fixed
+        value: |
+          You are a helpful assistant. Present the work item extraction results in a clear, structured format.
+          Summarize the key information including:
+          - The artifact filename where data was saved
+          - Work item ID, title and state
+          - Whether parent was found
+          - Number of predecessors found
+          - Number of comments
+          - Links found by category
+      task:
+        type: fstring
+        value: |
+          Successfully fetched work item {work_item_id} and saved to artifact: {artifact_filename}
+          
+          Extraction results:
+          {output_str}
+          
+          Provide a clear, concise summary mentioning the artifact filename and what was extracted.
+    output:
+      - output_str
+    structured_output: false
+    transition: END
