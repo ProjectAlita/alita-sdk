@@ -402,14 +402,14 @@ nodes:
       {% if root_work_item.comment_count > 0 %}
         FetchComments
       {% else %}
-        SkipComments
+        CheckParent
       {% endif %}
-    default_output: SkipComments
+    default_output: CheckParent
     input:
       - root_work_item
     routes:
       - FetchComments
-      - SkipComments
+      - CheckParent
 
   - id: FetchComments
     type: toolkit
@@ -426,18 +426,6 @@ nodes:
     structured_output: true
     tool: get_comments
     toolkit_name: LFAADOBoardReader
-    transition: CheckParent
-
-  - id: SkipComments
-    type: code
-    code:
-      type: fixed
-      value: |-
-        {"comments": []}
-    input: []
-    output:
-      - comments
-    structured_output: true
     transition: CheckParent
 
   # ── Fetch parent if present ───────────────────────────────────────
@@ -567,7 +555,8 @@ nodes:
             'created_date': parent_work_item_raw.get('System.CreatedDate', ''),
             'changed_date': parent_work_item_raw.get('System.ChangedDate', ''),
             'comment_count': parent_work_item_raw.get('System.CommentCount', 0),
-            'links': extract_links(parent_work_item_raw.get('System.Description', ''))
+            'links': extract_links(parent_work_item_raw.get('System.Description', '')),
+            'comments': []
         }
 
         # Fetch comments if needed
@@ -588,14 +577,14 @@ nodes:
       {% if parent_needs_comments %}
         FetchParentComments
       {% else %}
-        SkipParentComments
+        CheckPredecessors
       {% endif %}
-    default_output: SkipParentComments
+    default_output: CheckPredecessors
     input:
       - parent_needs_comments
     routes:
       - FetchParentComments
-      - SkipParentComments
+      - CheckPredecessors
 
   - id: FetchParentComments
     type: toolkit
@@ -626,21 +615,6 @@ nodes:
     input:
       - parent_work_item
       - parent_comments
-    output:
-      - parent_work_item
-    structured_output: true
-    transition: CheckPredecessors
-
-  - id: SkipParentComments
-    type: code
-    code:
-      type: fixed
-      value: |-
-        parent_work_item = alita_state.get('parent_work_item', {})
-        parent_work_item['comments'] = []
-        {'parent_work_item': parent_work_item}
-    input:
-      - parent_work_item
     output:
       - parent_work_item
     structured_output: true
@@ -819,7 +793,8 @@ nodes:
             'created_date': predecessor_work_item_raw.get('System.CreatedDate', ''),
             'changed_date': predecessor_work_item_raw.get('System.ChangedDate', ''),
             'comment_count': predecessor_work_item_raw.get('System.CommentCount', 0),
-            'links': extract_links(predecessor_work_item_raw.get('System.Description', ''))
+            'links': extract_links(predecessor_work_item_raw.get('System.Description', '')),
+            'comments': []
         }
 
         pred_needs_comments = processed_predecessor['comment_count'] > 0
@@ -839,14 +814,14 @@ nodes:
       {% if pred_needs_comments %}
         FetchPredecessorComments
       {% else %}
-        SkipPredecessorComments
+        AddToPredecessorsList
       {% endif %}
-    default_output: SkipPredecessorComments
+    default_output: AddToPredecessorsList
     input:
       - pred_needs_comments
     routes:
       - FetchPredecessorComments
-      - SkipPredecessorComments
+      - AddToPredecessorsList
 
   - id: FetchPredecessorComments
     type: toolkit
@@ -877,21 +852,6 @@ nodes:
     input:
       - current_predecessor
       - pred_comments
-    output:
-      - current_predecessor
-    structured_output: true
-    transition: AddToPredecessorsList
-
-  - id: SkipPredecessorComments
-    type: code
-    code:
-      type: fixed
-      value: |-
-        current_predecessor = alita_state.get('current_predecessor', {})
-        current_predecessor['comments'] = []
-        {'current_predecessor': current_predecessor}
-    input:
-      - current_predecessor
     output:
       - current_predecessor
     structured_output: true
