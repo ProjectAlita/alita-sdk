@@ -232,8 +232,6 @@ nodes:
       expand:
         type: fixed
         value: All
-    on_error:
-      transition: HandleFetchError
     output:
       - root_work_item
     structured_output: true
@@ -241,24 +239,6 @@ nodes:
     toolkit_name: LFAADOBoardReader
     transition: ProcessRootWorkItem
   
-  - id: HandleFetchError
-    type: code
-    code:
-      type: fixed
-      value: |-
-        work_item_id = alita_state.get('work_item_id')
-        {
-            "validation_passed": False,
-            "error_message": f"Failed to fetch work item {work_item_id}. Item may not exist or access denied."
-        }
-    input:
-      - work_item_id
-    output:
-      - validation_passed
-      - error_message
-    structured_output: true
-    transition: FormatError
-
   # ── Process root work item ────────────────────────────────────────
   - id: ProcessRootWorkItem
     type: code
@@ -419,8 +399,6 @@ nodes:
       work_item_id:
         type: variable
         value: work_item_id
-    on_error:
-      transition: SkipComments
     output:
       - comments
     structured_output: true
@@ -480,8 +458,6 @@ nodes:
       expand:
         type: fixed
         value: All
-    on_error:
-      transition: SkipParent
     output:
       - parent_work_item_raw
     structured_output: true
@@ -594,8 +570,6 @@ nodes:
       work_item_id:
         type: variable
         value: parent_id
-    on_error:
-      transition: SkipParentComments
     output:
       - parent_comments
     structured_output: true
@@ -718,8 +692,6 @@ nodes:
       expand:
         type: fixed
         value: All
-    on_error:
-      transition: SkipThisPredecessor
     output:
       - predecessor_work_item_raw
     structured_output: true
@@ -831,8 +803,6 @@ nodes:
       work_item_id:
         type: variable
         value: current_pred_id
-    on_error:
-      transition: SkipPredecessorComments
     output:
       - pred_comments
     structured_output: true
