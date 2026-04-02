@@ -1,0 +1,202 @@
+name: "SP18 - get_files_list: Include/Exclude conflict (edge case)"
+priority: High
+description: |
+  Verify the SharePoint 'get_files_list' tool handles conflicting include/skip extensions correctly.
+  
+  Objective: Test precedence when extensions appear in both include and skip lists
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Test 1 (Partial Conflict): When extension is in BOTH include and skip, skip takes precedence
+  - Test 2 (Full Conflict): When skip == include (identical lists), skip wins for all extensions
+  - Demonstrates that exclusion rules always override inclusion rules
+  - Must return files (baseline should have test data)
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+    value: ${SERVER_RELATIVE_PATH}
+  limit_files:
+    type: int
+    value: 50
+  include_all:
+    type: list
+    value: ["txt", "pdf", "docx", "png"]
+  skip_txt:
+    type: list
+    value: ["txt"]
+  include_txt_pdf:
+    type: list
+    value: ["txt", "pdf"]
+  skip_txt_conflict:
+    type: list
+    value: ["txt"]
+  include_same:
+    type: list
+    value: ["txt", "pdf"]
+  skip_same:
+    type: list
+    value: ["txt", "pdf"]
+  files_result_baseline:
+    type: dict
+  files_result_conflict:
+    type: dict
+  files_result_equal_conflict:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_baseline
+
+nodes:
+  - id: invoke_baseline
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - include_all
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      include_extensions:
+        type: variable
+        value: include_all
+    output:
+      - files_result_baseline
+    structured_output: true
+    transition: invoke_conflict_test
+
+  - id: invoke_conflict_test
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - include_txt_pdf
+      - skip_txt_conflict
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      include_extensions:
+        type: variable
+        value: include_txt_pdf
+      skip_extensions:
+        type: variable
+        value: skip_txt_conflict
+    output:
+      - files_result_conflict
+    structured_output: true
+    transition: invoke_equal_conflict_test
+
+  - id: invoke_equal_conflict_test
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - include_same
+      - skip_same
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      include_extensions:
+        type: variable
+        value: include_same
+      skip_extensions:
+        type: variable
+        value: skip_same
+    output:
+      - files_result_equal_conflict
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - files_result_baseline
+      - files_result_conflict
+      - files_result_equal_conflict
+      - include_txt_pdf
+      - skip_txt_conflict
+      - include_same
+      - skip_same
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the 'get_files_list' tool execution with conflicting include/skip extensions.
+
+          Baseline - Include: ['txt', 'pdf', 'docx', 'png']
+          Result: {files_result_baseline}
+
+          Test 1 (Partial Conflict) - Include: {include_txt_pdf}, Skip: {skip_txt_conflict}
+          Result: {files_result_conflict}
+
+          Test 2 (Full Conflict) - Include: {include_same}, Skip: {skip_same}
+          Result: {files_result_equal_conflict}
+
+          Expected behavior:
+          - All tool executions succeed without errors
+          - Baseline MUST return files (test data should exist)
+          
+          Test 1 (Partial Conflict):
+          - Includes 'txt' and 'pdf' BUT also skips 'txt'
+          - Skip should take precedence: result should contain ONLY .pdf files (no .txt)
+          - Proves exclusion rules override inclusion rules for overlapping extensions
+          
+          Test 2 (Full Conflict - skip == include):
+          - Include and skip lists are IDENTICAL: ['txt', 'pdf']
+          - Skip should take precedence for ALL extensions
+          - Result should contain NO .txt or .pdf files
+          - Should only return files with other extensions (docx, png, etc.) if they exist
+          - This is the ultimate conflict test: when skip == include, skip wins completely
+
+          Validation rules:
+          1. Check all result structures are valid (not error/exception)
+          2. Verify baseline result is non-empty (if empty, test fails - missing test data)
+          3. Verify Test 1 has NO .txt files (zero .txt files)
+          4. Verify Test 1 has only .pdf files (or empty if no .pdf files exist)
+          5. Verify Test 2 is empty (has NO .txt files (zero .txt files), has NO .pdf files (zero .pdf files))
+          6. Confirm skip_extensions took precedence over include_extensions in both tests
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed",
+            "result_sameple_conflict": {files_result_equal_conflict},
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

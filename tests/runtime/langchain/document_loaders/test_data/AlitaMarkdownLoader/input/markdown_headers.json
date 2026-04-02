@@ -2,8 +2,8 @@
   "tags": ["loader:markdown", "content:headers", "feature:chunking"],
   "file_path": "../files/markdown_headers.md",
   "configs": [
-    {},
-    {"max_tokens": 256},
-    {"max_tokens": 1024}
+    {"chunker_config": {"max_tokens": 512, "token_overlap": 10}},
+    {"chunker_config": {"max_tokens": 256, "token_overlap": 10}},
+    {"chunker_config": {"max_tokens": 1024, "token_overlap": 10}}
   ]
 }

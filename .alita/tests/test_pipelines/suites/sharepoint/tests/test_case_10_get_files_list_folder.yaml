@@ -3,14 +3,14 @@ priority: High
 description: |
   Verify the SharePoint 'get_files_list' tool filters files by folder path.
   
-  Objective: Test folder-specific file listing functionality
+  Objective: Test folder-specific file listing using server-relative path (path only pattern)
   
   Expected Behavior:
   - Tool executes successfully without errors
   - Returns only files from specified folder
-  - Supports both relative and absolute folder paths
+  - Supports server-relative paths (/sites/{SiteName}/...)
   - Empty folder returns empty array (not error)
-  - Form name filtering works correctly
+  - Works with folder_name only (no form_name required)
 
 toolkits:
   - id: ${SHAREPOINT_TOOLKIT_ID}
@@ -19,7 +19,7 @@ toolkits:
 state:
   folder_name:
     type: str
-    value: ${TEST_FOLDER}
+    value: ${SERVER_RELATIVE_PATH}
   limit_files:
     type: int
     value: 20

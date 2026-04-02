@@ -1,0 +1,173 @@
+name: "SP15 - get_files_list: Skip specific file extensions"
+priority: High
+description: |
+  Verify the SharePoint 'get_files_list' tool filters out files using skip_extensions parameter.
+  
+  Objective: Test that files with specified extensions are excluded from results
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns all files EXCEPT those with extensions in skip_extensions list
+  - Extensions are matched case-insensitively
+  - Accepts both 'exe' and '.exe' formats
+  - All files returned if skip list doesn't match any files
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+    value: ${SERVER_RELATIVE_PATH}
+  limit_files:
+    type: int
+    value: 50
+  skip_txt:
+    type: list
+    value: ["txt"]
+  skip_multiple:
+    type: list
+    value: [".pdf", ".docx", ".png"]
+  files_result_skip_txt:
+    type: dict
+  files_result_skip_multiple:
+    type: dict
+  files_result_all:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_files_all
+
+nodes:
+  - id: invoke_get_files_all
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+    output:
+      - files_result_all
+    structured_output: true
+    transition: invoke_get_files_skip_txt
+
+  - id: invoke_get_files_skip_txt
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - skip_txt
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      skip_extensions:
+        type: variable
+        value: skip_txt
+    output:
+      - files_result_skip_txt
+    structured_output: true
+    transition: invoke_get_files_skip_multiple
+
+  - id: invoke_get_files_skip_multiple
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - skip_multiple
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      skip_extensions:
+        type: variable
+        value: skip_multiple
+    output:
+      - files_result_skip_multiple
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - files_result_all
+      - files_result_skip_txt
+      - files_result_skip_multiple
+      - skip_txt
+      - skip_multiple
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the 'get_files_list' tool execution with skip_extensions filter.
+
+          Baseline - No filter:
+          Result: {files_result_all}
+
+          Test 1 - Skip extensions: {skip_txt}
+          Result: {files_result_skip_txt}
+
+          Test 2 - Skip extensions: {skip_multiple}
+          Result: {files_result_skip_multiple}
+
+          Expected behavior:
+          - All tool executions succeed without errors
+          - Baseline MUST return files (test data should exist)
+          - Test 1 returns all files EXCEPT .txt files
+          - Test 2 returns all files EXCEPT .pdf, .docx, .png files (NONE of these should be present)
+          - Extensions are matched case-insensitively
+          - Filtered results should have <= files than baseline
+
+          Validation rules:
+          1. Check all result structures are valid (not error/exception)
+          2. Verify baseline result is non-empty (if empty, test fails - missing test data)
+          3. Extract file extensions from each result
+          4. Verify Test 1 has NO .txt files (zero .txt files)
+          5. Verify Test 2 has NO .pdf files (zero .pdf files)
+          6. Verify Test 2 has NO .docx files (zero .docx files)
+          7. Verify Test 2 has NO .png files (zero .png files)
+          8. Verify Test 1 count <= Baseline count
+          9. Verify Test 2 count <= Baseline count
+          10. Calculate how many files were filtered in each test
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed",
+            "Result_1": {files_result_skip_txt},
+            "Result_2": {files_result_skip_multiple}
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

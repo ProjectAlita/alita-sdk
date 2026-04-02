@@ -2,6 +2,6 @@
     "tags": ["loader:text", "content:empty", "edge:empty-input"],
     "file_path": "../files/text_empty.txt",
     "configs": [
-        {}
+        {"autodetect_encoding": true, "max_tokens": 512}
     ]
 }

@@ -2,7 +2,7 @@
   "tags": ["loader:json", "content:empty", "edge:empty-input", "feature:chunking"],
   "file_path": "../files/json_empty.json",
   "configs": [
-    {},
+    {"max_tokens": 512},
     {"max_tokens": 256},
     {"max_tokens": 1024}
   ]

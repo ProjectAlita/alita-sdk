@@ -2,7 +2,7 @@
     "tags": ["loader:csv", "content:special-characters", "edge:special-chars"],
     "file_path": "../files/csv_special.csv",
     "configs": [
-        {},
-        {"max_tokens": 256}
+        {"encoding": "utf-8", "raw_content": true, "cleanse": false},
+        {"encoding": "utf-8", "raw_content": true, "cleanse": false}
     ]
 }

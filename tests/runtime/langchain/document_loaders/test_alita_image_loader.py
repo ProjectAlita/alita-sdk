@@ -27,12 +27,6 @@ from loader_test_runner import _get_llm_for_tests
 _LOADER_NAME = "AlitaImageLoader"
 
 _SKIP = {
-    ("alita_screenshot_jpeg", 1),
-    ("image_regular", 1),
-    ("image_regular", 2),
-    ("image_regular", 3),
-    ("several_in_one_png", 1),
-    ("snail_bmp", 1),
     ("wrench_svg", 1),
 }
 

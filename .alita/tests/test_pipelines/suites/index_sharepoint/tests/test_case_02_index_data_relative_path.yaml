@@ -1,0 +1,175 @@
+name: "ISP02-filtered"
+priority: High
+description: |
+  Verify index_data indexes SharePoint files with extension filtering and custom chunking config.
+
+  Tests:
+  1. Index all files except png (skip_extensions)
+  2. Apply chunking config {"max_tokens": 256} for .txt files
+  3. Search index to verify all documents are present
+  4. Verify text_large.txt has exactly 4 chunks using filter
+
+  Objective: Confirm skip_extensions and chunking_config parameters work correctly
+  and that indexed documents are searchable with proper chunking applied.
+
+  Expected Behavior:
+  - Index completes successfully (status: ok)
+  - Search returns indexed documents
+  - text_large.txt filter search returns exactly 4 chunks
+  - png files are not indexed
+
+toolkits:
+  - id: ${ISP_TOOLKIT_ID}
+    name: ${ISP_TOOLKIT_NAME}
+
+state:
+  skip_extensions:
+    type: list
+    value: ["png"]
+  chunking_config:
+    type: dict
+    value:
+      ".txt":
+        max_tokens: 256
+  index_result:
+    type: dict
+  search_all_result:
+    type: dict
+  search_large_txt_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_index_data
+
+nodes:
+  - id: invoke_index_data
+    type: toolkit
+    tool: index_data
+    toolkit_name: ${ISP_TOOLKIT_NAME}
+    input:
+      - skip_extensions
+      - chunking_config
+    input_mapping:
+      index_name:
+        type: fixed
+        value: "idx02"
+      clean_index:
+        type: fixed
+        value: true
+      path:
+        type: fixed
+        value: "${TEST_SUBFOLDER}"
+      limit_files:
+        type: fixed
+        value: 100
+      skip_extensions:
+        type: variable
+        value: skip_extensions
+      chunking_config:
+        type: variable
+        value: chunking_config
+    output:
+      - index_result
+    structured_output: true
+    transition: search_all_docs
+
+  - id: search_all_docs
+    type: toolkit
+    tool: search_index
+    toolkit_name: ${ISP_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      query:
+        type: fixed
+        value: "document"
+      index_name:
+        type: fixed
+        value: "idx02"
+      search_top:
+        type: fixed
+        value: 50
+    output:
+      - search_all_result
+    structured_output: true
+    transition: search_text_large
+
+  - id: search_text_large
+    type: toolkit
+    tool: search_index
+    toolkit_name: ${ISP_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      query:
+        type: fixed
+        value: "text content"
+      index_name:
+        type: fixed
+        value: "idx02"
+      filter:
+        type: fixed
+        value:
+          Name: "text_large.txt"
+      search_top:
+        type: fixed
+        value: 50
+    output:
+      - search_large_txt_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - index_result
+      - search_all_result
+      - search_large_txt_result
+      - skip_extensions
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the indexing and search results for SharePoint documents.
+
+          Index Result: {index_result}
+          Search All Docs: {search_all_result}
+          Search text_large.txt (filtered): {search_large_txt_result}
+          Skip Extensions: {skip_extensions}
+
+          Expected behavior:
+          1. Indexing completed successfully (status: ok)
+          2. Search returns indexed documents (non-empty results)
+          3. search_large_txt_result must contain EXACTLY 4 items (4 chunks)
+          4. ALL items in search_large_txt_result must be for text_large.txt (no other files)
+          5. No png files should be in indexed documents (they were skipped)
+
+          Validation rules:
+          1. Check index_result has "status": "ok"
+          2. Check index_result message indicates successful indexing
+          3. Verify search_all_result is not empty and contains document list
+          4. Count total items in search_large_txt_result array - must be EXACTLY 4
+          5. Verify every item in search_large_txt_result has Name == "text_large.txt"
+          6. If count != 4 or any item is not text_large.txt, test fails
+          7. Verify no .png files appear in search_all_result (check "Name" field in metadata)
+          8. All validations must pass for test to pass
+
+          Return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description including chunk count for text_large.txt",
+            "error": "error details if failed, null if passed"
+          }}
+
+          Return **only** the json object. No markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

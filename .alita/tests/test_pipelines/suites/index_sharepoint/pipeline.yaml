@@ -1,21 +1,27 @@
-name: sharepoint_toolkit
+name: index_sharepoint
 description: |
-  SharePoint toolkit integration tests
-  
-  Test Structure:
-  - List Operations (SP01-SP08): Test SharePoint list management and CRUD operations
-  - File Operations (SP09-SP14): Test document library file operations
-  - Attachment Operations (SP15-SP16): Test list item attachment management
+  SharePoint indexing test suite.
+
+  Tests cover two areas:
+  - index_data called with different path parameter styles (ISP01–ISP05):
+      no path, relative path, server-relative path, form_name only, path+form_name combo.
+      All paths are expected to reach the same set of test files so indexed counts should
+      be comparable across the five tests.
+  - search_index called with progressively sophisticated parameter combinations (ISP06–ISP13),
+      each preceded by a fresh index_data call scoped to the test folder.
 
 env_mapping:
-  SHAREPOINT_CONFIG_PATH: ${SHAREPOINT_CONFIG_PATH:../../configs/sharepoint-config.json}
   SHAREPOINT_SITE_URL: ${SHAREPOINT_SITE_URL:https://5clkvm.sharepoint.com/sites/ALITA}
   SHAREPOINT_CLIENT_ID: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
   SHAREPOINT_CLIENT_SECRET: ${SHAREPOINT_CLIENT_SECRET}
-  TEST_LIST_NAME: ${TEST_LIST_NAME:DO_NOT_DELETE_AlitaTestList}
+  PGVECTOR_CONNECTION_STRING: ${PGVECTOR_CONNECTION_STRING}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:text-embedding-ada-002}
   TEST_FOLDER: ${TEST_FOLDER:Shared Documents/DO_NOT_DELETE_AlitaTestFiles}
   SERVER_RELATIVE_PATH: ${SERVER_RELATIVE_PATH:/sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles}
+  TEST_FORM_NAME: ${TEST_FORM_NAME:Shared Documents}
+  TEST_SUBFOLDER: ${TEST_SUBFOLDER:DO_NOT_DELETE_AlitaTestFiles}
   TEST_FILE_NAME: ${TEST_FILE_NAME:DO_NOT_DELETE_test-document.txt}
+  SEARCH_QUERY: ${SEARCH_QUERY:test document}
 
 setup:
   - name: Setup SharePoint Configuration
@@ -28,21 +34,25 @@ setup:
         client_id: ${SHAREPOINT_CLIENT_ID:84c01a1e-1ebc-40c0-b55a-8b3fae194e41}
         client_secret: ${SHAREPOINT_CLIENT_SECRET}
 
-  - name: Create SharePoint Toolkit
+  - name: Create SharePoint Index Toolkit
     type: toolkit
     action: create_or_update
     config:
-      config_file: ${SHAREPOINT_CONFIG_PATH:../../configs/sharepoint-config.json}
+      config_file: ../../configs/sharepoint-index-config.json
       toolkit_type: sharepoint
       overrides:
         sharepoint_configuration:
           private: false
           alita_title: ${SHAREPOINT_SECRET_NAME:sharepoint}
-      toolkit_name: ${SHAREPOINT_TOOLKIT_NAME:sharepoint-testing}
+        pgvector_configuration:
+          private: false
+          alita_title: ${PGVECTOR_SECRET_NAME:elitea-pgvector}
+        embedding_model: ${EMBEDDING_MODEL:text-embedding-ada-002}
+      toolkit_name: ${ISP_TOOLKIT_NAME:sp-index-test}
     save_to_env:
-      - key: SHAREPOINT_TOOLKIT_ID
+      - key: ISP_TOOLKIT_ID
         value: $.id
-      - key: SHAREPOINT_TOOLKIT_NAME
+      - key: ISP_TOOLKIT_NAME
         value: $.name
 
 composable_pipelines: []
@@ -53,32 +63,30 @@ execution:
     - test_case_*.yaml
 
   substitutions:
-    SHAREPOINT_TOOLKIT_ID: ${SHAREPOINT_TOOLKIT_ID}
-    SHAREPOINT_TOOLKIT_NAME: ${SHAREPOINT_TOOLKIT_NAME}
-    TEST_LIST_NAME: ${TEST_LIST_NAME:DO_NOT_DELETE_AlitaTestList}
+    ISP_TOOLKIT_ID: ${ISP_TOOLKIT_ID}
+    ISP_TOOLKIT_NAME: ${ISP_TOOLKIT_NAME}
     TEST_FOLDER: ${TEST_FOLDER:Shared Documents/DO_NOT_DELETE_AlitaTestFiles}
     SERVER_RELATIVE_PATH: ${SERVER_RELATIVE_PATH:/sites/ALITA/Shared Documents/DO_NOT_DELETE_AlitaTestFiles}
+    TEST_FORM_NAME: ${TEST_FORM_NAME:Shared Documents}
+    TEST_SUBFOLDER: ${TEST_SUBFOLDER:DO_NOT_DELETE_AlitaTestFiles}
     TEST_FILE_NAME: ${TEST_FILE_NAME:DO_NOT_DELETE_test-document.txt}
+    SEARCH_QUERY: ${SEARCH_QUERY:test document}
     TIMESTAMP: ${TIMESTAMP}
     DEFAULT_LLM_MODEL: ${DEFAULT_LLM_MODEL:gpt-4o-2024-11-20}
 
   settings:
-    timeout: 180
-    parallel: 5
+    # Run sequentially: compound tests re-use unique index names so parallel is safe,
+    # but sequential avoids overwhelming the SharePoint Graph API quota.
+    timeout: 900
+    parallel: 1
     stop_on_failure: false
 
 exclude_tests: []
 
 cleanup:
-  - name: Delete Test Pipelines
-    type: pipeline
-    config:
-      pattern: "SP*"
-    continue_on_error: true
-
-  - name: Delete SharePoint Toolkit
+  - name: Delete SharePoint Index Toolkit
     type: toolkit
     config:
-      toolkit_id: ${SHAREPOINT_TOOLKIT_ID}
+      toolkit_id: ${ISP_TOOLKIT_ID}
     enabled: true
     continue_on_error: true

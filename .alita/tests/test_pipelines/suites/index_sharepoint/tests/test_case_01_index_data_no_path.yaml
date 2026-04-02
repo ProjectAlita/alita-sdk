@@ -1,0 +1,115 @@
+name: "ISP01-no-path"
+priority: Critical
+description: |
+  Verify index_data indexes all accessible SharePoint files with no path restriction.
+
+  Objective: Baseline indexing — establish that index_data completes successfully
+  and indexes documents from all accessible libraries.
+
+  Expected Behavior:
+  - Tool executes without raising an exception
+  - Result contains "status" field equal to "ok"
+  - Search returns indexed documents successfully
+  - Documents are indexed and searchable
+
+toolkits:
+  - id: ${ISP_TOOLKIT_ID}
+    name: ${ISP_TOOLKIT_NAME}
+
+state:
+  index_result:
+    type: dict
+  search_result:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_index_data
+
+nodes:
+  - id: invoke_index_data
+    type: toolkit
+    tool: index_data
+    toolkit_name: ${ISP_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      index_name:
+        type: fixed
+        value: "idx01"
+      clean_index:
+        type: fixed
+        value: true
+      limit_files:
+        type: fixed
+        value: 20
+    output:
+      - index_result
+    structured_output: true
+    transition: search_indexed_docs
+
+  - id: search_indexed_docs
+    type: toolkit
+    tool: search_index
+    toolkit_name: ${ISP_TOOLKIT_NAME}
+    input: []
+    input_mapping:
+      query:
+        type: fixed
+        value: "document"
+      index_name:
+        type: fixed
+        value: "idx01"
+      search_top:
+        type: fixed
+        value: 100
+    output:
+      - search_result
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: gpt-4o-2024-11-20
+    input:
+      - index_result
+      - search_result
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the output from the 'index_data' tool and search results.
+
+          Index Result: {index_result}
+          Search Result: {search_result}
+
+          Expected behavior:
+          1. Indexing completed successfully (status: ok)
+          2. Search returns indexed documents (non-empty results)
+          3. No critical errors or exceptions
+
+          Validation rules:
+          1. Check index_result has "status": "ok"
+          2. Check index_result message indicates successful indexing
+          3. Verify search_result is not empty and contains document list
+          4. Confirm at least one document was indexed and is searchable
+          5. All validations must pass for test to pass
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description including number of documents found",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: "dict"
+    transition: END

@@ -333,6 +333,8 @@ class LocalSetupStrategy(SetupStrategy):
         2. If alita_title is present, merge in stored configuration data from configuration step
         3. All placeholders should already be resolved by resolve_env_value before this method
         4. Fill in any defaults from the Pydantic model if needed
+        5. Programmatically create {toolkit_type}_configuration from environment variables
+        6. If indexing tools are selected, add pgvector_configuration and embedding_model
         
         Args:
             toolkit_type: Type of toolkit (e.g., 'github', 'jira')
@@ -391,7 +393,7 @@ class LocalSetupStrategy(SetupStrategy):
                 logger.info(f"[LOCAL DEBUG] Merged {key} into toolkit_config (overwrite)")
             logger.info(f"[LOCAL DEBUG] toolkit_config AFTER merge: {toolkit_config}")
         
-        # Fill in defaults from Pydantic model if available
+        # Programmatically populate toolkit_configuration from environment variables using Pydantic model
         try:
             from alita_sdk.configurations import get_class_configurations
             
@@ -409,23 +411,84 @@ class LocalSetupStrategy(SetupStrategy):
         
         except Exception as e:
             # If configuration class not available, just use what we have
+            # logger.warning(f"[LOCAL DEBUG] Could not auto-populate toolkit_configuration: {e}")
             pass
         
         # Store the configuration in settings
         settings[config_key] = toolkit_config
         
+        # Check if indexing tools are selected
+        selected_tools = config.get('selected_tools', [])
+        logger.info(f"[INDEXING DEBUG] selected_tools from config: {selected_tools}")
+        indexing_tools = {'index_data', 'search_index', 'stepback_search_index', 
+                          'stepback_summary_index', 'remove_index', 'list_collections'}
+        has_indexing_tools = bool(set(selected_tools) & indexing_tools)
+        logger.info(f"[INDEXING DEBUG] has_indexing_tools: {has_indexing_tools}, intersection: {set(selected_tools) & indexing_tools}")
+        
+        if has_indexing_tools:
+            logger.info(f"[INDEXING DEBUG] ===== ENTERING INDEXING TOOLS AUTO-CONFIG BLOCK =====")
+            logger.info(f"[LOCAL DEBUG] Indexing tools detected in selected_tools, adding pgvector_configuration and embedding_model")
+            
+            # Add pgvector_configuration if not already present
+            if 'pgvector_configuration' not in settings or not settings['pgvector_configuration']:
+                pgvector_config = {}
+                
+                # Try to load from environment or stored configuration
+                if 'pgvector_configuration' in config:
+                    pgvector_config = config['pgvector_configuration'].copy() if isinstance(config['pgvector_configuration'], dict) else {}
+                
+                # If alita_title is present in pgvector_configuration, merge stored data
+                if 'alita_title' in pgvector_config and pgvector_config['alita_title'] in self._configuration_data:
+                    stored_data = self._configuration_data[pgvector_config['alita_title']]
+                    for key, value in stored_data.items():
+                        if key not in ('alita_title', 'private'):
+                            pgvector_config[key] = value
+                
+                # Otherwise, load from PGVECTOR_CONNECTION_STRING environment variable
+                if 'connection_string' not in pgvector_config or not pgvector_config['connection_string']:
+                    logger.info(f"[INDEXING DEBUG] Attempting to load PGVECTOR_CONNECTION_STRING from environment")
+                    conn_str = load_from_env('PGVECTOR_CONNECTION_STRING')
+                    logger.info(f"[INDEXING DEBUG] PGVECTOR_CONNECTION_STRING loaded: {bool(conn_str)}, length: {len(conn_str) if conn_str else 0}")
+                    if conn_str:
+                        from pydantic import SecretStr
+                        pgvector_config['connection_string'] = SecretStr(conn_str)
+                        logger.info(f"[LOCAL DEBUG] Loaded pgvector connection_string from PGVECTOR_CONNECTION_STRING")
+                    else:
+                        logger.warning(f"[INDEXING DEBUG] Failed to load PGVECTOR_CONNECTION_STRING from environment")
+                else:
+                    logger.info(f"[INDEXING DEBUG] connection_string already in pgvector_config")
+                
+                settings['pgvector_configuration'] = pgvector_config
+            
+            # Add embedding_model if not already present
+            if 'embedding_model' not in settings or not settings['embedding_model']:
+                logger.info(f"[INDEXING DEBUG] embedding_model not in settings, attempting to load...")
+                embedding_model = config.get('embedding_model') or load_from_env('EMBEDDING_MODEL')
+                logger.info(f"[INDEXING DEBUG] Loaded embedding_model value: {embedding_model}")
+                if embedding_model:
+                    settings['embedding_model'] = embedding_model
+                    logger.info(f"[LOCAL DEBUG] Set embedding_model to {embedding_model}")
+                else:
+                    logger.warning(f"[INDEXING DEBUG] Failed to load EMBEDDING_MODEL from config or environment")
+            else:
+                logger.info(f"[INDEXING DEBUG] embedding_model already in settings: {settings.get('embedding_model')}")
+        
+        logger.info(f"[INDEXING DEBUG] Final settings keys: {list(settings.keys())}")
+        logger.info(f"[INDEXING DEBUG] Final settings has pgvector_configuration: {'pgvector_configuration' in settings}")
+        logger.info(f"[INDEXING DEBUG] Final settings has embedding_model: {'embedding_model' in settings}")
+        
         return settings
     
     def _create_alita_client(self) -> Optional[Any]:
         """Create AlitaClient for toolkit initialization."""
-        from utils_common import load_from_env
+        from utils_common import load_base_url_from_env, load_token_from_env, load_project_id_from_env
         
         try:
             from alita_sdk.runtime.clients.client import AlitaClient
             
-            deployment_url = load_from_env('DEPLOYMENT_URL') or load_from_env('BASE_URL')
-            api_key = load_from_env('API_KEY') or load_from_env('AUTH_TOKEN')
-            project_id = load_from_env('PROJECT_ID')
+            deployment_url = load_base_url_from_env()
+            api_key = load_token_from_env()
+            project_id = load_project_id_from_env()
             
             if not deployment_url or not api_key:
                 return None
@@ -433,7 +496,7 @@ class LocalSetupStrategy(SetupStrategy):
             return AlitaClient(
                 base_url=deployment_url,
                 auth_token=api_key,
-                project_id=int(project_id) if project_id else 0,
+                project_id=project_id or 0,
             )
         except Exception:
             return None
@@ -484,6 +547,33 @@ class LocalSetupStrategy(SetupStrategy):
                 )
             except FileNotFoundError:
                 ctx.log(f"Config file not found: {config['config_file']}", "warning")
+        
+        # Auto-detect indexing tools and add pgvector_configuration + embedding_model if needed
+        selected_tools = file_config.get('selected_tools', [])
+        indexing_tools = {'index_data', 'search_index', 'stepback_search_index', 
+                          'stepback_summary_index', 'remove_index', 'list_collections'}
+        has_indexing_tools = bool(set(selected_tools) & indexing_tools)
+        
+        if has_indexing_tools:
+            ctx.log(f"[LOCAL] Auto-configuring indexing tools for toolkit", "info")
+            
+            # Add pgvector_configuration if not in file_config
+            if 'pgvector_configuration' not in file_config:
+                file_config['pgvector_configuration'] = {}
+            
+            # Ensure connection_string is set
+            if 'connection_string' not in file_config['pgvector_configuration']:
+                conn_str = load_from_env('PGVECTOR_CONNECTION_STRING')
+                if conn_str:
+                    file_config['pgvector_configuration']['connection_string'] = conn_str
+                    ctx.log(f"[LOCAL] Auto-added PGVECTOR_CONNECTION_STRING to config", "info")
+            
+            # Add embedding_model if not in file_config
+            if 'embedding_model' not in file_config:
+                embedding_model = load_from_env('EMBEDDING_MODEL')
+                if embedding_model:
+                    file_config['embedding_model'] = embedding_model
+                    ctx.log(f"[LOCAL] Auto-added EMBEDDING_MODEL={embedding_model} to config", "info")
         
         # Apply overrides - resolve environment variables in overrides first
         overrides = resolve_env_value(config.get("overrides", {}), ctx.env_vars, env_loader=load_from_env)

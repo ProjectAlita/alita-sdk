@@ -1,0 +1,163 @@
+name: "SP17 - get_files_list: Combined filters (form_name + folder + extensions)"
+priority: Critical
+description: |
+  Verify the SharePoint 'get_files_list' tool correctly applies multiple filters simultaneously.
+  
+  Objective: Test that form_name, folder_name, include_extensions, and skip_extensions work together
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - All filters are applied simultaneously (AND logic)
+  - Results match ALL filter criteria
+  - Order of filters doesn't matter
+  - Must return at least one file in baseline and filtered results (test data should exist)
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  form_name:
+    type: str
+    value: "Shared Documents"
+  folder_name:
+    type: str
+    value: "DO_NOT_DELETE_AlitaTestFiles"
+  include_extensions:
+    type: list
+    value: ["txt", "pdf", "docx"]
+  skip_extensions:
+    type: list
+    value: ["pdf"]
+  limit_files:
+    type: int
+    value: 50
+  files_result_baseline:
+    type: dict
+  files_result_filtered:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_baseline
+
+nodes:
+  - id: invoke_baseline
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - form_name
+      - folder_name
+      - limit_files
+    input_mapping:
+      form_name:
+        type: variable
+        value: form_name
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+    output:
+      - files_result_baseline
+    structured_output: true
+    transition: invoke_combined_filters
+
+  - id: invoke_combined_filters
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - form_name
+      - folder_name
+      - include_extensions
+      - skip_extensions
+      - limit_files
+    input_mapping:
+      form_name:
+        type: variable
+        value: form_name
+      folder_name:
+        type: variable
+        value: folder_name
+      include_extensions:
+        type: variable
+        value: include_extensions
+      skip_extensions:
+        type: variable
+        value: skip_extensions
+      limit_files:
+        type: variable
+        value: limit_files
+    output:
+      - files_result_filtered
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - files_result_baseline
+      - files_result_filtered
+      - form_name
+      - folder_name
+      - include_extensions
+      - skip_extensions
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the 'get_files_list' tool execution with combined filters.
+
+          Baseline - Form + Folder only:
+          Form: '{form_name}'
+          Folder: '{folder_name}'
+          Result: {files_result_baseline}
+
+          Test - All filters combined:
+          Form: '{form_name}'
+          Folder: '{folder_name}'
+          Include extensions: {include_extensions}
+          Skip extensions: {skip_extensions}
+          Result: {files_result_filtered}
+
+          Expected behavior:
+          - Both tool executions succeed without errors
+          - Baseline must return files (test data should exist)
+          - Combined filter should return only .txt and .docx files (pdf is excluded by skip_extensions)
+          - Filtered result should have <= files than baseline
+          - All files are from '{form_name}' library and '{folder_name}' folder
+          - No .pdf files in filtered result (even though it's in include_extensions, it's in skip_extensions)
+
+          Validation rules:
+          1. Check both result structures are valid (not error/exception)
+          2. Verify baseline result is non-empty (if empty, test fails - missing test data)
+          3. Extract file extensions from filtered result
+          4. Verify filtered result contains ONLY .txt or .docx files (case-insensitive)
+          5. Verify NO .pdf files in filtered result
+          6. Verify filtered count <= baseline count
+          7. Verify paths contain the folder name
+          8. Calculate filtering effectiveness
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END

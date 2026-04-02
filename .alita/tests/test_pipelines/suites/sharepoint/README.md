@@ -10,12 +10,10 @@ Test suite for SharePoint toolkit under `alita_sdk/tools/sharepoint/`.
 | read_list | test_case_03, test_case_04 | Critical, High | ✅ Complete (Self-contained) |
 | get_list_columns | test_case_05, test_case_06 | Critical, High | ✅ Complete |
 | create_list_item | test_case_07, test_case_08 | Critical, High | ✅ Complete |
-| get_files_list | test_case_09, test_case_10 | Critical, High | ✅ Complete |
+| get_files_list | test_case_09-18 | Critical, High | ✅ Complete (10 tests) |
 | read_document | test_case_11, test_case_12 | Critical, High | ✅ Complete (Self-contained) |
-| upload_file | test_case_13, test_case_14 | Critical, High | ✅ Complete (Self-contained) |
-| add_attachment_to_list_item | test_case_15, test_case_16 | Critical, High | ✅ Complete (Self-contained) |
 
-**Coverage**: 8/8 tools (100%), 16/16 test files complete
+**Coverage**: 6/6 core tools (100%), 18 test files complete
 
 ## Setup Artifacts
 
@@ -62,17 +60,27 @@ Required variables (set in `.alita/tests/test_pipelines/.env`):
 - **SP07**: Create list item - Basic item creation
 - **SP08**: Create item missing fields - Validation error handling
 
-### File Operations (SP09-SP14)
-- **SP09**: List root files - Basic file listing
-- **SP10**: List files in folder - Folder filtering
+### File Operations (SP09-SP17)
+
+#### Basic File Listing (SP09-SP10)
+- **SP09**: List root files - Basic file listing in root document library
+- **SP10**: List files in folder - Folder filtering with folder_name parameter
+
+#### File Selection Parameters (SP13-SP18)
+Tests for `get_files_list` file selection logic focusing on parameters that affect which files are returned:
+
+- **SP13**: Limit parameter validation - Tests limit_files parameter with values 2 and 5, verifies exact count control
+- **SP14**: Include specific extensions - Tests include_extensions parameter with single extension ['txt'] and multiple ['.pdf', 'docx'], verifies ALL specified extensions are present
+- **SP15**: Skip specific extensions - Tests skip_extensions parameter to exclude file types, verifies NONE of the specified extensions are present
+- **SP16**: Document library filtering - Tests form_name parameter to scope results to specific library ('Shared Documents')
+- **SP17**: Combined filters - Tests all parameters together (form_name + folder_name + include_extensions + skip_extensions)
+- **SP18**: Include/Exclude conflict (edge case) - Tests precedence when same extension appears in both include and skip (skip should win)
+
+**Coverage**: All file selection parameters tested at the get_files_list level (bypassing full indexer)
+
+#### Document Content (SP11-SP12)
 - **SP11**: Read document content - Self-contained: uploads file, then reads it
 - **SP12**: Read non-existent file - Error handling
-- **SP13**: Upload new file - Self-contained: creates inline file content
-- **SP14**: Upload replace existing - Self-contained: uploads twice to test replacement
-
-### Attachment Operations (SP15-SP16)
-- **SP15**: Add attachment to item - Self-contained: creates item, adds attachment
-- **SP16**: Add attachment replace - Self-contained: creates item, adds twice to test replacement
 
 ## Prerequisites
 

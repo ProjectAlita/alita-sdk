@@ -3,26 +3,26 @@
   "tags": ["loader_image", "feature_llm", "feature_multimodal"],
   "configs": [
     {
-      "use_llm": false,
-      "max_tokens": 2048
+      "_use_llm": false,
+      "_max_tokens": 2048
     },
     {
       "_name": "llm_default_prompt_high_tokens",
-      "use_llm": true,
-      "prompt_default": true,
-      "max_tokens": 2048
+      "_use_llm": true,
+      "_prompt_default": true,
+      "_max_tokens": 2048
     },
     {
       "_name": "llm_custom_prompt_json_format",
-      "use_llm": true,
+      "_use_llm": true,
       "prompt": "Describe this image in JSON format with keys: subject, colors, text_content, estimated_age_group, brand_visible",
-      "max_tokens": 2048
+      "_max_tokens": 2048
     },
     {
       "_name": "llm_default_prompt_minimal_tokens",
-      "use_llm": true,
+      "_use_llm": true,
       "prompt": "Provide description (just general descriptions) of this image in around 1000 tokens.",
-      "max_tokens": 256
+      "_max_tokens": 256
     }
   ]
 }

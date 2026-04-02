@@ -188,6 +188,11 @@ jobs:
       env:
         PYTHONDONTWRITEBYTECODE: "1"
         PYTHONUNBUFFERED: "1"
+        DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS: ${{ secrets.DEFAULT_LLM_MODEL_FOR_CODE_ANALYSIS }}
+        ELITEA_DEPLOYMENT_URL: ${{ secrets.DEPLOYMENT_URL_STAGE }}
+        ELITEA_TOKEN: ${{ secrets.ALITA_API_KEY_STAGE }}
+        ELITEA_PROJECT_ID: ${{ secrets.PROJECT_ID_STAGE }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

@@ -1,0 +1,142 @@
+name: "SP14 - get_files_list: Include specific file extensions"
+priority: High
+description: |
+  Verify the SharePoint 'get_files_list' tool filters files by extension using include_extensions parameter.
+  
+  Objective: Test that only files with specified extensions are returned
+  
+  Expected Behavior:
+  - Tool executes successfully without errors
+  - Returns only files with extensions matching include_extensions list
+  - Extensions are matched case-insensitively
+  - Accepts both 'pdf' and '.pdf' formats
+  - Must return at least one file (empty results indicate missing test data)
+
+toolkits:
+  - id: ${SHAREPOINT_TOOLKIT_ID}
+    name: ${SHAREPOINT_TOOLKIT_NAME}
+
+state:
+  folder_name:
+    type: str
+    value: ${SERVER_RELATIVE_PATH}
+  limit_files:
+    type: int
+    value: 50
+  include_txt:
+    type: list
+    value: ["txt"]
+  include_pdf_doc:
+    type: list
+    value: [".pdf", ".docx"]
+  files_result_txt:
+    type: dict
+  files_result_pdf_doc:
+    type: dict
+  test_results:
+    type: dict
+
+entry_point: invoke_get_files_txt
+
+nodes:
+  - id: invoke_get_files_txt
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - include_txt
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      include_extensions:
+        type: variable
+        value: include_txt
+    output:
+      - files_result_txt
+    structured_output: true
+    transition: invoke_get_files_pdf_doc
+
+  - id: invoke_get_files_pdf_doc
+    type: toolkit
+    tool: get_files_list
+    toolkit_name: ${SHAREPOINT_TOOLKIT_NAME}
+    input:
+      - folder_name
+      - limit_files
+      - include_pdf_doc
+    input_mapping:
+      folder_name:
+        type: variable
+        value: folder_name
+      limit_files:
+        type: variable
+        value: limit_files
+      include_extensions:
+        type: variable
+        value: include_pdf_doc
+    output:
+      - files_result_pdf_doc
+    structured_output: true
+    transition: validate_result
+
+  - id: validate_result
+    type: llm
+    model: ${DEFAULT_LLM_MODEL}
+    input:
+      - files_result_txt
+      - files_result_pdf_doc
+      - include_txt
+      - include_pdf_doc
+    input_mapping:
+      system:
+        type: fixed
+        value: "You are a quality assurance validator."
+      task:
+        type: fstring
+        value: |
+          Analyze the 'get_files_list' tool execution with include_extensions filter.
+
+          Test 1 - Include extensions: {include_txt}
+          Result: {files_result_txt}
+
+          Test 2 - Include extensions: {include_pdf_doc}
+          Result: {files_result_pdf_doc}
+
+          Expected behavior:
+          - Both tool executions succeed without errors
+          - Test 1 returns only .txt files
+          - Test 2 returns only .pdf and .docx files (BOTH extensions must be present)
+          - Extensions are matched case-insensitively
+          - Both tests MUST return at least one file (test data should exist)
+
+          Validation rules:
+          1. Check result structure is valid (not error/exception)
+          2. Verify both results are non-empty (if empty, test fails - missing test data)
+          3. Extract file extensions from each result (from Name or Path field)
+          4. Verify Test 1 files all end with .txt (case-insensitive)
+          5. Verify Test 2 files all end with .pdf or .docx (case-insensitive)
+          6. Verify Test 2 contains BOTH .pdf AND .docx files (not just one type)
+          7. No files with other extensions should be included
+
+          return a json object with:
+          {{
+            "test_passed": true/false,
+            "summary": "brief description of outcome",
+            "error": "error details if failed, null if passed"
+          }}
+
+          return **only** the json object. no markdown formatting, no additional text.
+      chat_history:
+        type: fixed
+        value: []
+    output:
+      - test_results
+    structured_output_dict:
+      test_results: dict
+    transition: END
