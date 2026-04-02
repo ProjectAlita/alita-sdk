@@ -276,6 +276,8 @@ if [ -n "$SESSION_ID" ]; then
 fi
 
 # Step 1: Setup (optional)
+# Note: In LOCAL mode, run_suite.py handles setup internally, so --setup is optional.
+# Use --setup for debugging (to inspect env file before running tests).
 if [ "$DO_SETUP" = true ]; then
     echo -e "${YELLOW}▶ Running setup...${NC}"
     if python scripts/setup.py "$SUITE" $VERBOSE --output-env "$ENV_FILE" $LOCAL_FLAG $SESSION_FLAG; then
@@ -288,10 +290,14 @@ if [ "$DO_SETUP" = true ]; then
 fi
 
 # Check env file exists
+# In LOCAL mode without --setup, run_suite.py creates the env file internally
 if [ ! -f "$ENV_FILE" ]; then
-    echo -e "${RED}Error: Environment file not found: $ENV_FILE${NC}"
-    echo -e "${YELLOW}Hint: Run with --setup first, or specify --env-file${NC}"
-    exit 1
+    if [ "$LOCAL_MODE" != true ]; then
+        echo -e "${RED}Error: Environment file not found: $ENV_FILE${NC}"
+        echo -e "${YELLOW}Hint: Run with --setup first, or specify --env-file${NC}"
+        exit 1
+    fi
+    # In local mode, env file will be created by run_suite.py, so this is OK
 fi
 
 # Step 2: Seed (optional)
@@ -313,10 +319,13 @@ if [ "$DO_SEED" = true ]; then
     echo ""
 fi
 
-# Step 3: Run test(s)
-echo -e "${YELLOW}▶ Running test(s) matching: '$PATTERN'${NC}"
-echo ""
-
+# Step 3: Run test(s) (only if it exists)
+# In LOCAL mode without --setup, run_suite.py creates env file internally
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    source "$ENV_FILE"
+    set +a
+fi
 # Load env file for run_suite.py
 set -a
 source "$ENV_FILE"

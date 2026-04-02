@@ -424,10 +424,7 @@ run_suite_local() {
     local suite_output_dir="$OUTPUT_DIR/suites/$suite_output_name"
     mkdir -p "$suite_output_dir"
 
-    # Note: Local mode setup is handled internally by run_suite.py
-    # No separate setup step needed - run_suite.py executes setup and runs tests
-    
-    # Step 1: Run tests (with --local flag, includes internal setup)
+    # Step 1: Run tests (setup handled internally by run_suite.py --local)
     print_step "Step 1/2: Running tests for $suite_spec (local)"
     local results_file="$suite_output_dir/results.json"
 
@@ -440,7 +437,7 @@ run_suite_local() {
     fi
 
     # Save JSON results to file with --output-json, stderr goes to run.log
-    # run_suite.py --local executes setup internally and then runs tests
+    # run_suite.py --local handles setup internally and creates session env file
     # Verbose output controlled by $VERBOSE flag (-v)
     if [ "$SHOW_OUTPUT" = true ]; then
         # Show verbose output in real-time while also capturing to log
@@ -495,24 +492,38 @@ run_suite_local() {
         cp "${results_file%.json}_errors_only.json" "${suite_output_dir}/results_errors_only_for_bug_reporter.json" 2>/dev/null || true
     fi
 
-    # Step 3: Cleanup (with --local flag)
+    # Step 2: Cleanup (with --local flag and session env file)
     if [ "$SKIP_CLEANUP" = false ]; then
-        print_step "Step 3/3: Cleaning up $suite_spec (local)"
+        print_step "Step 2/2: Cleaning up $suite_spec (local)"
+        
+        # Set env file path for cleanup (matches what run_suite.py created)
+        ENV_FILE=".env.${SESSION_ID}"
         if [ "$SHOW_OUTPUT" = true ]; then
             # Show output in real-time while also capturing to log
-            if FORCE_COLOR=1 python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local $SESSION_FLAG 2>&1 | tee "$suite_output_dir/cleanup.log"; then
-                print_success "Cleanup completed"
+            if [ -f "$ENV_FILE" ]; then
+                if FORCE_COLOR=1 python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --env-file "$ENV_FILE" --local $SESSION_FLAG 2>&1 | tee "$suite_output_dir/cleanup.log"; then
+                    print_success "Cleanup completed"
+                else
+                    print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+                fi
             else
-                print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
-                # Don't fail suite on cleanup failure
+                echo "  ⚠ Env file not found, skipping cleanup"
             fi
         else
-            if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --local $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
-                print_success "Cleanup completed"
+            if [ -f "$ENV_FILE" ]; then
+                if python scripts/cleanup.py "$suite_spec" --yes $VERBOSE --env-file "$ENV_FILE" --local $SESSION_FLAG > "$suite_output_dir/cleanup.log" 2>&1; then
+                    print_success "Cleanup completed"
+                else
+                    print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
+                fi
             else
-                print_error "Cleanup failed - see $suite_output_dir/cleanup.log (continuing anyway)"
-                # Don't fail suite on cleanup failure
+                echo "  ⚠ Env file not found, skipping cleanup"
             fi
+        fi
+        
+        # Clean up session-scoped env file after cleanup
+        if [ -n "$SESSION_ID" ] && [ -f "$ENV_FILE" ]; then
+            rm -f "$ENV_FILE"
         fi
     else
         echo "  Skipping cleanup"

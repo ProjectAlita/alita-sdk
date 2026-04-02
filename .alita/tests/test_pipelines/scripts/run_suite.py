@@ -87,7 +87,7 @@ from utils_local import (
 )
 
 # Import setup utilities for local execution
-from setup import execute_setup, SetupContext
+from setup import execute_setup, SetupContext, write_env_file
 from setup_strategy import LocalSetupStrategy
 
 # Import ReportPortal reporter (optional)
@@ -846,6 +846,7 @@ def run_suite_local(
         logger: Optional[TestLogger] = None,
         sdk_log_level: str = 'error',
         reporter = None,  # ReportPortalReporter instance
+        session_id: str = None,  # Session ID for env file naming
 ) -> SuiteResult:
     """
     Run a suite of pipelines locally without backend.
@@ -932,6 +933,14 @@ def run_suite_local(
 
     # Get env_vars from setup (includes toolkit IDs, names, etc.)
     env_vars = setup_result.get("env_vars", {})
+
+    # Write env file for session isolation and consumption by load_from_env()
+    if session_id:
+        env_file_path = Path(f".env.{session_id}")
+        write_env_file(env_vars, env_file_path)
+        set_env_file(env_file_path)  # Make it available for load_from_env() calls
+        if logger:
+            logger.debug(f"Wrote session environment to: {env_file_path}")
 
     # Merge and resolve execution.substitutions from pipeline config into env_vars
     # Substitutions can reference setup variables, .env variables, or have defaults
