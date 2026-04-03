@@ -1,6 +1,6 @@
 state:
   input:
-    type: string
+    type: str
   messages:
     type: list
   work_item_id:
@@ -16,7 +16,7 @@ state:
     type: bool
     value: false
   error_message:
-    type: string
+    type: str
     value: ''
   root_work_item:
     type: dict
@@ -79,10 +79,10 @@ state:
     type: dict
     value: {}
   output_str:
-    type: string
+    type: str
     value: ''
   artifact_filename:
-    type: string
+    type: str
     value: ''
 entry_point: ParseInput
 nodes:
