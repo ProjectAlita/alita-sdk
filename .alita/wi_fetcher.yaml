@@ -3,7 +3,6 @@ state:
     type: string
   messages:
     type: list
-    value: []
   work_item_id:
     type: int
     value: 0
@@ -208,11 +207,10 @@ nodes:
         error_message = alita_state.get('error_message', '')
         work_item_id = alita_state.get('work_item_id', 0)
         
-        report = f"""❌ Failed to fetch work item{' ' + str(work_item_id) if work_item_id else ''}.
-
-**Error:** {error_message}
-
-Please check the input and try again."""
+        if work_item_id:
+            report = f"❌ Failed to fetch work item {work_item_id}.\n\n**Error:** {error_message}\n\nPlease check the input and try again."
+        else:
+            report = f"❌ Failed to fetch work item.\n\n**Error:** {error_message}\n\nPlease check the input and try again."
         
         msgs = list(alita_state.get('messages', []))
         msgs.append({"role": "assistant", "content": report})
