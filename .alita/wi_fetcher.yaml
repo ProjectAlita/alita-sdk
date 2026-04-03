@@ -18,6 +18,9 @@ state:
   error_message:
     type: str
     value: ''
+  root_work_item_raw:
+    type: dict
+    value: {}
   root_work_item:
     type: dict
     value: {}
@@ -81,7 +84,13 @@ state:
   output_str:
     type: str
     value: ''
+  raw_json_str:
+    type: str
+    value: ''
   artifact_filename:
+    type: str
+    value: ''
+  raw_artifact_filename:
     type: str
     value: ''
 entry_point: ParseInput
@@ -167,7 +176,8 @@ nodes:
                             "work_item_id": work_item_id,
                             "relations_include": input_data.get('relations_include', []),
                             "relations_exclude": input_data.get('relations_exclude', default_exclude),
-                            "artifact_filename": f"{work_item_id}_work_item.json"
+                            "artifact_filename": f"{work_item_id}_work_item.json",
+                            "raw_artifact_filename": f"{work_item_id}_work_item_raw.json"
                         }
 
         result
@@ -230,10 +240,57 @@ nodes:
         type: fixed
         value: All
     output:
-      - root_work_item
+      - root_work_item_raw
     structured_output: true
     tool: get_work_item
     toolkit_name: LFAADOBoardReader
+    transition: SaveRawWorkItem
+
+  # ── Save raw work item to separate artifact ──────────────────────
+  - id: SaveRawWorkItem
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+        
+        root_work_item_raw = alita_state.get('root_work_item_raw', {})
+        raw_artifact_filename = alita_state.get('raw_artifact_filename', '')
+        
+        raw_json_str = json.dumps(root_work_item_raw, indent=2, ensure_ascii=False)
+        
+        {'root_work_item_raw': root_work_item_raw, 'raw_json_str': raw_json_str}
+    input:
+      - root_work_item_raw
+      - raw_artifact_filename
+    output:
+      - root_work_item_raw
+      - raw_json_str
+    structured_output: true
+    transition: WriteRawArtifact
+
+  - id: WriteRawArtifact
+    type: toolkit
+    input:
+      - raw_json_str
+      - raw_artifact_filename
+    input_mapping:
+      bucket_name:
+        type: fixed
+        value: null
+      filedata:
+        type: variable
+        value: raw_json_str
+      filename:
+        type: variable
+        value: raw_artifact_filename
+      filepath:
+        type: fixed
+        value: null
+    output: []
+    structured_output: true
+    tool: createFile
+    toolkit_name: ADOartifactstorage
     transition: ProcessRootWorkItem
   
   # ── Process root work item ────────────────────────────────────────
@@ -246,7 +303,7 @@ nodes:
         import re
         import html as _html
 
-        root_work_item = alita_state.get('root_work_item', {})
+        root_work_item_raw = alita_state.get('root_work_item_raw', {})
         work_item_id = alita_state.get('work_item_id')
         relations_include = alita_state.get('relations_include', [])
         relations_exclude = alita_state.get('relations_exclude', [])
@@ -328,27 +385,27 @@ nodes:
 
         # Extract core fields
         processed_item = {
-            'id': root_work_item.get('id') or root_work_item.get('System.Id'),
-            'url': root_work_item.get('url', ''),
-            'title': root_work_item.get('System.Title', 'Untitled'),
-            'state': root_work_item.get('System.State', 'Unknown'),
-            'work_item_type': root_work_item.get('System.WorkItemType', 'Unknown'),
-            'description': strip_html(root_work_item.get('System.Description', '')),
-            'acceptance_criteria': strip_html(root_work_item.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
-            'assigned_to': simplify_user(root_work_item.get('System.AssignedTo')),
-            'created_by': simplify_user(root_work_item.get('System.CreatedBy')),
-            'changed_by': simplify_user(root_work_item.get('System.ChangedBy')),
-            'created_date': root_work_item.get('System.CreatedDate', ''),
-            'changed_date': root_work_item.get('System.ChangedDate', ''),
-            'comment_count': root_work_item.get('System.CommentCount', 0)
+            'id': root_work_item_raw.get('id') or root_work_item_raw.get('System.Id'),
+            'url': root_work_item_raw.get('url', ''),
+            'title': root_work_item_raw.get('System.Title', 'Untitled'),
+            'state': root_work_item_raw.get('System.State', 'Unknown'),
+            'work_item_type': root_work_item_raw.get('System.WorkItemType', 'Unknown'),
+            'description': strip_html(root_work_item_raw.get('System.Description', '')),
+            'acceptance_criteria': strip_html(root_work_item_raw.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
+            'assigned_to': simplify_user(root_work_item_raw.get('System.AssignedTo')),
+            'created_by': simplify_user(root_work_item_raw.get('System.CreatedBy')),
+            'changed_by': simplify_user(root_work_item_raw.get('System.ChangedBy')),
+            'created_date': root_work_item_raw.get('System.CreatedDate', ''),
+            'changed_date': root_work_item_raw.get('System.ChangedDate', ''),
+            'comment_count': root_work_item_raw.get('System.CommentCount', 0)
         }
 
         # Parse links from description
-        description_html = root_work_item.get('System.Description', '')
+        description_html = root_work_item_raw.get('System.Description', '')
         links = extract_links(description_html)
 
         # Filter relations
-        raw_relations = root_work_item.get('relations', [])
+        raw_relations = root_work_item_raw.get('relations', [])
         filtered_relations = filter_relations(raw_relations, relations_include, relations_exclude)
 
         {
@@ -359,7 +416,7 @@ nodes:
             'predecessor_relations': filtered_relations['predecessors']
         }
     input:
-      - root_work_item
+      - root_work_item_raw
       - work_item_id
       - relations_include
       - relations_exclude
@@ -842,6 +899,30 @@ nodes:
       type: fixed
       value: |-
         import json
+        import re
+        import html as _html
+
+        def strip_html(text):
+            """Remove HTML tags from text"""
+            if not text:
+                return ''
+            text = _html.unescape(text)
+            text = re.sub(r'<[^>]+>', ' ', text)
+            text = text.replace('\xa0', ' ')
+            text = re.sub(r'[ \t]+', ' ', text)
+            text = re.sub(r'\n{3,}', '\n\n', text)
+            return text.strip()
+        
+        def sanitize_comments(comments):
+            """Convert comment objects to sanitized text strings"""
+            sanitized = []
+            for comment in comments:
+                if isinstance(comment, dict):
+                    text = comment.get('text', '')
+                    sanitized.append(strip_html(text))
+                elif isinstance(comment, str):
+                    sanitized.append(strip_html(comment))
+            return sanitized
 
         root_work_item = alita_state.get('root_work_item', {})
         parent_work_item = alita_state.get('parent_work_item', {})
@@ -849,6 +930,17 @@ nodes:
         other_relations = alita_state.get('other_relations', [])
         links = alita_state.get('links', {})
         comments = alita_state.get('comments', [])
+
+        # Sanitize all comments fields
+        if comments:
+            comments = sanitize_comments(comments)
+        
+        if parent_work_item and 'comments' in parent_work_item:
+            parent_work_item['comments'] = sanitize_comments(parent_work_item['comments'])
+        
+        for predecessor in predecessors:
+            if 'comments' in predecessor:
+                predecessor['comments'] = sanitize_comments(predecessor['comments'])
 
         # Build final output structure
         output_json = {
