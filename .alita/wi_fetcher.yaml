@@ -72,9 +72,6 @@ state:
   other_relations:
     type: list
     value: []
-  links:
-    type: dict
-    value: {}
   comments:
     type: list
     value: []
@@ -293,67 +290,17 @@ nodes:
     toolkit_name: ADOartifactstorage
     transition: ProcessRootWorkItem
   
-  # ── Process root work item ────────────────────────────────────────
+  # ── Extract relations from root work item ────────────────────────
   - id: ProcessRootWorkItem
     type: code
     code:
       type: fixed
       value: |-
         import json
-        import re
-        import html as _html
 
         root_work_item_raw = alita_state.get('root_work_item_raw', {})
-        work_item_id = alita_state.get('work_item_id')
         relations_include = alita_state.get('relations_include', [])
         relations_exclude = alita_state.get('relations_exclude', [])
-
-        def simplify_user(user_obj):
-            """Extract only name and email from user object"""
-            if not user_obj or not isinstance(user_obj, dict):
-                return None
-            return {
-                'name': user_obj.get('displayName', 'Unknown'),
-                'email': user_obj.get('uniqueName', '')
-            }
-
-        def strip_html(text):
-            """Remove HTML tags from text"""
-            if not text:
-                return ''
-            text = _html.unescape(text)
-            text = re.sub(r'<[^>]+>', ' ', text)
-            text = text.replace('\xa0', ' ')
-            text = re.sub(r'[ \t]+', ' ', text)
-            text = re.sub(r'\n{3,}', '\n\n', text)
-            return text.strip()
-
-        def extract_links(text):
-            """Extract and categorize links from HTML text"""
-            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
-            if not text:
-                return links
-            urls = []
-            # Extract from href attributes
-            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
-            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
-            # Extract plain URLs
-            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
-            
-            seen = set()
-            for url in urls:
-                if url in seen:
-                    continue
-                seen.add(url)
-                if 'figma.com' in url:
-                    links['figma'].append(url)
-                elif '/_wiki/' in url or '/wiki/' in url:
-                    links['wiki'].append(url)
-                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
-                    links['item'].append(url)
-                else:
-                    links['other'].append(url)
-            return links
 
         def filter_relations(relations, include_list, exclude_list):
             """Filter relations based on include/exclude lists"""
@@ -383,46 +330,22 @@ nodes:
             
             return filtered
 
-        # Extract core fields
-        processed_item = {
-            'id': root_work_item_raw.get('id') or root_work_item_raw.get('System.Id'),
-            'url': root_work_item_raw.get('url', ''),
-            'title': root_work_item_raw.get('System.Title', 'Untitled'),
-            'state': root_work_item_raw.get('System.State', 'Unknown'),
-            'work_item_type': root_work_item_raw.get('System.WorkItemType', 'Unknown'),
-            'description': strip_html(root_work_item_raw.get('System.Description', '')),
-            'acceptance_criteria': strip_html(root_work_item_raw.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
-            'assigned_to': simplify_user(root_work_item_raw.get('System.AssignedTo')),
-            'created_by': simplify_user(root_work_item_raw.get('System.CreatedBy')),
-            'changed_by': simplify_user(root_work_item_raw.get('System.ChangedBy')),
-            'created_date': root_work_item_raw.get('System.CreatedDate', ''),
-            'changed_date': root_work_item_raw.get('System.ChangedDate', ''),
-            'comment_count': root_work_item_raw.get('System.CommentCount', 0)
-        }
-
-        # Parse links from description
-        description_html = root_work_item_raw.get('System.Description', '')
-        links = extract_links(description_html)
-
         # Filter relations
         raw_relations = root_work_item_raw.get('relations', [])
         filtered_relations = filter_relations(raw_relations, relations_include, relations_exclude)
 
         {
-            'root_work_item': processed_item,
-            'links': links,
+            'root_work_item': root_work_item_raw,
             'other_relations': filtered_relations['other'],
             'parent_relation': filtered_relations['parent'],
             'predecessor_relations': filtered_relations['predecessors']
         }
     input:
       - root_work_item_raw
-      - work_item_id
       - relations_include
       - relations_exclude
     output:
       - root_work_item
-      - links
       - other_relations
       - parent_relation
       - predecessor_relations
@@ -433,7 +356,7 @@ nodes:
   - id: CheckComments
     type: router
     condition: |
-      {% if root_work_item.comment_count > 0 %}
+      {% if root_work_item.get('System.CommentCount', 0) > 0 %}
         FetchComments
       {% else %}
         CheckParent
@@ -524,75 +447,12 @@ nodes:
     code:
       type: fixed
       value: |-
-        import re
-        import html as _html
-
         parent_work_item_raw = alita_state.get('parent_work_item_raw', {})
+        
+        # Keep raw, check if needs comments
+        parent_needs_comments = parent_work_item_raw.get('System.CommentCount', 0) > 0
 
-        def simplify_user(user_obj):
-            if not user_obj or not isinstance(user_obj, dict):
-                return None
-            return {
-                'name': user_obj.get('displayName', 'Unknown'),
-                'email': user_obj.get('uniqueName', '')
-            }
-
-        def strip_html(text):
-            if not text:
-                return ''
-            text = _html.unescape(text)
-            text = re.sub(r'<[^>]+>', ' ', text)
-            text = text.replace('\xa0', ' ')
-            text = re.sub(r'[ \t]+', ' ', text)
-            text = re.sub(r'\n{3,}', '\n\n', text)
-            return text.strip()
-
-        def extract_links(text):
-            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
-            if not text:
-                return links
-            urls = []
-            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
-            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
-            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
-            
-            seen = set()
-            for url in urls:
-                if url in seen:
-                    continue
-                seen.add(url)
-                if 'figma.com' in url:
-                    links['figma'].append(url)
-                elif '/_wiki/' in url or '/wiki/' in url:
-                    links['wiki'].append(url)
-                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
-                    links['item'].append(url)
-                else:
-                    links['other'].append(url)
-            return links
-
-        processed_parent = {
-            'id': parent_work_item_raw.get('id') or parent_work_item_raw.get('System.Id'),
-            'url': parent_work_item_raw.get('url', ''),
-            'title': parent_work_item_raw.get('System.Title', 'Untitled'),
-            'state': parent_work_item_raw.get('System.State', 'Unknown'),
-            'work_item_type': parent_work_item_raw.get('System.WorkItemType', 'Unknown'),
-            'description': strip_html(parent_work_item_raw.get('System.Description', '')),
-            'acceptance_criteria': strip_html(parent_work_item_raw.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
-            'assigned_to': simplify_user(parent_work_item_raw.get('System.AssignedTo')),
-            'created_by': simplify_user(parent_work_item_raw.get('System.CreatedBy')),
-            'changed_by': simplify_user(parent_work_item_raw.get('System.ChangedBy')),
-            'created_date': parent_work_item_raw.get('System.CreatedDate', ''),
-            'changed_date': parent_work_item_raw.get('System.ChangedDate', ''),
-            'comment_count': parent_work_item_raw.get('System.CommentCount', 0),
-            'links': extract_links(parent_work_item_raw.get('System.Description', '')),
-            'comments': []
-        }
-
-        # Fetch comments if needed
-        parent_needs_comments = processed_parent['comment_count'] > 0
-
-        {'parent_work_item': processed_parent, 'parent_needs_comments': parent_needs_comments}
+        {'parent_work_item': parent_work_item_raw, 'parent_needs_comments': parent_needs_comments}
     input:
       - parent_work_item_raw
     output:
@@ -638,7 +498,12 @@ nodes:
       value: |-
         parent_work_item = alita_state.get('parent_work_item', {})
         parent_comments = alita_state.get('parent_comments', [])
+        
+        # Attach raw comments to raw work item
+        if 'comments' not in parent_work_item:
+            parent_work_item['comments'] = []
         parent_work_item['comments'] = parent_comments
+        
         {'parent_work_item': parent_work_item}
     input:
       - parent_work_item
@@ -656,14 +521,14 @@ nodes:
       {% if predecessor_relations and predecessor_relations|length > 0 %}
         InitPredecessorsFetch
       {% else %}
-        BuildOutput
+        CleanAllItems
       {% endif %}
-    default_output: BuildOutput
+    default_output: CleanAllItems
     input:
       - predecessor_relations
     routes:
       - InitPredecessorsFetch
-      - BuildOutput
+      - CleanAllItems
 
   - id: InitPredecessorsFetch
     type: code
@@ -697,15 +562,15 @@ nodes:
       {% if current_predecessor_index < predecessor_ids|length %}
         FetchSinglePredecessor
       {% else %}
-        BuildOutput
+        CleanAllItems
       {% endif %}
-    default_output: BuildOutput
+    default_output: CleanAllItems
     input:
       - current_predecessor_index
       - predecessor_ids
     routes:
       - FetchSinglePredecessor
-      - BuildOutput
+      - CleanAllItems
 
   - id: FetchSinglePredecessor
     type: code
@@ -747,74 +612,12 @@ nodes:
     code:
       type: fixed
       value: |-
-        import re
-        import html as _html
-
         predecessor_work_item_raw = alita_state.get('predecessor_work_item_raw', {})
 
-        def simplify_user(user_obj):
-            if not user_obj or not isinstance(user_obj, dict):
-                return None
-            return {
-                'name': user_obj.get('displayName', 'Unknown'),
-                'email': user_obj.get('uniqueName', '')
-            }
+        # Keep raw, check if needs comments
+        pred_needs_comments = predecessor_work_item_raw.get('System.CommentCount', 0) > 0
 
-        def strip_html(text):
-            if not text:
-                return ''
-            text = _html.unescape(text)
-            text = re.sub(r'<[^>]+>', ' ', text)
-            text = text.replace('\xa0', ' ')
-            text = re.sub(r'[ \t]+', ' ', text)
-            text = re.sub(r'\n{3,}', '\n\n', text)
-            return text.strip()
-
-        def extract_links(text):
-            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
-            if not text:
-                return links
-            urls = []
-            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
-            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
-            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
-            
-            seen = set()
-            for url in urls:
-                if url in seen:
-                    continue
-                seen.add(url)
-                if 'figma.com' in url:
-                    links['figma'].append(url)
-                elif '/_wiki/' in url or '/wiki/' in url:
-                    links['wiki'].append(url)
-                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
-                    links['item'].append(url)
-                else:
-                    links['other'].append(url)
-            return links
-
-        processed_predecessor = {
-            'id': predecessor_work_item_raw.get('id') or predecessor_work_item_raw.get('System.Id'),
-            'url': predecessor_work_item_raw.get('url', ''),
-            'title': predecessor_work_item_raw.get('System.Title', 'Untitled'),
-            'state': predecessor_work_item_raw.get('System.State', 'Unknown'),
-            'work_item_type': predecessor_work_item_raw.get('System.WorkItemType', 'Unknown'),
-            'description': strip_html(predecessor_work_item_raw.get('System.Description', '')),
-            'acceptance_criteria': strip_html(predecessor_work_item_raw.get('Microsoft.VSTS.Common.AcceptanceCriteria', '')),
-            'assigned_to': simplify_user(predecessor_work_item_raw.get('System.AssignedTo')),
-            'created_by': simplify_user(predecessor_work_item_raw.get('System.CreatedBy')),
-            'changed_by': simplify_user(predecessor_work_item_raw.get('System.ChangedBy')),
-            'created_date': predecessor_work_item_raw.get('System.CreatedDate', ''),
-            'changed_date': predecessor_work_item_raw.get('System.ChangedDate', ''),
-            'comment_count': predecessor_work_item_raw.get('System.CommentCount', 0),
-            'links': extract_links(predecessor_work_item_raw.get('System.Description', '')),
-            'comments': []
-        }
-
-        pred_needs_comments = processed_predecessor['comment_count'] > 0
-
-        {'current_predecessor': processed_predecessor, 'pred_needs_comments': pred_needs_comments}
+        {'current_predecessor': predecessor_work_item_raw, 'pred_needs_comments': pred_needs_comments}
     input:
       - predecessor_work_item_raw
     output:
@@ -860,7 +663,12 @@ nodes:
       value: |-
         current_predecessor = alita_state.get('current_predecessor', {})
         pred_comments = alita_state.get('pred_comments', [])
+        
+        # Attach raw comments to raw work item
+        if 'comments' not in current_predecessor:
+            current_predecessor['comments'] = []
         current_predecessor['comments'] = pred_comments
+        
         {'current_predecessor': current_predecessor}
     input:
       - current_predecessor
@@ -892,13 +700,187 @@ nodes:
     structured_output: true
     transition: FetchPredecessorLoop
 
-  # ── Build output JSON ─────────────────────────────────────────────
-  - id: BuildOutput
+  # ── Clean all items (remove redundant fields) ─────────────────────
+  - id: CleanAllItems
     type: code
     code:
       type: fixed
       value: |-
         import json
+
+        def simplify_user(user_obj):
+            """Extract only name and email from user object"""
+            if not user_obj or not isinstance(user_obj, dict):
+                return None
+            return {
+                'name': user_obj.get('displayName', 'Unknown'),
+                'email': user_obj.get('uniqueName', '')
+            }
+
+        def clean_work_item(item):
+            """Extract core fields, simplify users, remove comment_count"""
+            if not item:
+                return None
+            
+            cleaned = {
+                'id': item.get('id') or item.get('System.Id'),
+                'url': item.get('url', ''),
+                'title': item.get('System.Title', 'Untitled'),
+                'state': item.get('System.State', 'Unknown'),
+                'work_item_type': item.get('System.WorkItemType', 'Unknown'),
+                'description': item.get('System.Description', ''),
+                'acceptance_criteria': item.get('Microsoft.VSTS.Common.AcceptanceCriteria', ''),
+                'assigned_to': simplify_user(item.get('System.AssignedTo')),
+                'created_by': simplify_user(item.get('System.CreatedBy')),
+                'changed_by': simplify_user(item.get('System.ChangedBy')),
+                'created_date': item.get('System.CreatedDate', ''),
+                'changed_date': item.get('System.ChangedDate', '')
+            }
+            
+            # Preserve comments if they exist
+            if 'comments' in item:
+                cleaned['comments'] = item['comments']
+            
+            return cleaned
+
+        root_work_item = alita_state.get('root_work_item', {})
+        parent_work_item = alita_state.get('parent_work_item', {})
+        predecessors = alita_state.get('predecessors', [])
+        comments = alita_state.get('comments', [])
+
+        # Attach root comments to root_work_item
+        if comments:
+            root_work_item['comments'] = comments
+
+        # Clean all items
+        cleaned_root = clean_work_item(root_work_item)
+        cleaned_parent = clean_work_item(parent_work_item) if parent_work_item else None
+        cleaned_predecessors = [clean_work_item(p) for p in predecessors]
+
+        {
+            'root_work_item': cleaned_root,
+            'parent_work_item': cleaned_parent,
+            'predecessors': cleaned_predecessors
+        }
+    input:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+      - comments
+    output:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+    structured_output: true
+    transition: ExtractLinks
+
+  # ── Extract links from all items ──────────────────────────────────
+  - id: ExtractLinks
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import re
+
+        def extract_links(text):
+            """Extract and categorize links from HTML text"""
+            links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
+            if not text:
+                return links
+            urls = []
+            # Extract from href attributes
+            href_pattern = r'<a\s+(?:[^>]*?\s+)?href=["' + "'" + r']([^"' + "'" + r']+)["' + "'" + r']'
+            urls.extend(re.findall(href_pattern, text, re.IGNORECASE))
+            # Extract plain URLs
+            urls.extend(re.findall(r'https?://[^\s<>"{}|\\^`\[\]]+|ftp://[^\s<>"{}|\\^`\[\]]+', text))
+            
+            seen = set()
+            for url in urls:
+                if url in seen:
+                    continue
+                seen.add(url)
+                if 'figma.com' in url:
+                    links['figma'].append(url)
+                elif '/_wiki/' in url or '/wiki/' in url:
+                    links['wiki'].append(url)
+                elif 'workitem=' in url or '/_workitems/' in url or '/workItems/' in url:
+                    links['item'].append(url)
+                else:
+                    links['other'].append(url)
+            return links
+
+        def extract_links_from_item(item):
+            """Extract links from description, acceptance_criteria, and comments"""
+            all_links = {'wiki': [], 'item': [], 'figma': [], 'other': []}
+            
+            if not item:
+                return all_links
+            
+            # Extract from description
+            desc_links = extract_links(item.get('description', ''))
+            # Extract from acceptance criteria
+            ac_links = extract_links(item.get('acceptance_criteria', ''))
+            # Extract from comments
+            comments = item.get('comments', [])
+            for comment in comments:
+                if isinstance(comment, dict):
+                    comment_links = extract_links(comment.get('text', ''))
+                    for key in all_links:
+                        all_links[key].extend(comment_links[key])
+            
+            # Merge all links
+            for key in all_links:
+                all_links[key].extend(desc_links[key])
+                all_links[key].extend(ac_links[key])
+                # Remove duplicates while preserving order
+                seen = set()
+                unique = []
+                for url in all_links[key]:
+                    if url not in seen:
+                        seen.add(url)
+                        unique.append(url)
+                all_links[key] = unique
+            
+            return all_links
+
+        root_work_item = alita_state.get('root_work_item', {})
+        parent_work_item = alita_state.get('parent_work_item', {})
+        predecessors = alita_state.get('predecessors', [])
+
+        # Extract links for root (will be added to root_work_item)
+        root_links = extract_links_from_item(root_work_item)
+        root_work_item['links'] = root_links
+
+        # Extract links for parent
+        if parent_work_item:
+            parent_work_item['links'] = extract_links_from_item(parent_work_item)
+
+        # Extract links for predecessors
+        for predecessor in predecessors:
+            predecessor['links'] = extract_links_from_item(predecessor)
+
+        {
+            'root_work_item': root_work_item,
+            'parent_work_item': parent_work_item,
+            'predecessors': predecessors
+        }
+    input:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+    output:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+    structured_output: true
+    transition: SanitizeHTML
+
+  # ── Sanitize HTML in all items ────────────────────────────────────
+  - id: SanitizeHTML
+    type: code
+    code:
+      type: fixed
+      value: |-
         import re
         import html as _html
 
@@ -912,7 +894,7 @@ nodes:
             text = re.sub(r'[ \t]+', ' ', text)
             text = re.sub(r'\n{3,}', '\n\n', text)
             return text.strip()
-        
+
         def sanitize_comments(comments):
             """Convert comment objects to sanitized text strings"""
             sanitized = []
@@ -924,32 +906,64 @@ nodes:
                     sanitized.append(strip_html(comment))
             return sanitized
 
+        def sanitize_item(item):
+            """Strip HTML from description, acceptance_criteria, and comments"""
+            if not item:
+                return None
+            
+            item['description'] = strip_html(item.get('description', ''))
+            item['acceptance_criteria'] = strip_html(item.get('acceptance_criteria', ''))
+            
+            if 'comments' in item and item['comments']:
+                item['comments'] = sanitize_comments(item['comments'])
+            
+            return item
+
+        root_work_item = alita_state.get('root_work_item', {})
+        parent_work_item = alita_state.get('parent_work_item', {})
+        predecessors = alita_state.get('predecessors', [])
+
+        # Sanitize all items
+        root_work_item = sanitize_item(root_work_item)
+        if parent_work_item:
+            parent_work_item = sanitize_item(parent_work_item)
+        predecessors = [sanitize_item(p) for p in predecessors]
+
+        {
+            'root_work_item': root_work_item,
+            'parent_work_item': parent_work_item,
+            'predecessors': predecessors
+        }
+    input:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+    output:
+      - root_work_item
+      - parent_work_item
+      - predecessors
+    structured_output: true
+    transition: BuildOutput
+
+  # ── Build output JSON ─────────────────────────────────────────────
+  - id: BuildOutput
+    type: code
+    code:
+      type: fixed
+      value: |-
+        import json
+
         root_work_item = alita_state.get('root_work_item', {})
         parent_work_item = alita_state.get('parent_work_item', {})
         predecessors = alita_state.get('predecessors', [])
         other_relations = alita_state.get('other_relations', [])
-        links = alita_state.get('links', {})
-        comments = alita_state.get('comments', [])
 
-        # Sanitize all comments fields
-        if comments:
-            comments = sanitize_comments(comments)
-        
-        if parent_work_item and 'comments' in parent_work_item:
-            parent_work_item['comments'] = sanitize_comments(parent_work_item['comments'])
-        
-        for predecessor in predecessors:
-            if 'comments' in predecessor:
-                predecessor['comments'] = sanitize_comments(predecessor['comments'])
-
-        # Build final output structure
+        # Build final output structure (all processing already done)
         output_json = {
             'work_item': root_work_item,
             'parent': parent_work_item if parent_work_item else None,
             'predecessors': predecessors if predecessors else [],
-            'other_relations': other_relations if other_relations else [],
-            'links': links,
-            'comments': comments
+            'other_relations': other_relations if other_relations else []
         }
 
         # Remove None values for cleaner output
@@ -961,8 +975,6 @@ nodes:
       - parent_work_item
       - predecessors
       - other_relations
-      - links
-      - comments
     output:
       - output_json
       - output_str
@@ -1010,8 +1022,8 @@ nodes:
         work_item = output_json.get('work_item', {})
         parent = output_json.get('parent', {})
         predecessors = output_json.get('predecessors', [])
-        comments = output_json.get('comments', [])
-        links = output_json.get('links', {})
+        comments = work_item.get('comments', [])
+        links = work_item.get('links', {})
         
         # Build report
         report_lines = [
