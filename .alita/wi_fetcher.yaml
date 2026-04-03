@@ -171,15 +171,8 @@ nodes:
                         }
 
         result
-    input:
-      - input
-    output:
-      - validation_passed
-      - error_message
-      - work_item_id
-      - relations_include
-      - relations_exclude
-      - artifact_filename
+    input: []
+    output: []
     structured_output: true
     transition: ValidationRouter
   
@@ -214,7 +207,8 @@ nodes:
         
         msgs = list(alita_state.get('messages', []))
         msgs.append({"role": "assistant", "content": report})
-        {"messages": msgs}
+        result = {"messages": msgs}
+        result
     input:
       - error_message
       - work_item_id
@@ -980,7 +974,8 @@ nodes:
         
         msgs = list(alita_state.get('messages', []))
         msgs.append({"role": "assistant", "content": report})
-        {"messages": msgs}
+        result = {"messages": msgs}
+        result
     input:
       - output_json
       - artifact_filename
